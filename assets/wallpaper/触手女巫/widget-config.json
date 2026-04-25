@@ -1,0 +1,67 @@
+{
+  "widgets": [
+    {
+      "id": "stocks-1777042865475",
+      "type": "stocks",
+      "x": 1056,
+      "y": 416,
+      "width": 336,
+      "height": 336,
+      "enabled": true,
+      "config": {
+        "symbols": [
+          {
+            "code": "000001",
+            "name": "上证指数",
+            "market": "1"
+          },
+          {
+            "code": "600519",
+            "name": "贵州茅台",
+            "market": "1"
+          }
+        ],
+        "refreshInterval": 30
+      }
+    },
+    {
+      "id": "news-1777042867001",
+      "type": "news",
+      "x": 848,
+      "y": 416,
+      "width": 160,
+      "height": 336,
+      "enabled": true,
+      "config": {
+        "source": "toutiao",
+        "maxItems": 5,
+        "refreshInterval": 10
+      }
+    },
+    {
+      "id": "clock-1777045931734",
+      "type": "clock",
+      "x": 176,
+      "y": 1104,
+      "width": 336,
+      "height": 160,
+      "enabled": true,
+      "config": {
+        "style": "elegant",
+        "themeId": "rose"
+      }
+    },
+    {
+      "id": "weather-1777049642330",
+      "type": "weather",
+      "x": 128,
+      "y": 96,
+      "width": 336,
+      "height": 336,
+      "enabled": true,
+      "config": {
+        "style": "realism"
+      }
+    }
+  ]
+}

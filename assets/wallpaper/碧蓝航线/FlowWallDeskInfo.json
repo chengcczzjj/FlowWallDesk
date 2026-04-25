@@ -1,0 +1,19 @@
+﻿{
+    "AppVersion":  "1.0.0.0",
+    "Title":  "Azur Lane",
+    "Desc":  "Picture Wallpaper",
+    "Author":  "FlowWallDesk",
+    "Contact":  "https://www.flowwall.art/",
+    "License":  "",
+    "Type":  11,
+    "FileName":  "碧蓝航线.png",
+    "Thumbnail":  "碧蓝航线.png",
+    "Preview":  "碧蓝航线.png",
+    "IsAbsolutePath":  false,
+    "Id":  "flowwall-azur-lane",
+    "Tags":  [
+                 "picture",
+                 "static"
+             ],
+    "Version":  1
+}

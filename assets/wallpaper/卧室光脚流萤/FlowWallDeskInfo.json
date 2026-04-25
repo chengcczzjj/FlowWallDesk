@@ -1,0 +1,19 @@
+﻿{
+    "AppVersion": "1.0.0.0",
+    "Title": "Bedroom Firefly",
+    "Desc": "Video Wallpaper",
+    "Author": "FlowWallDesk",
+    "Contact": "https://www.flowwall.art/",
+    "License": "",
+    "Type": 7,
+    "FileName": "卧室光脚流萤.mp4",
+    "Thumbnail": null,
+    "Preview": null,
+    "IsAbsolutePath": false,
+    "Id": "flowwall-bedroom-firefly",
+    "Tags": [
+        "video",
+        "dynamic"
+    ],
+    "Version": 1
+}

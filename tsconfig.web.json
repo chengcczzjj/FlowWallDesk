@@ -1,0 +1,18 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.web.json",
+  "include": [
+    "src/renderer/**/*",
+    "src/shared/**/*",
+    "src/renderer/env.d.ts"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "jsx": "react-jsx",
+    "types": ["electron-vite/node"],
+    "paths": {
+      "@renderer/*": ["./src/renderer/*"],
+      "@shared/*": ["./src/shared/*"],
+      "@resources/*": ["./resources/*"]
+    }
+  }
+}

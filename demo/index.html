@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowWallDesk — UI Prototype</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+    <div class="app-shell" id="appShell">
+
+        <!-- ====== TITLE BAR ====== -->
+        <div class="title-bar">
+            <img class="title-bar__icon" src="../src/FlowWallDesk.UI.WinUI/Assets/icon-FlowWallDesk-48.png" alt="icon">
+            <span class="title-bar__text">FlowWallDesk</span>
+            <div class="title-bar__spacer"></div>
+            <input class="title-bar__search" type="text" placeholder="搜索壁纸…">
+            <div class="title-bar__spacer"></div>
+        </div>
+
+        <div class="app-body">
+            <!-- ====== ACTIVITY BAR ====== -->
+            <div class="activity-bar">
+                <button class="activity-bar__item active" title="壁纸资源"
+                    onclick="switchPage('library'); switchNav('library')">
+                    <span class="icon">&#xE8B9;</span> <!-- Photo/Wallpaper icon -->
+                </button>
+                <button class="activity-bar__item" title="小组件" onclick="switchPage('components'); switchNav('none')">
+                    <span class="icon">&#xE74C;</span> <!-- Dashboard/Widget icon -->
+                </button>
+                <button class="activity-bar__item" title="桌宠" onclick="">
+                    <span class="icon">&#xE914;</span> <!-- Pet/Animal icon (usually cat/dog in segmdl2) -->
+                </button>
+                <button class="activity-bar__item" title="AI记忆" onclick="">
+                    <span class="icon">&#xE8FC;</span> <!-- Brain/AI/Dictionary icon -->
+                </button>
+
+                <div style="flex: 1;"></div>
+
+                <button class="activity-bar__item" title="设置" onclick="enterSettings()">
+                    <span class="icon">&#xE713;</span>
+                </button>
+                <button class="activity-bar__item" id="overflowBtn" onclick="toggleOverflowMenu(event)" title="更多">
+                    <span class="icon">&#xE10C;</span>
+                </button>
+            </div>
+
+            <div class="app-content" style="position: relative; overflow: hidden; background: transparent;">
+                <!-- dynamic blurred background -->
+                <div id="libraryBackground" class="library-bg-layer"
+                    style="opacity: 0; z-index: 0; position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none;">
+                    <img id="libraryBgImage" src="" alt="">
+                </div>
+
+                <!-- ====== TOP NAVIGATION ====== -->
+                <nav class="top-nav">
+                    <!-- Back button (settings mode only) -->
+                    <button class="nav-back" id="navBack" onclick="exitSettings()">
+                        <span class="icon">&#xE72B;</span>
+                    </button>
+
+                    <div class="top-nav__items" id="navItems">
+                        <!-- Main nav items -->
+                        <div class="nav-items-main" id="navMain">
+                            <!-- JS will update this depending on activity bar selection -->
+                            <button class="nav-item active" data-page="library" onclick="switchPage('library')">
+                                <span>本地壁纸</span>
+                            </button>
+                            <button class="nav-item" data-page="store" onclick="switchPage('store')">
+                                <span>壁纸库</span>
+                            </button>
+                            <button class="nav-item" data-page="maker" onclick="switchPage('maker')">
+                                <span>壁纸制作</span>
+                            </button>
+                        </div>
+                        <!-- Settings nav items (hidden by default) -->
+                        <div class="nav-items-settings hidden" id="navSettings">
+                            <button class="nav-item active" data-page="settings-general"
+                                onclick="switchPage('settings-general')">通用</button>
+                            <button class="nav-item" data-page="settings-performance"
+                                onclick="switchPage('settings-performance')">性能</button>
+                            <button class="nav-item" data-page="settings-wallpaper"
+                                onclick="switchPage('settings-wallpaper')">壁纸</button>
+                            <button class="nav-item" data-page="settings-screensaver"
+                                onclick="switchPage('settings-screensaver')">屏保</button>
+                            <button class="nav-item" data-page="settings-system"
+                                onclick="switchPage('settings-system')">系统</button>
+                        </div>
+                    </div>
+
+                    <div class="nav-footer" id="navFooter">
+                        <!-- Add wallpaper -->
+                        <button class="nav-btn" title="添加壁纸" onclick="openDialog('dialog-add-wallpaper')">
+                            <span class="icon">&#xE710;</span>
+                        </button>
+                        <!-- Control panel -->
+                        <button class="nav-btn" title="控制面板" onclick="openDialog('dialog-control-panel')">
+                            <span class="icon">&#xE7F4;</span>
+                        </button>
+                    </div>
+                </nav>
+
+                <!-- ====== PAGE CONTENT ====== -->
+                <div class="page-content" style="z-index: 1;">
+
+                    <!-- ==================== LIBRARY PAGE ==================== -->
+                    <div class="page active" id="page-library"
+                        style="display: flex; overflow: hidden; position: relative;">
+
+                        <div id="libraryContent" style="flex: 1; overflow-y: auto; position: relative; z-index: 1;">
+                            <div class="library-grid" id="libraryGrid">
+                                <!-- JS will populate wallpaper cards -->
+                            </div>
+                            <!-- Drag & Drop zone -->
+                            <div class="library-dropzone" id="libraryDropzone">
+                                <div class="library-dropzone__border">
+                                    <span class="icon library-dropzone__icon">&#xE710;</span>
+                                    <span class="library-dropzone__text">拖放壁纸文件到此处</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Wallpaper Sidebar -->
+                        <div id="wallpaperSidebar" class="wallpaper-sidebar">
+                            <div class="wallpaper-sidebar__header"
+                                style="height: auto; padding: 16px 24px 24px; position: relative; background: transparent;">
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 20px;">
+                                    <img id="sidebarCover" src="" alt="cover"
+                                        style="width: 200px; height: 200px; border-radius: var(--radius-lg); object-fit: cover; box-shadow: var(--shadow-flyout); border: 1px solid rgba(255,255,255,0.8);"
+                                        onerror="this.style.display='none'">
+
+                                    <div
+                                        style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
+                                        <h2 id="sidebarTitle" class="text-truncate"
+                                            style="font-size: var(--font-size-title); font-weight: var(--font-weight-semibold); max-width: 180px;">
+                                            Wallpaper Name</h2>
+                                        <span id="sidebarType"
+                                            style="padding: 2px 8px; border-radius: var(--radius-sm); background: var(--accent-light); color: var(--accent); font-size: var(--font-size-caption); white-space: nowrap;">Video</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="wallpaper-sidebar__content settings-scroll" style="padding: 0 16px 20px;">
+
+                                <div class="settings-group">
+                                    <div class="settings-group__header">壁纸属性</div>
+
+                                    <div class="sidebar-panel">
+                                        <!-- Theme Color -->
+                                        <div class="sidebar-property">
+                                            <div class="sidebar-property__icon"><span class="icon">&#xE790;</span></div>
+                                            <div class="sidebar-property__body">
+                                                <div class="sidebar-property__title">主题色 (Theme Color)</div>
+                                                <div class="sidebar-property__control">
+                                                    <div
+                                                        style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.6); border: 1px solid rgba(0,0,0,0.06); border-radius: var(--radius-sm); padding: 4px 8px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.02)">
+                                                        <input type="color" value="#005FB8" class="color-picker-input"
+                                                            style="width: 24px; height: 24px; min-width: 24px; border:none; box-shadow:none; padding:0;">
+                                                        <span class="text-truncate"
+                                                            style="font-size: 12px; color: var(--text-secondary);">跟随强调色</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Playback Speed -->
+                                        <div class="sidebar-property" id="sidebarSpeedCard">
+                                            <div class="sidebar-property__icon"><span class="icon">&#xE174;</span></div>
+                                            <div class="sidebar-property__body">
+                                                <div class="sidebar-property__title">播放速度 (Speed)</div>
+                                                <div class="sidebar-property__control">
+                                                    <div class="slider-container" style="width: 100%;">
+                                                        <input type="range" class="slider" min="0.1" max="2" step="0.1"
+                                                            value="1.0" style="flex: 1;">
+                                                        <div class="slider__value"
+                                                            style="font-variant-numeric: tabular-nums;">1.0x</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Alignment -->
+                                        <div class="sidebar-property">
+                                            <div class="sidebar-property__icon"><span class="icon">&#xE8B1;</span></div>
+                                            <div class="sidebar-property__body">
+                                                <div class="sidebar-property__title">显示策略 (Scaling)</div>
+                                                <div class="sidebar-property__control">
+                                                    <select class="combo-box"
+                                                        style="width: 100%; border: 1px solid rgba(0,0,0,0.1); box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);">
+                                                        <option>覆盖</option>
+                                                        <option>填充</option>
+                                                        <option>居中</option>
+                                                        <option>拉伸</option>
+                                                        <option>自由</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Flip -->
+                                        <div class="sidebar-property">
+                                            <div class="sidebar-property__icon"><span class="icon">&#xED0D;</span></div>
+                                            <div class="sidebar-property__body">
+                                                <div class="sidebar-property__title">镜像翻转 (Flip Mode)</div>
+                                                <div class="sidebar-property__control">
+                                                    <select class="combo-box"
+                                                        style="width: 100%; border: 1px solid rgba(0,0,0,0.1); box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);">
+                                                        <option>无</option>
+                                                        <option>水平倒置 (Horizontal)</option>
+                                                        <option>垂直倒置 (Vertical)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Volume -->
+                                        <div class="sidebar-property" id="sidebarVolumeCard">
+                                            <div class="sidebar-property__icon"><span class="icon">&#xE767;</span></div>
+                                            <div class="sidebar-property__body">
+                                                <div class="sidebar-property__title">音量 (Volume)</div>
+                                                <div class="sidebar-property__control">
+                                                    <div class="slider-container" style="width: 100%;">
+                                                        <input type="range" class="slider" min="0" max="100" value="50"
+                                                            style="flex: 1;">
+                                                        <div class="slider__value"
+                                                            style="font-variant-numeric: tabular-nums;">50%</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 动态插入自定义设置的位置 -->
+                                <div id="sidebarCustomSettings" style="display: none;">
+                                    <div class="settings-group">
+                                        <div class="settings-group__header">参数自定义</div>
+                                        <!-- 自定义卡片...由JS填充 -->
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            <!-- Action Buttons Footer -->
+                            <div class="wallpaper-sidebar__footer" style="padding: 16px 20px; gap: 12px;">
+                                <button class="btn btn--primary"
+                                    style="flex: 1; height: 36px; border-radius: var(--radius-sm);"
+                                    onclick="alert('已设置为当前系统壁纸！')" title="设置为桌面">
+                                    <span class="icon" style="font-size: 14px;">&#xE73E;</span>
+                                    <span class="btn-text">应用</span>
+                                </button>
+                                <button class="btn" style="flex: 1; height: 36px; border-radius: var(--radius-sm);"
+                                    onclick="resetSidebarSettings()" title="恢复默认参数">
+                                    <span class="icon" style="font-size: 14px;">&#xE777;</span>
+                                    <span class="btn-text">重置</span>
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- ==================== COMPONENTS PAGE ==================== -->
+                    <div class="page" id="page-components" style="display: flex; overflow: hidden;">
+                        <div
+                            style="flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                            <span class="icon"
+                                style="font-size: 48px; color: var(--text-tertiary); margin-bottom: 16px;">&#xE74C;</span>
+                            <h2
+                                style="font-size: var(--font-size-title); color: var(--text-secondary); margin-bottom: 8px;">
+                                小组件生态</h2>
+                            <p style="color: var(--text-tertiary);">敬请期待...</p>
+                        </div>
+                    </div>
+
+                    <!-- ==================== SETTINGS: GENERAL ==================== -->
+                    <div class="page" id="page-settings-general">
+                        <div class="settings-scroll">
+
+                            <!-- Group: Appearance & Behavior -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">外观与行为</div>
+
+                                <!-- Startup -->
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE768;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">开机自启动</div>
+                                        <div class="settings-card__desc">系统启动时自动运行 FlowWallDesk</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox">
+                                            <div class="toggle-switch__track">
+                                                <div class="toggle-switch__thumb"></div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- System tray -->
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xED35;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">系统托盘图标</div>
+                                        <div class="settings-card__desc">在系统托盘区域显示图标</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" checked>
+                                            <div class="toggle-switch__track">
+                                                <div class="toggle-switch__thumb"></div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Animations -->
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE8AB;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">动画效果</div>
+                                        <div class="settings-card__desc">启用 UI 动画和过渡效果</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" checked>
+                                            <div class="toggle-switch__track">
+                                                <div class="toggle-switch__thumb"></div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Theme -->
+                                <div class="settings-card clickable" onclick="openDialog('dialog-theme')">
+                                    <div class="settings-card__icon"><span class="icon">&#xE790;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">应用主题</div>
+                                        <div class="settings-card__desc">自定义应用外观和颜色</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <span class="icon" style="color:var(--text-tertiary)">&#xE76C;</span>
+                                    </div>
+                                </div>
+
+                                <!-- Language -->
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xF2B7;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">语言</div>
+                                        <div class="settings-card__desc">选择应用显示语言</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <select class="combo-box">
+                                            <option selected>简体中文</option>
+                                            <option>English</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Translation help infobar -->
+                                <div class="info-bar info-bar--info">
+                                    <span class="icon info-bar__icon">&#xE946;</span>
+                                    <div class="info-bar__body">
+                                        <div class="info-bar__title">帮助翻译</div>
+                                        <div class="info-bar__message">帮助我们将 FlowWallDesk 翻译成您的语言。<a href="#">了解更多</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: Audio -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">音频</div>
+
+                                <!-- Volume -->
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE767;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">全局音量</div>
+                                        <div class="settings-card__desc">壁纸音频音量</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="slider-container">
+                                            <input type="range" class="slider" min="0" max="100" value="50">
+                                            <span class="slider__value">50</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Display audio output -->
+                                <div class="settings-expander open">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE7F5;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">显示器音频输出</div>
+                                            <div class="settings-card__desc">多显示器音频暂停规则</div>
+                                        </div>
+                                        <div class="settings-card__action">
+                                            <select class="combo-box" onclick="event.stopPropagation()">
+                                                <option selected>每个显示器</option>
+                                                <option>所有显示器</option>
+                                            </select>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item">
+                                            <div
+                                                style="width:450px;height:150px;background:var(--bg-smoke);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;color:var(--text-tertiary);font-size:var(--font-size-caption);">
+                                                [ 显示器选择器 — DisplaySelector 控件 ]
+                                            </div>
+                                        </div>
+                                        <div class="settings-expander__item">
+                                            <label class="checkbox">
+                                                <input type="checkbox">
+                                                <span>仅桌面聚焦时播放音频</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: Wallpaper Directory -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">壁纸目录</div>
+
+                                <div class="settings-expander open">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE8B7;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">壁纸存储目录</div>
+                                            <div class="settings-card__desc">壁纸文件的存储位置</div>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item"
+                                            style="flex-direction:column;align-items:stretch;gap:12px;">
+                                            <div style="display:flex;gap:8px;">
+                                                <button class="btn"
+                                                    style="flex:1;text-align:left;min-width:450px;">C:\Users\User\AppData\Local\FlowWallDesk\Library</button>
+                                                <button class="btn"><span class="icon">&#xE8F4;</span></button>
+                                            </div>
+                                            <label class="checkbox">
+                                                <input type="checkbox">
+                                                <span>将现有壁纸迁移到新目录</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- ==================== SETTINGS: PERFORMANCE ==================== -->
+                    <div class="page" id="page-settings-performance">
+                        <div class="settings-scroll">
+
+                            <!-- Group: Wallpaper Playback -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">壁纸播放</div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE90E;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">全屏应用运行时</div>
+                                        <div class="settings-card__desc">检测到全屏应用时壁纸行为</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="listbox-toggle">
+                                            <button class="listbox-toggle__item" title="继续播放"><span
+                                                    class="icon">&#xE769;</span></button>
+                                            <button class="listbox-toggle__item active" title="暂停"><span
+                                                    class="icon">&#xE768;</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE90C;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">其他应用获得焦点时</div>
+                                        <div class="settings-card__desc">焦点不在桌面时壁纸行为</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="listbox-toggle">
+                                            <button class="listbox-toggle__item" title="继续播放"><span
+                                                    class="icon">&#xE769;</span></button>
+                                            <button class="listbox-toggle__item active" title="暂停"><span
+                                                    class="icon">&#xE768;</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: Laptop Playback -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">笔记本壁纸播放</div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE856;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">电池供电时</div>
+                                        <div class="settings-card__desc">使用电池时壁纸行为</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="listbox-toggle">
+                                            <button class="listbox-toggle__item" title="继续播放"><span
+                                                    class="icon">&#xE769;</span></button>
+                                            <button class="listbox-toggle__item active" title="暂停"><span
+                                                    class="icon">&#xE768;</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE863;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">省电模式时</div>
+                                        <div class="settings-card__desc">系统省电模式激活时壁纸行为</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="listbox-toggle">
+                                            <button class="listbox-toggle__item" title="继续播放"><span
+                                                    class="icon">&#xE769;</span></button>
+                                            <button class="listbox-toggle__item active" title="暂停"><span
+                                                    class="icon">&#xE768;</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: System -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">系统</div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE703;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">远程桌面连接时</div>
+                                        <div class="settings-card__desc">远程桌面会话中的壁纸行为</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="listbox-toggle">
+                                            <button class="listbox-toggle__item" title="继续播放"><span
+                                                    class="icon">&#xE769;</span></button>
+                                            <button class="listbox-toggle__item active" title="暂停"><span
+                                                    class="icon">&#xE768;</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE72E;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">锁屏后重启壁纸</div>
+                                        <div class="settings-card__desc">锁屏恢复后重新加载壁纸引擎</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox">
+                                            <div class="toggle-switch__track">
+                                                <div class="toggle-switch__thumb"></div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE7F4;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">显示器暂停规则</div>
+                                        <div class="settings-card__desc">多显示器壁纸暂停方式</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <select class="combo-box">
+                                            <option selected>每个显示器</option>
+                                            <option>所有显示器</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE769;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">暂停算法</div>
+                                        <div class="settings-card__desc">壁纸暂停检测方式</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <select class="combo-box">
+                                            <option>前台进程</option>
+                                            <option>所有进程</option>
+                                            <option>独占模式</option>
+                                            <option>Grid</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="info-bar info-bar--info">
+                                    <span class="icon info-bar__icon">&#xE946;</span>
+                                    <div class="info-bar__body">
+                                        <div class="info-bar__title">?</div>
+                                        <div class="info-bar__message">了解不同暂停算法之间的差异。<a href="#">了解更多</a></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: Application -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">应用程序</div>
+
+                                <div class="settings-expander">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xF0E3;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">应用规则</div>
+                                            <div class="settings-card__desc">为特定应用程序设置暂停行为</div>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item"
+                                            style="flex-direction:column;align-items:stretch;gap:8px;">
+                                            <div
+                                                style="min-height:100px;background:var(--bg-smoke);border-radius:var(--radius-sm);padding:8px;font-size:var(--font-size-caption);color:var(--text-tertiary);display:flex;align-items:center;justify-content:center;">
+                                                暂无应用规则
+                                            </div>
+                                            <div style="display:flex;gap:8px;">
+                                                <button class="btn"><span class="icon">&#xE710;</span> 添加</button>
+                                                <button class="btn"><span class="icon">&#xE74D;</span> 移除</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- ==================== SETTINGS: WALLPAPER ==================== -->
+                    <div class="page" id="page-settings-wallpaper">
+                        <div class="settings-scroll">
+
+                            <!-- Group: Appearance -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">外观与行为</div>
+
+                                <!-- Desktop Picture -->
+                                <div class="settings-expander open">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE7B5;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">桌面图片</div>
+                                            <div class="settings-card__desc">暂停时自动设置壁纸缩略图为桌面背景</div>
+                                        </div>
+                                        <div class="settings-card__action">
+                                            <label class="toggle-switch" onclick="event.stopPropagation()">
+                                                <input type="checkbox" checked>
+                                                <div class="toggle-switch__track">
+                                                    <div class="toggle-switch__thumb"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item">
+                                            <div class="settings-card__body">
+                                                <div class="settings-card__title">壁纸适应方式</div>
+                                            </div>
+                                            <select class="combo-box">
+                                                <option>无</option>
+                                                <option>填充</option>
+                                                <option>等比缩放</option>
+                                                <option selected>等比填充</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Wallpaper Input -->
+                                <div class="settings-expander open">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE962;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">壁纸输入</div>
+                                            <div class="settings-card__desc">交互式壁纸的输入方式</div>
+                                        </div>
+                                        <div class="settings-card__action">
+                                            <select class="combo-box" onclick="event.stopPropagation()">
+                                                <option>关闭</option>
+                                                <option selected>鼠标</option>
+                                                <option>键盘</option>
+                                            </select>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item">
+                                            <label class="checkbox">
+                                                <input type="checkbox">
+                                                <span>仅在桌面上响应鼠标交互</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: Plugins -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">插件</div>
+
+                                <!-- Video Player -->
+                                <div class="settings-expander open">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE714;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">视频播放器</div>
+                                            <div class="settings-card__desc">用于播放视频壁纸的引擎</div>
+                                        </div>
+                                        <div class="settings-card__action">
+                                            <select class="combo-box" onclick="event.stopPropagation()">
+                                                <option>wmf</option>
+                                                <option selected>mpv</option>
+                                                <option>vlc</option>
+                                            </select>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item">
+                                            <div class="settings-card__body">
+                                                <div class="settings-card__title">视频硬件解码</div>
+                                            </div>
+                                            <label class="toggle-switch"><input type="checkbox" checked>
+                                                <div class="toggle-switch__track">
+                                                    <div class="toggle-switch__thumb"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <div class="settings-expander__item">
+                                            <div class="settings-card__body">
+                                                <div class="settings-card__title">由 Windows 管理颜色</div>
+                                            </div>
+                                            <label class="toggle-switch"><input type="checkbox">
+                                                <div class="toggle-switch__track">
+                                                    <div class="toggle-switch__thumb"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Web Browser -->
+                                <div class="settings-expander open">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE774;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">网页浏览器</div>
+                                            <div class="settings-card__desc">网页壁纸渲染引擎</div>
+                                        </div>
+                                        <div class="settings-card__action">
+                                            <select class="combo-box" onclick="event.stopPropagation()">
+                                                <option>CefSharp</option>
+                                                <option selected>WebView2</option>
+                                            </select>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item">
+                                            <div class="settings-card__body">
+                                                <div class="settings-card__title">磁盘缓存</div>
+                                            </div>
+                                            <label class="toggle-switch"><input type="checkbox">
+                                                <div class="toggle-switch__track">
+                                                    <div class="toggle-switch__thumb"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <div class="settings-expander__item">
+                                            <div class="settings-card__body">
+                                                <div class="settings-card__title">调试端口</div>
+                                            </div>
+                                            <label class="toggle-switch"><input type="checkbox">
+                                                <div class="toggle-switch__track">
+                                                    <div class="toggle-switch__thumb"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Stream Quality -->
+                                <div class="settings-expander">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE93E;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">流媒体壁纸质量</div>
+                                            <div class="settings-card__desc">流媒体类壁纸的视频质量</div>
+                                        </div>
+                                        <div class="settings-card__action">
+                                            <select class="combo-box" onclick="event.stopPropagation()">
+                                                <option>144p</option>
+                                                <option>240p</option>
+                                                <option>360p</option>
+                                                <option>480p</option>
+                                                <option selected>720p</option>
+                                                <option>1080p</option>
+                                                <option>1080p+</option>
+                                            </select>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item">
+                                            <div class="settings-card__body">
+                                                <div class="settings-card__title">检测流壁纸</div>
+                                            </div>
+                                            <label class="toggle-switch"><input type="checkbox" checked>
+                                                <div class="toggle-switch__track">
+                                                    <div class="toggle-switch__thumb"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Group: Music -->
+                            <div class="settings-group">
+                                <div class="settings-group__header">音乐</div>
+
+                                <div class="settings-expander">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE8D6;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">音频可视化设备</div>
+                                            <div class="settings-card__desc">选择用于音乐可视化的音频设备</div>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item"
+                                            style="flex-direction:column;align-items:stretch;">
+                                            <div
+                                                style="min-height:80px;background:var(--bg-smoke);border-radius:var(--radius-sm);padding:8px;font-size:var(--font-size-caption);color:var(--text-tertiary);display:flex;align-items:center;justify-content:center;">
+                                                [ 音频设备列表 ]
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="settings-expander">
+                                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                                        <div class="settings-card__icon"><span class="icon">&#xE8D6;</span></div>
+                                        <div class="settings-card__body">
+                                            <div class="settings-card__title">音乐排除列表</div>
+                                            <div class="settings-card__desc">排除特定应用的音频捕获</div>
+                                        </div>
+                                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                                    </div>
+                                    <div class="settings-expander__content">
+                                        <div class="settings-expander__item"
+                                            style="flex-direction:column;align-items:stretch;gap:8px;">
+                                            <div
+                                                style="min-height:100px;background:var(--bg-smoke);border-radius:var(--radius-sm);padding:8px;font-size:var(--font-size-caption);color:var(--text-tertiary);display:flex;align-items:center;justify-content:center;">
+                                                暂无排除应用
+                                            </div>
+                                            <div style="display:flex;gap:8px;">
+                                                <button class="btn"><span class="icon">&#xE710;</span> 添加</button>
+                                                <button class="btn"><span class="icon">&#xE74D;</span> 移除</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- ==================== SETTINGS: SCREENSAVER ==================== -->
+                    <div class="page" id="page-settings-screensaver">
+                        <div class="settings-scroll">
+
+                            <div class="settings-group">
+                                <div class="settings-group__header">外观与行为</div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE72E;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">恢复时锁定</div>
+                                        <div class="settings-card__desc">屏保退出时要求登录</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <label class="toggle-switch"><input type="checkbox">
+                                            <div class="toggle-switch__track">
+                                                <div class="toggle-switch__thumb"></div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE793;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">淡入效果</div>
+                                        <div class="settings-card__desc">屏保启动时使用渐入过渡</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <label class="toggle-switch"><input type="checkbox" checked>
+                                            <div class="toggle-switch__track">
+                                                <div class="toggle-switch__thumb"></div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-group">
+                                <div class="settings-group__header">音频</div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE767;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">屏保音量</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <div class="slider-container">
+                                            <input type="range" class="slider" min="0" max="100" value="50">
+                                            <span class="slider__value">50</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-group">
+                                <div class="settings-group__header">系统</div>
+
+                                <div class="settings-card clickable">
+                                    <div class="settings-card__icon"><span class="icon">&#xE770;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">Windows 屏保设置</div>
+                                        <div class="settings-card__desc">打开 Windows 系统屏保设置</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <span class="icon" style="color:var(--text-tertiary)">&#xE76C;</span>
+                                    </div>
+                                </div>
+
+                                <div class="info-bar info-bar--warning">
+                                    <span class="icon info-bar__icon">&#xE7BA;</span>
+                                    <div class="info-bar__body">
+                                        <div class="info-bar__title">屏保插件</div>
+                                        <div class="info-bar__message">需要先在Windows屏保设置中选择 FlowWallDesk。<a
+                                                href="#">了解更多</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- ==================== SETTINGS: SYSTEM ==================== -->
+                    <div class="page" id="page-settings-system">
+                        <div class="settings-scroll">
+
+                            <div class="settings-group">
+                                <div class="settings-group__header">外观与行为</div>
+
+                                <div class="settings-card">
+                                    <div class="settings-card__icon"><span class="icon">&#xE771;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">任务栏主题</div>
+                                        <div class="settings-card__desc">自定义任务栏外观</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <select class="combo-box">
+                                            <option>关闭</option>
+                                            <option>透明</option>
+                                            <option>模糊</option>
+                                            <option>Fluent</option>
+                                            <option>壁纸</option>
+                                            <option>壁纸 Fluent</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="info-bar info-bar--error">
+                                    <span class="icon info-bar__icon">&#xE783;</span>
+                                    <div class="info-bar__body">
+                                        <div class="info-bar__title">功能暂停开发</div>
+                                        <div class="info-bar__message">此功能暂时暂停维护，可能无法正常工作。<a href="#">查看讨论</a></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="settings-group">
+                                <div class="settings-group__header">开发者</div>
+
+                                <div class="settings-card clickable">
+                                    <div class="settings-card__icon"><span class="icon">&#xEC7A;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">调试</div>
+                                        <div class="settings-card__desc">打开调试信息面板</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <span class="icon" style="color:var(--text-tertiary)">&#xE76C;</span>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card clickable">
+                                    <div class="settings-card__icon"><span class="icon">&#xE9F9;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">导出日志</div>
+                                        <div class="settings-card__desc">导出诊断日志文件</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <span class="icon" style="color:var(--text-tertiary)">&#xE76C;</span>
+                                    </div>
+                                </div>
+
+                                <div class="settings-card clickable" style="border-left: 3px solid var(--success);">
+                                    <div class="settings-card__icon"><span class="icon">&#xE90F;</span></div>
+                                    <div class="settings-card__body">
+                                        <div class="settings-card__title">切换到测试版</div>
+                                        <div class="settings-card__desc">获取最新测试版功能</div>
+                                    </div>
+                                    <div class="settings-card__action">
+                                        <span class="icon" style="color:var(--text-tertiary)">&#xE76C;</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                </div><!-- /page-content -->
+            </div><!-- /app-content -->
+        </div><!-- /app-body -->
+    </div><!-- /app-shell -->
+
+
+    <!-- ============================================================
+     DIALOGS
+     ============================================================ -->
+
+    <!-- Dialog: Add Wallpaper -->
+    <div class="dialog-overlay" id="dialog-add-wallpaper">
+        <div class="dialog" style="min-width:480px;">
+            <div class="dialog__header">添加壁纸</div>
+            <div class="dialog__body">
+                <!-- Drop zone -->
+                <div
+                    style="border:2px dashed var(--border-control);border-radius:var(--radius-md);padding:32px;text-align:center;margin-bottom:16px;">
+                    <span class="icon"
+                        style="font-size:32px;color:var(--text-tertiary);display:block;margin-bottom:8px;">&#xE710;</span>
+                    <span style="color:var(--text-secondary);">拖放文件到此处</span>
+                </div>
+                <!-- Browse -->
+                <div class="settings-card clickable" style="margin-bottom:8px;">
+                    <div class="settings-card__icon"><span class="icon">&#xEC50;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">浏览文件</div>
+                        <div class="settings-card__desc">从磁盘选择壁纸文件</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+                <!-- URL -->
+                <div style="margin-bottom:8px;">
+                    <label
+                        style="font-size:var(--font-size-caption);color:var(--text-secondary);display:block;margin-bottom:4px;">URL</label>
+                    <input type="text" placeholder="输入壁纸URL链接…"
+                        style="width:100%;height:32px;padding:0 12px;border:1px solid var(--border-control);border-radius:var(--radius-sm);background:var(--bg-card);font-size:var(--font-size-body);font-family:var(--font-family);outline:none;">
+                </div>
+                <!-- Advanced -->
+                <div class="settings-card clickable">
+                    <div class="settings-card__icon"><span class="icon">&#xE710;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">高级创建</div>
+                        <div class="settings-card__desc">创建自定义壁纸类型</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--accent" onclick="closeDialog('dialog-add-wallpaper')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog: About App -->
+    <div class="dialog-overlay" id="dialog-about">
+        <div class="dialog" style="min-width:400px;">
+            <div class="dialog__header">关于</div>
+            <div class="dialog__body">
+                <div style="text-align:center;padding:16px 0;">
+                    <img src="../src/FlowWallDesk.UI.WinUI/Assets/icon-FlowWallDesk-48.png" alt="icon"
+                        style="width:64px;height:64px;margin-bottom:12px;">
+                    <div style="font-size:var(--font-size-title);font-weight:var(--font-weight-semibold);">FlowWallDesk
+                    </div>
+                    <div style="font-size:var(--font-size-caption);color:var(--text-secondary);margin-top:4px;">v1.0.0.0
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;">
+                    <button class="btn"><span class="icon">&#xE774;</span> 网站</button>
+                    <button class="btn"><span class="icon">&#xE715;</span> 邮箱</button>
+                </div>
+                <div style="text-align:center;font-size:var(--font-size-caption);color:var(--text-tertiary);">
+                    <a href="#">许可证</a> · <a href="#">隐私政策</a>
+                </div>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--accent" onclick="closeDialog('dialog-about')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog: Help -->
+    <div class="dialog-overlay" id="dialog-help">
+        <div class="dialog" style="min-width:400px;">
+            <div class="dialog__header">帮助</div>
+            <div class="dialog__body">
+                <div class="settings-card clickable" style="margin-bottom:4px;">
+                    <div class="settings-card__icon"><span class="icon">&#xE774;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">官方网站</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+                <div class="settings-card clickable" style="margin-bottom:4px;">
+                    <div class="settings-card__icon"><span class="icon">&#xE736;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">文档</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+                <div class="settings-card clickable" style="margin-bottom:4px;">
+                    <div class="settings-card__icon"><span class="icon">&#xE716;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">社区</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+                <div class="settings-card clickable" style="margin-bottom:4px;">
+                    <div class="settings-card__icon"><span class="icon">&#xE943;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">源代码</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+                <div class="settings-card clickable">
+                    <div class="settings-card__icon"><span class="icon">&#xEBE8;</span></div>
+                    <div class="settings-card__body">
+                        <div class="settings-card__title">报告问题</div>
+                    </div>
+                    <div class="settings-card__action"><span class="icon"
+                            style="color:var(--text-tertiary)">&#xE76C;</span></div>
+                </div>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--accent" onclick="closeDialog('dialog-help')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog: Theme -->
+    <div class="dialog-overlay" id="dialog-theme">
+        <div class="dialog" style="min-width:480px;">
+            <div class="dialog__header">应用主题</div>
+            <div class="dialog__body">
+                <div style="margin-bottom:12px;">
+                    <!-- Theme list -->
+                    <div class="settings-card" style="margin-bottom:4px;border-left:3px solid var(--accent);">
+                        <div
+                            style="width:48px;height:36px;border-radius:var(--radius-sm);background:linear-gradient(135deg,#f3f3f3,#e0e0e0);border:1px solid var(--border-card);">
+                        </div>
+                        <div class="settings-card__body">
+                            <div class="settings-card__title">默认浅色</div>
+                            <div class="settings-card__desc">FlowWallDesk 默认浅色主题</div>
+                        </div>
+                    </div>
+                    <div class="settings-card" style="margin-bottom:4px;">
+                        <div
+                            style="width:48px;height:36px;border-radius:var(--radius-sm);background:linear-gradient(135deg,#2d2d2d,#1a1a1a);border:1px solid var(--border-card);">
+                        </div>
+                        <div class="settings-card__body">
+                            <div class="settings-card__title">默认深色</div>
+                            <div class="settings-card__desc">FlowWallDesk 默认深色主题</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:16px;">
+                    <button class="btn"><span class="icon">&#xEC50;</span> 浏览主题</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:var(--font-size-body);">颜色模式</span>
+                    <select class="combo-box" style="min-width:120px;">
+                        <option>跟随系统</option>
+                        <option selected>浅色</option>
+                        <option>深色</option>
+                    </select>
+                </div>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--accent" onclick="closeDialog('dialog-theme')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog: Control Panel -->
+    <div class="dialog-overlay" id="dialog-control-panel">
+        <div class="dialog" style="min-width:520px;max-width:520px;">
+            <div class="dialog__header">显示器布局</div>
+            <div class="dialog__body">
+                <div
+                    style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border-divider);padding-bottom:8px;">
+                    <button class="nav-item active" style="font-size:var(--font-size-caption);">壁纸</button>
+                    <button class="nav-item" style="font-size:var(--font-size-caption);">屏保</button>
+                </div>
+                <!-- Display selector placeholder -->
+                <div
+                    style="width:100%;height:180px;background:var(--bg-smoke);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+                    <div
+                        style="width:160px;height:100px;background:var(--bg-card);border:2px solid var(--accent);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:var(--font-size-title);color:var(--text-tertiary);">
+                        1</div>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn--accent"><span class="icon">&#xE790;</span> 自定义</button>
+                    <button class="btn"><span class="icon">&#xE711;</span> 关闭壁纸</button>
+                </div>
+                <div class="settings-expander">
+                    <div class="settings-expander__header" onclick="toggleExpander(this)">
+                        <div class="settings-card__body">
+                            <div class="settings-card__title">壁纸布局</div>
+                        </div>
+                        <span class="icon settings-expander__chevron">&#xE70D;</span>
+                    </div>
+                    <div class="settings-expander__content">
+                        <div class="settings-expander__item" style="padding-left:16px;">
+                            <div class="listbox-toggle">
+                                <button class="listbox-toggle__item active"
+                                    style="width:auto;padding:0 12px;font-size:var(--font-size-caption);">每屏独立</button>
+                                <button class="listbox-toggle__item"
+                                    style="width:auto;padding:0 12px;font-size:var(--font-size-caption);">跨屏</button>
+                                <button class="listbox-toggle__item"
+                                    style="width:auto;padding:0 12px;font-size:var(--font-size-caption);">复制</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--accent" onclick="closeDialog('dialog-control-panel')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog: Wallpaper About -->
+    <div class="dialog-overlay" id="dialog-wallpaper-about">
+        <div class="dialog" style="min-width:400px;">
+            <div class="dialog__header">关于</div>
+            <div class="dialog__body">
+                <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:var(--font-size-body);">
+                    <span style="color:var(--text-secondary);">标题</span><span>示例壁纸</span>
+                    <span style="color:var(--text-secondary);">描述</span><span>—</span>
+                    <span style="color:var(--text-secondary);">类型</span><span>视频</span>
+                    <span style="color:var(--text-secondary);">作者</span><span>未知</span>
+                    <span style="color:var(--text-secondary);">大小</span><span>12.3 MB</span>
+                </div>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--accent" onclick="closeDialog('dialog-wallpaper-about')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog: Delete Confirm -->
+    <div class="dialog-overlay" id="dialog-delete-confirm">
+        <div class="dialog" style="min-width:400px;">
+            <div class="dialog__header">确认删除</div>
+            <div class="dialog__body">
+                <p style="margin-bottom:8px;">确定要删除此壁纸吗？</p>
+                <p style="font-size:var(--font-size-caption);color:var(--text-secondary);">此操作无法撤销。</p>
+            </div>
+            <div class="dialog__footer">
+                <button class="btn btn--danger" onclick="closeDialog('dialog-delete-confirm')">删除</button>
+                <button class="btn" onclick="closeDialog('dialog-delete-confirm')">取消</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ============================================================
+     CONTEXT MENU (right-click on wallpaper card)
+     ============================================================ -->
+    <div class="context-menu" id="wallpaperContextMenu">
+        <button class="context-menu__item" onclick="openDialog('dialog-wallpaper-about');hideContextMenu();">
+            <span class="icon">&#xE946;</span><span>更多信息</span>
+        </button>
+        <button class="context-menu__item">
+            <span class="icon">&#xE73E;</span><span>设为壁纸</span>
+        </button>
+        <button class="context-menu__item">
+            <span class="icon">&#xE890;</span><span>预览壁纸</span>
+        </button>
+        <button class="context-menu__item">
+            <span class="icon">&#xE790;</span><span>自定义</span>
+        </button>
+        <button class="context-menu__item">
+            <span class="icon">&#xED25;</span><span>在磁盘中显示</span>
+        </button>
+        <div class="context-menu__separator"></div>
+        <button class="context-menu__item context-menu__item--danger"
+            onclick="openDialog('dialog-delete-confirm');hideContextMenu();">
+            <span class="icon">&#xE74D;</span><span>删除</span>
+        </button>
+        <button class="context-menu__item">
+            <span class="icon">&#xE70F;</span><span>编辑</span>
+        </button>
+    </div>
+
+    <!-- Overflow menu -->
+    <div class="context-menu" id="overflowMenu">
+        <button class="context-menu__item" onclick="openDialog('dialog-theme');hideOverflowMenu();">
+            <span class="icon">&#xE790;</span><span>主题</span>
+        </button>
+        <button class="context-menu__item" onclick="openDialog('dialog-help');hideOverflowMenu();">
+            <span class="icon">&#xE897;</span><span>帮助</span>
+        </button>
+        <button class="context-menu__item" onclick="openDialog('dialog-about');hideOverflowMenu();">
+            <span class="icon">&#xE90A;</span><span>关于</span>
+        </button>
+    </div>
+
+
+    <script src="app.js"></script>
+    <script src="components.js"></script>
+</body>
+
+</html>

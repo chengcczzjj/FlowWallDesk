@@ -1,0 +1,189 @@
+/* components.css */
+.components-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    background-color: transparent;
+    color: var(--text-primary);
+    overflow-y: auto;
+}
+
+/* Main Content Area */
+.components-main-area {
+    padding: 32px 48px;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.section-label {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: var(--text-primary);
+}
+
+/* No-Background Grid (For Time, Audio, Text) */
+.nobg-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-bottom: 48px;
+}
+
+/* Component Grid */
+.component-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-auto-rows: 160px;
+    grid-auto-flow: dense;
+    gap: 16px;
+    margin-bottom: 48px;
+}
+
+.size-1x1 {
+    grid-column: span 1;
+    grid-row: span 1;
+}
+
+.size-2x2 {
+    grid-column: span 2;
+    grid-row: span 2;
+}
+
+.size-1x2 {
+    grid-column: span 1;
+    grid-row: span 2;
+}
+
+.size-2x1 {
+    grid-column: span 2;
+    grid-row: span 1;
+}
+
+.size-3x2 {
+    grid-column: span 3;
+    grid-row: span 2;
+}
+
+/* New Card Design */
+.comp-card {
+    border-radius: 16px;
+    overflow: visible;
+    position: relative;
+    transition: transform 0.2s cubic-bezier(0.1, 0.9, 0.2, 1), box-shadow 0.2s;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    display: flex;
+    flex-direction: column;
+    cursor: default;
+}
+
+.comp-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+}
+
+.comp-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    border-radius: inherit;
+    overflow: hidden;
+}
+
+/* Hover Actions (Replacing Overlay) */
+.comp-hover-actions {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    /* Let events pass through to content */
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 10;
+}
+
+.comp-card:hover .comp-hover-actions {
+    opacity: 1;
+}
+
+.comp-hover-btn {
+    position: absolute;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: white;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    pointer-events: auto;
+    /* Re-enable pointer events for buttons */
+    transition: transform 0.15s, background 0.15s;
+    font-size: 14px;
+}
+
+.comp-hover-btn:hover {
+    transform: scale(1.1);
+    background: var(--accent-hover);
+}
+
+.comp-hover-btn.btn-add {
+    top: 0;
+    right: 0;
+    transform: translate(50%, -50%);
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+}
+
+.comp-hover-btn.btn-add:hover {
+    transform: translate(50%, -50%) scale(1.1);
+}
+
+.comp-hover-btn.btn-prev {
+    top: 50%;
+    left: 12px;
+    transform: translateY(-50%);
+    background: transparent;
+    color: var(--text-primary);
+    border: none;
+    box-shadow: none;
+    font-size: 12px;
+    width: auto;
+    height: auto;
+}
+
+.comp-hover-btn.btn-prev:hover {
+    transform: translateY(-50%) scale(1.1);
+    background: transparent;
+}
+
+.comp-hover-btn.btn-next {
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    background: transparent;
+    color: var(--text-primary);
+    border: none;
+    box-shadow: none;
+    font-size: 12px;
+    width: auto;
+    height: auto;
+}
+
+.comp-hover-btn.btn-next:hover {
+    transform: translateY(-50%) scale(1.1);
+    background: transparent;
+}
+
+.comp-nobg-text {
+    font-size: 48px;
+    font-weight: 300;
+    color: #fff;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    line-height: 1;
+}

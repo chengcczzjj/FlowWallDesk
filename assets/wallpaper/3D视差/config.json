@@ -1,0 +1,40 @@
+{
+    "layers": [
+        {
+            "type": "image",
+            "image": "./assets/images/2.png",
+            "depth": "./assets/images/2_depth.png",
+            "range": [
+                0.0,
+                0.9333333333333333
+            ]
+        },
+        {
+            "type": "time",
+            "depth": 0.5,
+            "center_x": 50,
+            "center_y": 28,
+            "font_size_date": 2.75,
+            "font_color_date": "rgba(255, 255, 255, 0.5)",
+            "font_size": 13.750000000000002,
+            "font_stroke_color": "white",
+            "font_mix_color": "rgba(255, 255, 255, 0.1)",
+            "blur_radius": 25
+        },
+        {
+            "type": "image",
+            "image": "./assets/images/0.png",
+            "depth": "./assets/images/0_depth.png",
+            "range": [
+                0.0,
+                1.0
+            ]
+        }
+    ],
+    "shift": {
+        "x": 0.015,
+        "y": 0.015
+    },
+    "expand": 0.1,
+    "fit_inside": false
+}

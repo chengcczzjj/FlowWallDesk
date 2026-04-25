@@ -1,0 +1,19 @@
+﻿{
+    "AppVersion": "1.0.0.0",
+    "Title": "Swimsuit Tiger",
+    "Desc": "Video Wallpaper",
+    "Author": "FlowWallDesk",
+    "Contact": "https://www.flowwall.art/",
+    "License": "",
+    "Type": 7,
+    "FileName": "泳装虎尾把.mp4",
+    "Thumbnail": null,
+    "Preview": null,
+    "IsAbsolutePath": false,
+    "Id": "flowwall-swimsuit",
+    "Tags": [
+        "video",
+        "dynamic"
+    ],
+    "Version": 1
+}

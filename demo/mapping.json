@@ -1,0 +1,292 @@
+{
+    "$schema": "mapping-schema",
+    "version": "1.0",
+    "description": "HTML原型组件 ↔ WinUI XAML文件的映射关系。回写WinUI时按此文件逐项同步。",
+    "lastUpdated": "2026-04-16",
+    "pages": [
+        {
+            "htmlId": "page-library",
+            "htmlFile": "demo/index.html",
+            "htmlSection": "#page-library",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/LibraryView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/LibraryViewModel.cs",
+            "status": "synced",
+            "description": "壁纸资源库网格页面",
+            "notes": "卡片尺寸272x153, 右键菜单9项, 拖放区域, 加载动画",
+            "requiresAsset": false,
+            "subComponents": [
+                {
+                    "name": "wallpaper-card",
+                    "description": "壁纸卡片组件 (缩略图+标题+渐变+更多按钮)",
+                    "xamlElement": "GridView.ItemTemplate > DataTemplate > Grid",
+                    "status": "synced"
+                },
+                {
+                    "name": "wallpaperContextMenu",
+                    "description": "壁纸右键菜单 (9项: 关于/设为壁纸/预览/自定义/磁盘显示/分享/举报/删除/编辑)",
+                    "xamlElement": "MenuFlyout in GridView.ContextFlyout",
+                    "status": "synced"
+                },
+                {
+                    "name": "library-dropzone",
+                    "description": "拖放添加壁纸区域 (虚线框+图标+文字)",
+                    "xamlElement": "AddFilePanel Grid",
+                    "status": "synced"
+                }
+            ]
+        },
+        {
+            "htmlId": "page-settings-general",
+            "htmlFile": "demo/index.html",
+            "htmlSection": "#page-settings-general",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/Settings/SettingsGeneralView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/Settings/SettingsGeneralViewModel.cs",
+            "status": "synced",
+            "description": "设置-通用页面 (外观/音频/壁纸目录)",
+            "notes": "3个分组: 外观与行为(6项+InfoBar), 音频(Expander含DisplaySelector+CheckBox), 壁纸目录(Expander含路径+迁移)",
+            "requiresAsset": false
+        },
+        {
+            "htmlId": "page-settings-performance",
+            "htmlFile": "demo/index.html",
+            "htmlSection": "#page-settings-performance",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/Settings/SettingsPerformanceView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/Settings/SettingsPerformanceViewModel.cs",
+            "status": "synced",
+            "description": "设置-性能页面 (播放规则/电池/系统/应用规则)",
+            "notes": "4个分组, 使用ListBox(▷/∥)作play/pause选择器, AppRules为Expander含ListView",
+            "requiresAsset": false
+        },
+        {
+            "htmlId": "page-settings-wallpaper",
+            "htmlFile": "demo/index.html",
+            "htmlSection": "#page-settings-wallpaper",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/Settings/SettingsWallpaperView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/Settings/SettingsWallpaperViewModel.cs",
+            "status": "synced",
+            "description": "设置-壁纸页面 (外观/插件/音乐)",
+            "notes": "3个分组, 多个SettingsExpander(视频播放器/浏览器/流媒体/音频设备/音乐排除)",
+            "requiresAsset": false
+        },
+        {
+            "htmlId": "page-settings-screensaver",
+            "htmlFile": "demo/index.html",
+            "htmlSection": "#page-settings-screensaver",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/Settings/SettingsScreensaverView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/Settings/SettingsScreensaverViewModel.cs",
+            "status": "synced",
+            "description": "设置-屏保页面 (外观/音频/系统)",
+            "notes": "3个分组, 最简单的设置页",
+            "requiresAsset": false
+        },
+        {
+            "htmlId": "page-settings-system",
+            "htmlFile": "demo/index.html",
+            "htmlSection": "#page-settings-system",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/Settings/SettingsSystemView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/Settings/SettingsSystemViewModel.cs",
+            "status": "synced",
+            "description": "设置-系统页面 (任务栏主题/开发者选项)",
+            "notes": "2个分组, 开发者区含Debug/ExportLogs/SwitchChannel",
+            "requiresAsset": false
+        }
+    ],
+    "navigation": {
+        "htmlElement": ".top-nav",
+        "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/MainWindow.xaml",
+        "status": "synced",
+        "description": "顶部导航栏 (主模式: Library | 设置模式: 5个设置页)",
+        "notes": "WinUI使用NavigationView PaneDisplayMode=Top, HTML用flex布局模拟",
+        "items": {
+            "main": [
+                "library"
+            ],
+            "settings": [
+                "settings-general",
+                "settings-performance",
+                "settings-wallpaper",
+                "settings-screensaver",
+                "settings-system"
+            ]
+        },
+        "footerButtons": [
+            "addWallpaper",
+            "controlPanel",
+            "settings",
+            "overflow(theme/help/about)"
+        ],
+        "removedFromOriginal": [
+            "gallery (GalleryView)",
+            "appupdate (AppUpdateView)"
+        ]
+    },
+    "titleBar": {
+        "htmlElement": ".title-bar",
+        "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/MainWindow.xaml",
+        "xamlElement": "AppTitleBar Grid",
+        "status": "synced",
+        "description": "标题栏 (图标+标题+搜索框)",
+        "notes": "WinUI用自定义标题栏+ExtendsContentIntoTitleBar, 搜索框宽360"
+    },
+    "dialogs": [
+        {
+            "htmlId": "dialog-add-wallpaper",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/AddWallpaperView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/AddWallpaperViewModel.cs",
+            "status": "synced",
+            "description": "添加壁纸弹窗 (拖放区+文件浏览+URL+高级创建)",
+            "dialogService": "ShowAddWallpaperDialogAsync"
+        },
+        {
+            "htmlId": "dialog-about",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/AboutView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/AboutViewModel.cs",
+            "status": "synced",
+            "description": "关于弹窗 (图标+版本+网站/邮箱+许可证/隐私)",
+            "dialogService": "ShowAboutDialogAsync"
+        },
+        {
+            "htmlId": "dialog-help",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/HelpView.xaml",
+            "status": "synced",
+            "description": "帮助弹窗 (网站/文档/社区/源码/报告问题 5个链接)",
+            "dialogService": "ShowHelpDialogAsync"
+        },
+        {
+            "htmlId": "dialog-theme",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/Settings/AppThemeView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/Settings/AppThemeViewModel.cs",
+            "status": "synced",
+            "description": "主题弹窗 (主题列表+浏览+颜色模式)",
+            "dialogService": "ShowThemeDialogAsync"
+        },
+        {
+            "htmlId": "dialog-control-panel",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/ControlPanel/ControlPanelView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/ControlPanel/ControlPanelViewModel.cs",
+            "status": "synced",
+            "description": "控制面板弹窗 (壁纸/屏保选项卡+显示器布局+自定义/关闭按钮)",
+            "dialogService": "ShowControlPanelDialogAsync",
+            "subPages": [
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/ControlPanel/WallpaperLayoutView.xaml",
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/ControlPanel/ScreensaverLayoutView.xaml"
+            ]
+        },
+        {
+            "htmlId": "dialog-wallpaper-about",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/LibraryAboutView.xaml",
+            "viewModel": "src/FlowWallDesk.UI.Shared/ViewModels/LibraryAboutViewModel.cs",
+            "status": "synced",
+            "description": "壁纸详情弹窗 (标题/描述/类型/作者/大小)",
+            "dialogService": "ShowAboutWallpaperDialogAsync"
+        },
+        {
+            "htmlId": "dialog-delete-confirm",
+            "xamlFile": null,
+            "status": "synced",
+            "description": "删除确认弹窗 (通用确认对话框)",
+            "dialogService": "ShowDeleteWallpaperDialogAsync",
+            "notes": "WinUI中使用LibraryAboutView复用+Yes/No按钮"
+        }
+    ],
+    "removedPages": [
+        {
+            "reason": "功能移除 — 不需要Gallery在线画廊",
+            "xamlFiles": [
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/Gallery/GalleryView.xaml",
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/Gallery/GalleryFeaturedView.xaml",
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/Gallery/GalleryLibraryView.xaml",
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/Gallery/GalleryLoginView.xaml",
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/Gallery/GallerySubscriptionView.xaml",
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/Gallery/ManageAccountView.xaml"
+            ]
+        },
+        {
+            "reason": "功能移除 — 不需要AppUpdate更新页",
+            "xamlFiles": [
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/AppUpdateView.xaml"
+            ]
+        },
+        {
+            "reason": "功能移除 — 不需要Patreon赞助页",
+            "xamlFiles": [
+                "src/FlowWallDesk.UI.WinUI/Views/Pages/PatreonSupportersView.xaml"
+            ]
+        }
+    ],
+    "notYetPrototyped": [
+        {
+            "description": "分享壁纸弹窗",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/ShareWallpaperView.xaml",
+            "priority": "low"
+        },
+        {
+            "description": "壁纸属性编辑弹窗 (动态表单)",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/FlowWallDeskProperty/FlowWallDeskPropertiesView.xaml",
+            "priority": "medium",
+            "notes": "需要动态渲染Slider/TextBox/Dropdown/ColorPicker等控件模板"
+        },
+        {
+            "description": "深度壁纸弹窗",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/DepthEstimateWallpaperView.xaml",
+            "priority": "low"
+        },
+        {
+            "description": "壁纸创建类型选择弹窗",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/AddWallpaperCreateView.xaml",
+            "priority": "medium"
+        },
+        {
+            "description": "壁纸元数据编辑表单",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/Pages/AddWallpaperDataView.xaml",
+            "priority": "medium"
+        },
+        {
+            "description": "DisplaySelector 显示器选择自定义控件",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/UserControls/DisplaySelector.xaml",
+            "priority": "low",
+            "notes": "目前在HTML中用占位符表示"
+        },
+        {
+            "description": "ColorPickerButton 颜色选择控件",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/UserControls/ColorPickerButton.xaml",
+            "priority": "low"
+        },
+        {
+            "description": "MainWindow 通知层 (InfoBar + TeachingTip)",
+            "xamlFile": "src/FlowWallDesk.UI.WinUI/Views/MainWindow.xaml",
+            "priority": "low",
+            "notes": "4个InfoBar(错误/WebView2/导入进度/屏保选择) + 2个TeachingTip"
+        }
+    ],
+    "assets": {
+        "description": "新增资源文件映射。网页中使用的图标/图片如需在WinUI中使用，记录在此。",
+        "targetDirectory": "src/FlowWallDesk.UI.WinUI/Assets/",
+        "items": []
+    },
+    "iconMapping": {
+        "description": "WinUI Segoe MDL2 Assets 图标码 ↔ HTML中的使用方式。回写时转为 FontIcon Glyph。",
+        "icons": {
+            "\\uE8A9": "Library",
+            "\\uE710": "Add/Plus",
+            "\\uE713": "Settings",
+            "\\uE768": "Pause/Play",
+            "\\uE769": "Play",
+            "\\uE790": "Customize/Theme",
+            "\\uE897": "Help",
+            "\\uE90A": "About/Info",
+            "\\uE10C": "More/Ellipsis",
+            "\\uE72B": "Back",
+            "\\uE76C": "ChevronRight",
+            "\\uE70D": "ChevronDown",
+            "\\uE946": "Info/Details",
+            "\\uE73E": "Accept/Set",
+            "\\uE890": "Preview",
+            "\\uED25": "OpenFolder",
+            "\\uE74D": "Delete",
+            "\\uE70F": "Edit",
+            "\\uE7F4": "Display",
+            "\\uE767": "Volume"
+        }
+    }
+}

@@ -1,0 +1,28 @@
+appId: com.lingyue.desk
+productName: LingyueDesk
+asar: true
+asarUnpack:
+  - resources/**
+  - assets/**
+directories:
+  buildResources: resources/build
+files:
+  - '!**/.vscode/*'
+  - '!demo/**'
+  - '!doc/**'
+  - '!{electron.vite.config.{js,ts,mjs,cjs}}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+extraResources:
+  - from: assets
+    to: assets
+    filter: ['**/*']
+win:
+  executableName: LingyueDesk
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+npmRebuild: false

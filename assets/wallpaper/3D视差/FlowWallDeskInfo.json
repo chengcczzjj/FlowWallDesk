@@ -1,0 +1,21 @@
+﻿{
+  "AppVersion": "1.0.0.0",
+  "Title": "3D Parallax Clock",
+  "Desc": "Web wallpaper with 3D parallax effect and clock",
+  "Author": "FlowWallDesk",
+  "Contact": "https://www.flowwall.art/",
+  "License": "",
+  "Type": 1,
+  "FileName": "index.html",
+  "Thumbnail": "assets/images/thumbnail.webp",
+  "Preview": "assets/images/preview.webp",
+  "IsAbsolutePath": false,
+  "Id": "flowwall-3d-parallax",
+  "Tags": [
+    "3D",
+    "parallax",
+    "clock",
+    "web"
+  ],
+  "Version": 1
+}

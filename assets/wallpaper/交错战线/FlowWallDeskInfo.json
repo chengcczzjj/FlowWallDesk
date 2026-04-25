@@ -1,0 +1,19 @@
+﻿{
+    "AppVersion":  "1.0.0.0",
+    "Title":  "Daiblos Core",
+    "Desc":  "Picture Wallpaper",
+    "Author":  "FlowWallDesk",
+    "Contact":  "https://www.flowwall.art/",
+    "License":  "",
+    "Type":  11,
+    "FileName":  "交错战线.png",
+    "Thumbnail":  "交错战线.png",
+    "Preview":  "交错战线.png",
+    "IsAbsolutePath":  false,
+    "Id":  "flowwall-daiblos-core",
+    "Tags":  [
+                 "picture",
+                 "static"
+             ],
+    "Version":  1
+}

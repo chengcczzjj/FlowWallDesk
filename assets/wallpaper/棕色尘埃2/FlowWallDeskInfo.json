@@ -1,0 +1,19 @@
+﻿{
+    "AppVersion":  "1.0.0.0",
+    "Title":  "Brown Dust 2",
+    "Desc":  "Picture Wallpaper",
+    "Author":  "FlowWallDesk",
+    "Contact":  "https://www.flowwall.art/",
+    "License":  "",
+    "Type":  11,
+    "FileName":  "棕色尘埃2.png",
+    "Thumbnail":  "棕色尘埃2.png",
+    "Preview":  "棕色尘埃2.png",
+    "IsAbsolutePath":  false,
+    "Id":  "flowwall-brown-dust2",
+    "Tags":  [
+                 "picture",
+                 "static"
+             ],
+    "Version":  1
+}
