@@ -19,4 +19,4 @@
 - 图形时间日期字体不能依赖强制横向压缩 → 改用窄体字体栈，并用同色不同透明度实现日期渐变。
 - 悬浮组件缩放后逻辑尺寸和视觉尺寸不一致 → 改为等待字体就绪后读取 DOM 实际尺寸参与保存与碰撞计算。
 
-**Git Commit**: （未提交）
+**Git Commit**: `9706bde` — feat: add clock widgets and improve canvas snapping
