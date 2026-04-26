@@ -10,6 +10,84 @@ const TASKBAR_MARGIN = 56
 const MIN_SIZE = 80
 const HANDLE_SIZE = 14
 
+/** 碰撞间距 — 组件之间最小间隔 */
+const COLLISION_GAP = GRID
+
+/**
+ * 获取组件的 DOM 实际矩形。
+ * 始终从 DOM 读取，确保缩放后的视觉尺寸与碰撞矩形一致。
+ */
+function getDomRect(id: string, fallback: { x: number; y: number; w: number; h: number }) {
+  const el = document.querySelector(`[data-widget="${id}"]`) as HTMLElement | null
+  return {
+    x: fallback.x,
+    y: fallback.y,
+    w: el?.offsetWidth || fallback.w || 160,
+    h: el?.offsetHeight || fallback.h || 160,
+  }
+}
+
+/**
+ * 碰撞检测 + 吸附位置计算。
+ *
+ * 算法（仿 macOS）：
+ * 1. 根据两组件中心向量决定推开方向（稳定，不受重叠深度影响）
+ * 2. 推开距离固定 = COLLISION_GAP
+ * 3. 被推组件在推开方向的垂直轴上对齐拖拽组件的边缘
+ *    - 水平推 → top 对齐
+ *    - 垂直推 → left 对齐
+ *
+ * 只推被覆盖的组件，拖拽组件保持原位。
+ */
+function calcSnapTarget(
+  moved: { x: number; y: number; w: number; h: number },
+  other: { x: number; y: number; w: number; h: number }
+): { x: number; y: number } | null {
+  // 判断是否重叠
+  if (
+    moved.x >= other.x + other.w ||
+    moved.x + moved.w <= other.x ||
+    moved.y >= other.y + other.h ||
+    moved.y + moved.h <= other.y
+  )
+    return null
+
+  // 中心向量决定方向（稳定：只取决于相对位置，不取决于重叠深度）
+  const mCx = moved.x + moved.w / 2
+  const mCy = moved.y + moved.h / 2
+  const oCx = other.x + other.w / 2
+  const oCy = other.y + other.h / 2
+  const dx = oCx - mCx
+  const dy = oCy - mCy
+
+  let nx: number, ny: number
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    // 水平推开
+    nx =
+      dx >= 0
+        ? moved.x + moved.w + COLLISION_GAP // 推到右侧
+        : moved.x - other.w - COLLISION_GAP // 推到左侧
+    ny = moved.y // top 对齐
+  } else {
+    // 垂直推开
+    nx = moved.x // left 对齐
+    ny =
+      dy >= 0
+        ? moved.y + moved.h + COLLISION_GAP // 推到下方
+        : moved.y - other.h - COLLISION_GAP // 推到上方
+  }
+
+  // 吸附到网格
+  nx = Math.round(nx / GRID) * GRID
+  ny = Math.round(ny / GRID) * GRID
+  // 限制范围
+  nx = Math.max(EDGE_PADDING, Math.min(nx, window.innerWidth - EDGE_PADDING - other.w))
+  ny = Math.max(EDGE_PADDING, Math.min(ny, window.innerHeight - TASKBAR_MARGIN - other.h))
+
+  return { x: nx, y: ny }
+}
+
 /**
  * 桌面组件画布：单个全屏透明窗口，所有桌面组件渲染在此。
  *
@@ -18,20 +96,31 @@ const HANDLE_SIZE = 14
  */
 export function Canvas() {
   const [widgets, setWidgets] = useState<WidgetInstance[]>([])
+  const widgetsRef = useRef(widgets)
+  widgetsRef.current = widgets
   const [editing, setEditing] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [frame, setFrame] = useState<string | null>(null)
+  const [snapPreviews, setSnapPreviews] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>(
+    []
+  )
 
   useEffect(() => {
     window.canvasBridge?.getWidgets().then((list) => setWidgets(list))
     const offSync = window.canvasBridge?.onSync((list) => setWidgets(list))
     const offFrame = window.canvasBridge?.onFrame((data) => setFrame(data))
-    return () => { offSync?.(); offFrame?.() }
+    return () => {
+      offSync?.()
+      offFrame?.()
+    }
   }, [])
 
   useEffect(() => {
     window.canvasBridge?.setEditMode(editing)
-    if (!editing) setSelectedId(null)
+    if (!editing) {
+      setSelectedId(null)
+      setSnapPreviews([])
+    }
   }, [editing])
 
   const onBgClick = useCallback(() => {
@@ -46,9 +135,7 @@ export function Canvas() {
 
   const updateWidgetConfig = useCallback((id: string, newConfig: Record<string, unknown>) => {
     setWidgets((prev) => {
-      const updated = prev.map((w) =>
-        w.id === id ? { ...w, config: { ...(w.config || {}), ...newConfig } } : w
-      )
+      const updated = prev.map((w) => (w.id === id ? { ...w, config: { ...(w.config || {}), ...newConfig } } : w))
       // 仅保存 config，不触发位置吸附
       window.canvasBridge?.updateWidgetConfig(id, newConfig)
       return updated
@@ -59,59 +146,53 @@ export function Canvas() {
     window.canvasBridge?.saveWidgetConfig?.()
   }, [])
 
-  /** 碰撞检测：将被遮挡的组件推开 */
-  const resolveCollisions = useCallback((movedId: string, movedRect: { x: number; y: number; w: number; h: number }) => {
-    // 使用 DOM 实际尺寸修正碰撞矩形（悬浮组件等比缩放后实际尺寸 < 逻辑尺寸）
-    const movedEl = document.querySelector(`[data-widget="${movedId}"]`) as HTMLElement | null
-    const rect = {
-      x: movedRect.x,
-      y: movedRect.y,
-      w: movedEl?.offsetWidth || movedRect.w,
-      h: movedEl?.offsetHeight || movedRect.h,
+  /** 拖拽过程中实时计算吸附预览（每帧调用） */
+  const onDragPreview = useCallback((movedId: string, movedRect: { x: number; y: number; w: number; h: number }) => {
+    const moved = getDomRect(movedId, movedRect)
+    const targets: Array<{ id: string; x: number; y: number; w: number; h: number }> = []
+    for (const w of widgetsRef.current) {
+      if (w.id === movedId || !w.enabled) continue
+      const other = getDomRect(w.id, { x: w.x, y: w.y, w: w.width, h: w.height })
+      const snap = calcSnapTarget(moved, other)
+      if (snap) targets.push({ id: w.id, x: snap.x, y: snap.y, w: other.w, h: other.h })
     }
-    setWidgets((prev) => {
-      const updated = [...prev]
-      let changed = false
-      for (const other of updated) {
-        if (other.id === movedId || !other.enabled) continue
-        const el = document.querySelector(`[data-widget="${other.id}"]`) as HTMLElement | null
-        const ox = other.x, oy = other.y
-        const ow = el?.offsetWidth || other.width || 160
-        const oh = el?.offsetHeight || other.height || 160
-        const overlapX = rect.x < ox + ow && rect.x + rect.w > ox
-        const overlapY = rect.y < oy + oh && rect.y + rect.h > oy
-        if (overlapX && overlapY) {
-          // 根据两组件中心的相对方向决定推开方向（不受重叠深度影响，快慢拖动一致）
-          const mCx = rect.x + rect.w / 2
-          const mCy = rect.y + rect.h / 2
-          const oCx = ox + ow / 2
-          const oCy = oy + oh / 2
-          const dx = oCx - mCx
-          const dy = oCy - mCy
-          if (Math.abs(dx) >= Math.abs(dy)) {
-            // 水平推开
-            other.x = dx >= 0 ? rect.x + rect.w + GRID : rect.x - ow - GRID
-          } else {
-            // 垂直推开
-            other.y = dy >= 0 ? rect.y + rect.h + GRID : rect.y - oh - GRID
-          }
-          // 限制范围
-          other.x = Math.max(EDGE_PADDING, Math.min(other.x, window.innerWidth - EDGE_PADDING - ow))
-          other.y = Math.max(EDGE_PADDING, Math.min(other.y, window.innerHeight - TASKBAR_MARGIN - oh))
-          window.canvasBridge?.updateWidget(other)
-          changed = true
-        }
-      }
-      return changed ? updated : prev
-    })
+    setSnapPreviews(targets)
   }, [])
+
+  /** 拖拽结束：先提交拖拽组件位置，再应用碰撞并清除预览 */
+  const resolveCollisions = useCallback(
+    (movedId: string, movedRect: { x: number; y: number; w: number; h: number }) => {
+      const moved = getDomRect(movedId, movedRect)
+      const targets: Array<{ id: string; x: number; y: number }> = []
+      for (const w of widgetsRef.current) {
+        if (w.id === movedId || !w.enabled) continue
+        const other = getDomRect(w.id, { x: w.x, y: w.y, w: w.width, h: w.height })
+        const snap = calcSnapTarget(moved, other)
+        if (snap) targets.push({ id: w.id, x: snap.x, y: snap.y })
+      }
+      setSnapPreviews([])
+      if (targets.length === 0) return
+      setWidgets((prev) => {
+        const updated = prev.map((w) => {
+          // 同步拖拽组件的位置到 state（避免 sync 回调前闪回旧位置）
+          if (w.id === movedId) return { ...w, x: movedRect.x, y: movedRect.y }
+          const t = targets.find((t) => t.id === w.id)
+          if (t) {
+            const nw = { ...w, x: t.x, y: t.y }
+            window.canvasBridge?.updateWidget(nw)
+            return nw
+          }
+          return w
+        })
+        return updated
+      })
+    },
+    []
+  )
 
   return (
     <WallpaperFrameCtx.Provider value={frame}>
-      <div
-        style={{ width: '100%', height: '100%', position: 'relative' }}
-        onClick={onBgClick}
-      >
+      <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick}>
         {widgets
           .filter((w) => w.enabled)
           .map((w) => (
@@ -120,14 +201,35 @@ export function Canvas() {
               widget={w}
               editing={editing}
               selected={selectedId === w.id}
-              onSelect={() => { if (editing) setSelectedId(w.id) }}
+              onSelect={() => {
+                if (editing) setSelectedId(w.id)
+              }}
               onEnterEdit={() => setEditing(true)}
               onUpdateConfig={(cfg) => updateWidgetConfig(w.id, cfg)}
               onDelete={() => window.canvasBridge?.removeWidget(w.id)}
               onSaveToWallpaper={saveToWallpaper}
               onResolveCollisions={resolveCollisions}
+              onDragPreview={onDragPreview}
             />
           ))}
+        {/* 吸附预览虚线框 */}
+        {snapPreviews.map((p) => (
+          <div
+            key={`snap-${p.id}`}
+            style={{
+              position: 'absolute',
+              left: p.x,
+              top: p.y,
+              width: p.w,
+              height: p.h,
+              border: '2px dashed rgba(59,130,246,0.5)',
+              borderRadius: 16,
+              pointerEvents: 'none',
+              zIndex: 999,
+              transition: 'left 0.15s ease, top 0.15s ease',
+            }}
+          />
+        ))}
       </div>
     </WallpaperFrameCtx.Provider>
   )
@@ -143,6 +245,7 @@ function DraggableWidget({
   onDelete,
   onSaveToWallpaper,
   onResolveCollisions,
+  onDragPreview,
 }: {
   widget: WidgetInstance
   editing: boolean
@@ -153,6 +256,7 @@ function DraggableWidget({
   onDelete: () => void
   onSaveToWallpaper: () => void
   onResolveCollisions: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
+  onDragPreview: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
 }) {
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
   const [pos, setPos] = useState({ x: widget.x, y: widget.y })
@@ -161,7 +265,15 @@ function DraggableWidget({
   const sizeRef = useRef(size)
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
-  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; origX: number; origY: number; edge: string } | null>(null)
+  const resizeRef = useRef<{
+    startX: number
+    startY: number
+    origW: number
+    origH: number
+    origX: number
+    origY: number
+    edge: string
+  } | null>(null)
   const hasDraggedRef = useRef(false)
   const elRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -186,12 +298,15 @@ function DraggableWidget({
     if (prevConfigStyle.current !== configStyle && prevConfigStyle.current !== '') {
       // 记录锚点（仅首次）
       if (anchorCenterXRef.current === null) {
-        const curW = naturalSizeRef.current?.w ?? (elRef.current?.offsetWidth ?? 0)
+        const curW = naturalSizeRef.current?.w ?? elRef.current?.offsetWidth ?? 0
         anchorCenterXRef.current = posRef.current.x + curW / 2
       }
       // 记录当前用户缩放倍数
       if (naturalSizeRef.current && sizeRef.current.w > 0) {
-        userScaleRef.current = Math.min(sizeRef.current.w / naturalSizeRef.current.w, sizeRef.current.h / naturalSizeRef.current.h)
+        userScaleRef.current = Math.min(
+          sizeRef.current.w / naturalSizeRef.current.w,
+          sizeRef.current.h / naturalSizeRef.current.h
+        )
       }
       naturalSizeRef.current = null
       setStyleChanging(true)
@@ -207,8 +322,8 @@ function DraggableWidget({
               naturalSizeRef.current = { w: newW, h: newH }
               const s = userScaleRef.current
               if (s !== 1) {
-                const scaledW = Math.round(newW * s / GRID) * GRID
-                const scaledH = Math.round(newH * s / GRID) * GRID
+                const scaledW = Math.round((newW * s) / GRID) * GRID
+                const scaledH = Math.round((newH * s) / GRID) * GRID
                 setSize({ w: scaledW, h: scaledH })
                 sizeRef.current = { w: scaledW, h: scaledH }
                 const newX = Math.max(EDGE_PADDING, anchorCenterXRef.current - scaledW / 2)
@@ -228,20 +343,28 @@ function DraggableWidget({
     prevConfigStyle.current = configStyle
   }, [configStyle])
 
-  /** 在 fit-content 首次渲染后记录自然尺寸 */
+  /** 在 fit-content 首次渲染后记录自然尺寸（等待字体就绪再测量） */
   useEffect(() => {
     if (canResize && size.w === 0 && !naturalSizeRef.current && elRef.current) {
+      let cancelled = false
       const measure = () => {
-        if (elRef.current) {
-          const w = elRef.current.offsetWidth
-          const h = elRef.current.offsetHeight
-          if (w > 0 && h > 0) {
-            naturalSizeRef.current = { w, h }
-          }
+        if (cancelled || !elRef.current) return
+        const w = elRef.current.offsetWidth
+        const h = elRef.current.offsetHeight
+        if (w > 0 && h > 0) {
+          naturalSizeRef.current = { w, h }
         }
       }
-      requestAnimationFrame(measure)
+      // 等字体全部就绪后再测量，避免像素字体等延迟加载字体导致尺寸偏差
+      document.fonts.ready.then(() => {
+        if (cancelled) return
+        requestAnimationFrame(measure)
+      })
+      return () => {
+        cancelled = true
+      }
     }
+    return undefined
   }, [canResize, size.w, size.h, configStyle])
 
   /**
@@ -251,14 +374,21 @@ function DraggableWidget({
   const initialSizeRef = useRef({ w: widget.width, h: widget.height })
   const didRestoreRef = useRef(false)
   useEffect(() => {
-    if (!canResize || didRestoreRef.current) return
+    if (!canResize || didRestoreRef.current) return undefined
     if (initialSizeRef.current.w > 0 && !naturalSizeRef.current) {
+      let cancelled = false
       // 临时设为 fit-content 以测量
       setSize({ w: 0, h: 0 })
       sizeRef.current = { w: 0, h: 0 }
-      requestAnimationFrame(() => {
+      // 等待字体就绪后再测量，避免像素字体等延迟加载字体导致尺寸偏差
+      document.fonts.ready.then(() => {
+        if (cancelled) return
         requestAnimationFrame(() => {
-          if (elRef.current) {
+          requestAnimationFrame(() => {
+            if (cancelled || !elRef.current) {
+              didRestoreRef.current = true
+              return
+            }
             const nw = elRef.current.offsetWidth
             const nh = elRef.current.offsetHeight
             if (nw > 0 && nh > 0) {
@@ -273,35 +403,40 @@ function DraggableWidget({
               setSize({ w: savedW, h: savedH })
               sizeRef.current = { w: savedW, h: savedH }
             }
-          }
-          didRestoreRef.current = true
+            didRestoreRef.current = true
+          })
         })
       })
+      return () => {
+        cancelled = true
+      }
     } else {
       didRestoreRef.current = true
+      return undefined
     }
   }, [canResize])
 
-  /** 获取实际渲染尺寸 */
+  /** 获取实际渲染尺寸（使用 DOM 实际尺寸，避免约束尺寸与视觉尺寸不一致） */
   const getActualSize = useCallback(() => {
-    if (canResize && size.w === 0 && elRef.current) {
-      return { w: elRef.current.offsetWidth, h: elRef.current.offsetHeight }
+    if (elRef.current) {
+      const w = elRef.current.offsetWidth
+      const h = elRef.current.offsetHeight
+      if (w > 0 && h > 0) return { w, h }
     }
     return { w: size.w || 200, h: size.h || 100 }
-  }, [canResize, size.w, size.h])
+  }, [size.w, size.h])
 
   /** 计算缩放比例 */
-  const scaleRatio = canResize && naturalSizeRef.current && size.w > 0
-    ? Math.min(size.w / naturalSizeRef.current.w, size.h / naturalSizeRef.current.h)
-    : 1
+  const scaleRatio =
+    canResize && naturalSizeRef.current && size.w > 0
+      ? Math.min(size.w / naturalSizeRef.current.w, size.h / naturalSizeRef.current.h)
+      : 1
 
   // 视觉内容尺寸 = naturalSize * scaleRatio，容器应匹配这个尺寸
-  const visualW = canResize && naturalSizeRef.current && size.w > 0
-    ? Math.round(naturalSizeRef.current.w * scaleRatio)
-    : undefined
-  const visualH = canResize && naturalSizeRef.current && size.w > 0
-    ? Math.round(naturalSizeRef.current.h * scaleRatio)
-    : undefined
+  const visualW =
+    canResize && naturalSizeRef.current && size.w > 0 ? Math.round(naturalSizeRef.current.w * scaleRatio) : undefined
+  const visualH =
+    canResize && naturalSizeRef.current && size.w > 0 ? Math.round(naturalSizeRef.current.h * scaleRatio) : undefined
 
   useEffect(() => {
     setPos({ x: widget.x, y: widget.y })
@@ -315,113 +450,139 @@ function DraggableWidget({
     sizeRef.current = { w: widget.width, h: widget.height }
   }, [widget.width, widget.height])
 
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    if (editing) {
-      if ((e.target as HTMLElement).closest('[data-delete-btn]')) return
-      if ((e.target as HTMLElement).closest('[data-toolbar]')) return
-      // 检查是否点击了 resize handle
-      const resizeEdge = (e.target as HTMLElement).closest('[data-resize]')?.getAttribute('data-resize')
-      if (resizeEdge && canResize) {
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0) return
+      e.stopPropagation()
+      if (editing) {
+        if ((e.target as HTMLElement).closest('[data-delete-btn]')) return
+        if ((e.target as HTMLElement).closest('[data-toolbar]')) return
+        // 检查是否点击了 resize handle
+        const resizeEdge = (e.target as HTMLElement).closest('[data-resize]')?.getAttribute('data-resize')
+        if (resizeEdge && canResize) {
+          e.preventDefault()
+          elRef.current?.setPointerCapture(e.pointerId)
+          setResizing(true)
+          const actual = getActualSize()
+          resizeRef.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            origW: actual.w,
+            origH: actual.h,
+            origX: posRef.current.x,
+            origY: posRef.current.y,
+            edge: resizeEdge,
+          }
+          return
+        }
         e.preventDefault()
         elRef.current?.setPointerCapture(e.pointerId)
-        setResizing(true)
-        const actual = getActualSize()
-        resizeRef.current = {
-          startX: e.clientX, startY: e.clientY,
-          origW: actual.w, origH: actual.h,
-          origX: posRef.current.x, origY: posRef.current.y,
-          edge: resizeEdge,
+        onSelect() // 点击/拖拽即选中
+        setDragging(true)
+        hasDraggedRef.current = false
+        dragRef.current = { startX: e.clientX, startY: e.clientY, origX: posRef.current.x, origY: posRef.current.y }
+      }
+    },
+    [editing, canResize, onSelect]
+  )
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      // 处理 resize
+      if (resizeRef.current) {
+        const r = resizeRef.current
+        const dx = e.clientX - r.startX
+        const dy = e.clientY - r.startY
+        let nw = r.origW,
+          nh = r.origH,
+          nx = r.origX,
+          ny = r.origY
+        if (r.edge.includes('r')) nw = Math.max(MIN_SIZE, r.origW + dx)
+        if (r.edge.includes('b')) nh = Math.max(MIN_SIZE, r.origH + dy)
+        if (r.edge.includes('l')) {
+          const dw = Math.min(dx, r.origW - MIN_SIZE)
+          nw = r.origW - dw
+          nx = r.origX + dw
         }
+        if (r.edge.includes('t')) {
+          const dh = Math.min(dy, r.origH - MIN_SIZE)
+          nh = r.origH - dh
+          ny = r.origY + dh
+        }
+        // 吸附到网格
+        nw = Math.round(nw / GRID) * GRID
+        nh = Math.round(nh / GRID) * GRID
+        nx = Math.round(nx / GRID) * GRID
+        ny = Math.round(ny / GRID) * GRID
+        nw = Math.max(MIN_SIZE, nw)
+        nh = Math.max(MIN_SIZE, nh)
+        setSize({ w: nw, h: nh })
+        sizeRef.current = { w: nw, h: nh }
+        setPos({ x: nx, y: ny })
+        posRef.current = { x: nx, y: ny }
         return
       }
-      e.preventDefault()
-      elRef.current?.setPointerCapture(e.pointerId)
-      onSelect() // 点击/拖拽即选中
-      setDragging(true)
-      hasDraggedRef.current = false
-      dragRef.current = { startX: e.clientX, startY: e.clientY, origX: posRef.current.x, origY: posRef.current.y }
-    }
-  }, [editing, canResize, onSelect])
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    // 处理 resize
-    if (resizeRef.current) {
-      const r = resizeRef.current
-      const dx = e.clientX - r.startX
-      const dy = e.clientY - r.startY
-      let nw = r.origW, nh = r.origH, nx = r.origX, ny = r.origY
-      if (r.edge.includes('r')) nw = Math.max(MIN_SIZE, r.origW + dx)
-      if (r.edge.includes('b')) nh = Math.max(MIN_SIZE, r.origH + dy)
-      if (r.edge.includes('l')) {
-        const dw = Math.min(dx, r.origW - MIN_SIZE)
-        nw = r.origW - dw
-        nx = r.origX + dw
-      }
-      if (r.edge.includes('t')) {
-        const dh = Math.min(dy, r.origH - MIN_SIZE)
-        nh = r.origH - dh
-        ny = r.origY + dh
-      }
-      // 吸附到网格
-      nw = Math.round(nw / GRID) * GRID
-      nh = Math.round(nh / GRID) * GRID
-      nx = Math.round(nx / GRID) * GRID
-      ny = Math.round(ny / GRID) * GRID
-      nw = Math.max(MIN_SIZE, nw)
-      nh = Math.max(MIN_SIZE, nh)
-      setSize({ w: nw, h: nh })
-      sizeRef.current = { w: nw, h: nh }
+      // 处理 drag
+      if (!dragRef.current) return
+      const dx = e.clientX - dragRef.current.startX
+      const dy = e.clientY - dragRef.current.startY
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDraggedRef.current = true
+      let nx = Math.round((dragRef.current.origX + dx) / GRID) * GRID
+      let ny = Math.round((dragRef.current.origY + dy) / GRID) * GRID
+      const curW = elRef.current?.offsetWidth || size.w || 200
+      const curH = elRef.current?.offsetHeight || size.h || 100
+      const maxX = window.innerWidth - EDGE_PADDING - curW
+      const maxY = window.innerHeight - TASKBAR_MARGIN - curH
+      nx = Math.max(EDGE_PADDING, Math.min(nx, Math.max(EDGE_PADDING, maxX)))
+      ny = Math.max(EDGE_PADDING, Math.min(ny, Math.max(EDGE_PADDING, maxY)))
       setPos({ x: nx, y: ny })
       posRef.current = { x: nx, y: ny }
-      return
-    }
-    // 处理 drag
-    if (!dragRef.current) return
-    const dx = e.clientX - dragRef.current.startX
-    const dy = e.clientY - dragRef.current.startY
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDraggedRef.current = true
-    let nx = Math.round((dragRef.current.origX + dx) / GRID) * GRID
-    let ny = Math.round((dragRef.current.origY + dy) / GRID) * GRID
-    const curSize = canResize && size.w === 0 ? { w: elRef.current?.offsetWidth ?? 200, h: elRef.current?.offsetHeight ?? 100 } : { w: size.w, h: size.h }
-    const maxX = window.innerWidth - EDGE_PADDING - curSize.w
-    const maxY = window.innerHeight - TASKBAR_MARGIN - curSize.h
-    nx = Math.max(EDGE_PADDING, Math.min(nx, Math.max(EDGE_PADDING, maxX)))
-    ny = Math.max(EDGE_PADDING, Math.min(ny, Math.max(EDGE_PADDING, maxY)))
-    setPos({ x: nx, y: ny })
-    posRef.current = { x: nx, y: ny }
-  }, [size.w, size.h])
+      // 实时计算吸附预览
+      const curW2 = elRef.current?.offsetWidth || size.w || 200
+      const curH2 = elRef.current?.offsetHeight || size.h || 100
+      onDragPreview(widget.id, { x: nx, y: ny, w: curW2, h: curH2 })
+    },
+    [size.w, size.h, onDragPreview, widget.id]
+  )
 
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
-    elRef.current?.releasePointerCapture(e.pointerId)
-    if (resizeRef.current) {
-      resizeRef.current = null
-      setResizing(false)
-      const updated = { ...widget, x: posRef.current.x, y: posRef.current.y, width: sizeRef.current.w, height: sizeRef.current.h }
-      window.canvasBridge?.updateWidget(updated)
-      onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: sizeRef.current.w, h: sizeRef.current.h })
-      return
-    }
-    if (dragRef.current) {
-      dragRef.current = null
-      setDragging(false)
-      const actualW = sizeRef.current.w > 0 ? sizeRef.current.w : (elRef.current?.offsetWidth ?? 200)
-      const actualH = sizeRef.current.h > 0 ? sizeRef.current.h : (elRef.current?.offsetHeight ?? 100)
-      // 拖拽后更新锚点中心
-      anchorCenterXRef.current = posRef.current.x + actualW / 2
-      const updated = { ...widget, x: posRef.current.x, y: posRef.current.y, width: actualW, height: actualH }
-      window.canvasBridge?.updateWidget(updated)
-      onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: actualW, h: actualH })
-    }
-  }, [widget, onResolveCollisions])
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      elRef.current?.releasePointerCapture(e.pointerId)
+      if (resizeRef.current) {
+        resizeRef.current = null
+        setResizing(false)
+        // 保存视觉尺寸（DOM 实际渲染尺寸），避免约束尺寸不断膨胀
+        const vis = getActualSize()
+        setSize({ w: vis.w, h: vis.h })
+        sizeRef.current = { w: vis.w, h: vis.h }
+        const updated = { ...widget, x: posRef.current.x, y: posRef.current.y, width: vis.w, height: vis.h }
+        window.canvasBridge?.updateWidget(updated)
+        onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
+        return
+      }
+      if (dragRef.current) {
+        dragRef.current = null
+        setDragging(false)
+        const vis = getActualSize()
+        // 拖拽后更新锚点中心
+        anchorCenterXRef.current = posRef.current.x + vis.w / 2
+        const updated = { ...widget, x: posRef.current.x, y: posRef.current.y, width: vis.w, height: vis.h }
+        window.canvasBridge?.updateWidget(updated)
+        onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
+      }
+    },
+    [widget, onResolveCollisions, getActualSize]
+  )
 
-  const onContextMenu = useCallback(async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const action = await window.canvasBridge?.showContextMenu(widget.id)
-    if (action === 'edit') onEnterEdit()
-  }, [widget.id, onEnterEdit])
+  const onContextMenu = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const action = await window.canvasBridge?.showContextMenu(widget.id)
+      if (action === 'edit') onEnterEdit()
+    },
+    [widget.id, onEnterEdit]
+  )
 
   const posValue = useMemo(() => ({ x: pos.x, y: pos.y }), [pos.x, pos.y])
 
@@ -451,17 +612,22 @@ function DraggableWidget({
         borderRadius: 16,
         pointerEvents: 'auto',
         cursor: editing ? (dragging ? 'grabbing' : 'grab') : 'default',
-        transition: (isActive || styleChanging) ? 'none' : 'left 0.25s ease, top 0.25s ease, width 0.2s ease, height 0.2s ease',
+        transition:
+          isActive || styleChanging ? 'none' : 'left 0.25s ease, top 0.25s ease, width 0.2s ease, height 0.2s ease',
         touchAction: 'none',
       }}
     >
       {/* 选中边框 */}
       {editing && (
-        <div style={{
-          position: 'absolute', inset: -2,
-          border: selected ? '2px solid rgba(59,130,246,0.8)' : '2px dashed rgba(255,255,255,0.6)',
-          borderRadius: 18, pointerEvents: 'none',
-        }} />
+        <div
+          style={{
+            position: 'absolute',
+            inset: -2,
+            border: selected ? '2px solid rgba(59,130,246,0.8)' : '2px dashed rgba(255,255,255,0.6)',
+            borderRadius: 18,
+            pointerEvents: 'none',
+          }}
+        />
       )}
       {/* Resize handles（仅选中的悬浮组件） */}
       {editing && selected && canResize && (
@@ -482,15 +648,30 @@ function DraggableWidget({
       {editing && !showToolbar && (
         <button
           data-delete-btn
-          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
           style={{
-            position: 'absolute', top: -8, right: -8,
-            width: 24, height: 24, borderRadius: 12,
-            border: 'none', background: 'rgba(220, 38, 38, 0.9)',
-            color: '#fff', fontSize: 14, lineHeight: '24px',
-            textAlign: 'center', cursor: 'pointer', zIndex: 10,
-            padding: 0, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', backdropFilter: 'blur(4px)',
+            position: 'absolute',
+            top: -8,
+            right: -8,
+            width: 24,
+            height: 24,
+            borderRadius: 12,
+            border: 'none',
+            background: 'rgba(220, 38, 38, 0.9)',
+            color: '#fff',
+            fontSize: 14,
+            lineHeight: '24px',
+            textAlign: 'center',
+            cursor: 'pointer',
+            zIndex: 10,
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
           }}
         >
           ✕
@@ -498,14 +679,17 @@ function DraggableWidget({
       )}
       {/* 浮动设置工具栏 — 始终居中在组件上方 */}
       {showToolbar && (
-        <div data-toolbar style={{
-          position: 'absolute',
-          left: '50%',
-          bottom: '100%',
-          transform: 'translateX(-50%)',
-          marginBottom: 12,
-          zIndex: 50,
-        }}>
+        <div
+          data-toolbar
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: '100%',
+            transform: 'translateX(-50%)',
+            marginBottom: 12,
+            zIndex: 50,
+          }}
+        >
           <FloatingToolbar
             widgetType={widget.type}
             config={widget.config || {}}
@@ -523,10 +707,12 @@ function DraggableWidget({
             height: canResize && !stretchFill && naturalSizeRef.current ? naturalSizeRef.current.h : '100%',
             overflow: canResize ? 'visible' : 'hidden',
             borderRadius: canResize ? 0 : 16,
-            position: 'relative', zIndex: 0,
+            position: 'relative',
+            zIndex: 0,
             transform: canResize && !stretchFill && scaleRatio !== 1 ? `scale(${scaleRatio})` : undefined,
             transformOrigin: 'top left',
-          }}>
+          }}
+        >
           {renderWidget(widget)}
         </div>
       </WidgetPosCtx.Provider>
@@ -554,7 +740,14 @@ function ResizeHandle({
         ...style,
         ...(bar
           ? { borderRadius: 4, background: 'rgba(59,130,246,0.5)', backdropFilter: 'blur(2px)' }
-          : { width: HANDLE_SIZE, height: HANDLE_SIZE, borderRadius: HANDLE_SIZE / 2, background: '#fff', border: '2.5px solid rgba(59,130,246,0.9)', boxShadow: '0 0 4px rgba(0,0,0,0.3)' }),
+          : {
+              width: HANDLE_SIZE,
+              height: HANDLE_SIZE,
+              borderRadius: HANDLE_SIZE / 2,
+              background: '#fff',
+              border: '2.5px solid rgba(59,130,246,0.9)',
+              boxShadow: '0 0 4px rgba(0,0,0,0.3)',
+            }),
         cursor,
         zIndex: 20,
         pointerEvents: 'auto',

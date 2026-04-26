@@ -1,10 +1,4 @@
-import {
-  Activity,
-  Clock,
-  CloudSun,
-  type LucideProps,
-  Music,
-} from 'lucide-react'
+import { Activity, Clock, CloudSun, type LucideProps, Music } from 'lucide-react'
 
 // ── Color Themes ──
 export const COLOR_THEMES = [
@@ -140,7 +134,12 @@ export const COLOR_THEMES = [
 export const CLOCK_STYLES = [
   { id: 'minimal', name: 'Minimal', description: 'Clean & Large' },
   { id: 'stacked', name: 'Stacked', description: 'Vertical Layout' },
-  { id: 'elegant', name: 'Elegant', description: 'Serif & Classy' },
+]
+
+// ── Pixel Clock Styles ──
+export const PIXEL_CLOCK_STYLES = [
+  { id: 'minimal', name: 'Pixel Time', description: 'Retro Digital' },
+  { id: 'weekday', name: 'Pixel Week', description: 'Weekday Layout' },
 ]
 
 // ── Weather Styles ──
@@ -168,7 +167,14 @@ export const AUDIO_STYLES = [
 ]
 
 // ── Widget Type → Identifier ──
-export type WidgetTypeId = 'clock' | 'weather' | 'whitenoise' | 'audio'
+export type WidgetTypeId =
+  | 'clock'
+  | 'elegantclock'
+  | 'pixelclock'
+  | 'graphicdatetime'
+  | 'weather'
+  | 'whitenoise'
+  | 'audio'
 
 export interface WidgetStyleDef {
   id: string
@@ -182,6 +188,9 @@ export const WIDGET_CATALOG: {
   icon: React.ReactElement<LucideProps>
 }[] = [
   { id: 'clock', name: '时间', icon: <Clock size={18} /> },
+  { id: 'elegantclock', name: '日期时钟', icon: <Clock size={18} /> },
+  { id: 'pixelclock', name: '像素时钟', icon: <Clock size={18} /> },
+  { id: 'graphicdatetime', name: '图形时间', icon: <Clock size={18} /> },
   { id: 'weather', name: '天气', icon: <CloudSun size={18} /> },
   { id: 'whitenoise', name: '白噪音', icon: <Music size={18} /> },
   { id: 'audio', name: '音频可视化', icon: <Activity size={18} /> },
@@ -191,6 +200,12 @@ export function getStylesForType(type: string): WidgetStyleDef[] {
   switch (type) {
     case 'clock':
       return CLOCK_STYLES
+    case 'elegantclock':
+      return []
+    case 'pixelclock':
+      return PIXEL_CLOCK_STYLES
+    case 'graphicdatetime':
+      return []
     case 'weather':
       return WEATHER_STYLES
     case 'whitenoise':

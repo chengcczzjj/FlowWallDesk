@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
+import '../shared/pixel-font.css'
 
 // 阻止 Electron 默认的拖拽导航行为，让组件自己处理 drop
 document.addEventListener('dragover', (e) => e.preventDefault())

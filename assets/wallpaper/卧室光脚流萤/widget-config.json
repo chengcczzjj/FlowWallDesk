@@ -1,0 +1,17 @@
+{
+  "widgets": [
+    {
+      "id": "graphicdatetime-1777216696036",
+      "type": "graphicdatetime",
+      "x": 2000,
+      "y": 688,
+      "width": 464,
+      "height": 464,
+      "enabled": true,
+      "config": {
+        "themeId": "orange",
+        "darkMode": false
+      }
+    }
+  ]
+}

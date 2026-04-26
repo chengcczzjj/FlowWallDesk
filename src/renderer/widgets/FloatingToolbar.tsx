@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  LayoutTemplate, Moon, Save, Sun, Trash2,
-  Volume, Volume1, Volume2, VolumeX,
-} from 'lucide-react'
-import {
-  COLOR_THEMES, getStylesForType,
-} from './shared/constants'
+import { LayoutTemplate, Moon, Save, Sun, Trash2, Volume, Volume1, Volume2, VolumeX } from 'lucide-react'
+import { COLOR_THEMES, getStylesForType } from './shared/constants'
 
 interface FloatingToolbarProps {
   widgetType: string
@@ -29,7 +24,10 @@ export function FloatingToolbar({
 
   const styles = getStylesForType(widgetType)
   const currentStyle = styles.find((s) => s.id === config.style) || styles[0]
-  const currentTheme = COLOR_THEMES.find((t) => t.id === config.themeId) || COLOR_THEMES[0]
+  const defaultThemeId = widgetType === 'graphicdatetime' ? 'yellow' : COLOR_THEMES[0].id
+  const currentTheme =
+    COLOR_THEMES.find((t) => t.id === ((config.themeId as string | undefined) || defaultThemeId)) || COLOR_THEMES[0]
+  const darkModeOn = (config.darkMode as boolean | undefined) ?? widgetType === 'graphicdatetime'
 
   const togglePopover = (name: 'style' | 'theme') => {
     setActivePopover((prev) => {
@@ -40,7 +38,7 @@ export function FloatingToolbar({
           return null
         } else {
           // 打开颜色面板 — 记录原始值
-          originalThemeRef.current = (config.themeId as string) || COLOR_THEMES[0].id
+          originalThemeRef.current = (config.themeId as string) || defaultThemeId
           return 'theme'
         }
       }
@@ -71,9 +69,9 @@ export function FloatingToolbar({
   // 是否支持样式选择
   const hasStyles = styles.length > 0
   // 是否支持颜色主题
-  const hasTheme = ['clock', 'audio', 'whitenoise'].includes(widgetType)
+  const hasTheme = ['clock', 'audio', 'whitenoise', 'graphicdatetime'].includes(widgetType)
   // 是否支持暗色模式
-  const hasDarkMode = ['weather', 'whitenoise'].includes(widgetType)
+  const hasDarkMode = ['weather', 'whitenoise', 'graphicdatetime'].includes(widgetType)
   // 是否支持音量
   const hasVolume = widgetType === 'whitenoise'
   // 是否支持透明度
@@ -133,11 +131,11 @@ export function FloatingToolbar({
       {/* Dark Mode Toggle */}
       {hasDarkMode && (
         <button
-          onClick={() => updateConfig({ ...config, darkMode: !config.darkMode })}
-          className={`p-1.5 rounded-full transition-colors ${config.darkMode ? 'bg-slate-800 text-yellow-400' : 'hover:bg-slate-50 text-slate-400 hover:text-orange-500'}`}
+          onClick={() => updateConfig({ ...config, darkMode: !darkModeOn })}
+          className={`p-1.5 rounded-full transition-colors ${darkModeOn ? 'bg-slate-800 text-yellow-400' : 'hover:bg-slate-50 text-slate-400 hover:text-orange-500'}`}
           title="明暗切换"
         >
-          {config.darkMode ? <Moon size={16} /> : <Sun size={16} />}
+          {darkModeOn ? <Moon size={16} /> : <Sun size={16} />}
         </button>
       )}
 
@@ -150,7 +148,14 @@ export function FloatingToolbar({
             className="p-1.5 rounded-full transition-colors hover:bg-slate-50 text-slate-400 hover:text-slate-700"
             title={`音量: ${Math.round([0, 0.3, 0.6, 1][(config.volume as number) ?? 2] * 100)}%`}
           >
-            {[<VolumeX key="0" size={16} />, <Volume key="1" size={16} />, <Volume1 key="2" size={16} />, <Volume2 key="3" size={16} />][(config.volume as number) ?? 2]}
+            {
+              [
+                <VolumeX key="0" size={16} />,
+                <Volume key="1" size={16} />,
+                <Volume1 key="2" size={16} />,
+                <Volume2 key="3" size={16} />,
+              ][(config.volume as number) ?? 2]
+            }
           </button>
         </>
       )}
@@ -184,7 +189,9 @@ export function FloatingToolbar({
                   <div className="border-t border-slate-100 pt-2 px-1">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">透明度</span>
-                      <span className="text-[10px] text-slate-500">{Math.round(((config.opacity as number) ?? 1) * 100)}%</span>
+                      <span className="text-[10px] text-slate-500">
+                        {Math.round(((config.opacity as number) ?? 1) * 100)}%
+                      </span>
                     </div>
                     <input
                       type="range"

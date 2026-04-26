@@ -1,12 +1,14 @@
 import { type CSSProperties, useEffect, useState } from 'react'
 import { COLOR_THEMES } from '../shared/constants'
 
-interface ClockProps {
+interface PixelClockProps {
   config?: Record<string, unknown>
 }
 
-/** 桌面时钟组件 — 多样式、多主题（严格对齐参考实现） */
-export function Clock({ config }: ClockProps) {
+const PIXEL_FONT = "'Press Start 2P', 'Courier New', monospace"
+
+/** 桌面像素时钟组件 — 两种样式 */
+export function PixelClock({ config }: PixelClockProps) {
   const style = (config?.style as string) || 'minimal'
   const themeId = (config?.themeId as string) || 'white'
   const opacity = (config?.opacity as number) ?? 0.8
@@ -23,8 +25,6 @@ export function Clock({ config }: ClockProps) {
   const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
   const date = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()
   const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase()
-  const hours = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit' })
-  const minutes = now.toLocaleTimeString('en-US', { minute: '2-digit' })
 
   const containerStyle = { opacity }
   const getStyle = (defaults = {}) => ({ ...containerStyle, ...defaults, ...customStyle })
@@ -41,23 +41,28 @@ export function Clock({ config }: ClockProps) {
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: customStyle.color ? 'currentcolor' : 'transparent',
     textShadow: `0 0 20px ${theme.glow}`,
+    fontFamily: PIXEL_FONT,
   }
 
   switch (style) {
-    case 'stacked':
+    case 'weekday':
       return (
-        <div className="flex flex-col items-center leading-[1.1] drop-shadow-2xl select-none" style={getStyle()}>
-          <span className="text-[100%] font-black tracking-tight opacity-90" style={{ ...gradientText, fontSize: '6rem' }}>{hours}</span>
-          <span className="text-[100%] font-black tracking-tight opacity-90" style={{ ...gradientText, fontSize: '6rem' }}>{minutes}</span>
-          <span className="text-base font-medium tracking-[0.2em] mt-4 uppercase opacity-80 pl-[0.2em]" style={{ color: theme.accent, whiteSpace: 'nowrap' }}>{day}</span>
+        <div className="flex flex-col items-center drop-shadow-lg select-none" style={{ ...getStyle(), gap: 6, padding: '8px 12px' }}>
+          <span className="font-black leading-none text-center uppercase" style={{ ...gradientText, fontSize: '3rem', letterSpacing: '0.3em', whiteSpace: 'nowrap' }}>{day}</span>
+          <div className="flex items-center gap-4">
+            <div className="h-px w-10 opacity-60" style={{ backgroundColor: theme.borderColor }}></div>
+            <span className="font-bold tracking-widest" style={{ ...gradientText, fontSize: '1rem', whiteSpace: 'nowrap' }}>{time}</span>
+            <div className="h-px w-10 opacity-60" style={{ backgroundColor: theme.borderColor }}></div>
+          </div>
+          <span className="font-bold uppercase tracking-[0.3em] opacity-70" style={{ color: theme.accent, fontFamily: PIXEL_FONT, whiteSpace: 'nowrap', fontSize: '0.5rem' }}>{date}</span>
         </div>
       )
     case 'minimal':
     default:
       return (
-        <div className="flex flex-col items-center drop-shadow-2xl select-none" style={getStyle()}>
-          <span className="font-bold tracking-tight leading-none" style={{ ...gradientText, fontSize: '6rem' }}>{time}</span>
-          <span className="text-sm font-light tracking-[0.3em] opacity-80 uppercase pl-[0.3em]" style={{ color: theme.accent, whiteSpace: 'nowrap' }}>{day} · {date}</span>
+        <div className="flex flex-col items-center drop-shadow-2xl select-none" style={{ ...getStyle(), padding: '8px 12px' }}>
+          <span className="font-bold tracking-tight leading-none" style={{ ...gradientText, fontSize: '4.5rem' }}>{time}</span>
+          <span className="text-sm font-light tracking-[0.3em] opacity-80 uppercase pl-[0.3em]" style={{ color: theme.accent, fontFamily: PIXEL_FONT, whiteSpace: 'nowrap', fontSize: '0.6rem', marginTop: 8 }}>{day} · {date}</span>
         </div>
       )
   }

@@ -293,10 +293,8 @@ export function registerWidgetIpc(): void {
  * 基础单元 160px，间距 16px
  */
 const UNIT = 160
+/** 卡片组件的标准尺寸（悬浮组件使用 fit-content，不参与迁移） */
 const WIDGET_SIZE_MAP: Record<string, { w: number; h: number }> = {
-  clock:      { w: UNIT * 2 + GRID_GAP, h: UNIT },           // 中-横
-  audio:      { w: UNIT * 2 + GRID_GAP, h: UNIT },           // 中-横
-  text:       { w: UNIT * 2 + GRID_GAP, h: UNIT },           // 中-横
   weather:    { w: UNIT * 2 + GRID_GAP, h: UNIT * 2 + GRID_GAP }, // 大
   stocks:     { w: UNIT * 2 + GRID_GAP, h: UNIT * 2 + GRID_GAP }, // 大 2×2
   news:       { w: UNIT,                h: UNIT * 2 + GRID_GAP }, // 中-竖 1×2
