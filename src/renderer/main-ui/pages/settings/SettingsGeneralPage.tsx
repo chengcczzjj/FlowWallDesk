@@ -1,0 +1,403 @@
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Plus,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  ChevronDown,
+  Zap,
+  Power,
+  Monitor,
+  Sparkles,
+  Globe,
+} from 'lucide-react'
+import type { ModelProfile, ModelProvider } from '@shared/types'
+import './settings.css'
+
+const PROVIDER_LABELS: Record<ModelProvider, string> = {
+  'openai-compatible': 'OpenAI 兼容',
+  'google': 'Google Gemini',
+}
+
+export function SettingsGeneralPage() {
+  /* ── General settings state ── */
+  const [autoStart, setAutoStart] = useState(false)
+  const [animations, setAnimations] = useState(true)
+
+  /* ── Model profiles state ── */
+  const [profiles, setProfiles] = useState<ModelProfile[]>([])
+  const [editingProfile, setEditingProfile] = useState<ModelProfile | null>(null)
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [testError, setTestError] = useState('')
+  const [models, setModels] = useState<string[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [activeId, setActiveId] = useState('')
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+
+  const loadProfiles = useCallback(async () => {
+    const list = await window.lingyue.chat.listProfiles()
+    setProfiles(list)
+    const active = await window.lingyue.chat.getActiveProfile()
+    if (active) setActiveId(active.id)
+  }, [])
+
+  useEffect(() => {
+    loadProfiles()
+  }, [loadProfiles])
+
+  /* ── Profile actions ── */
+  const handleNewProfile = (provider: ModelProvider = 'openai-compatible') => {
+    setEditingProfile({
+      id: `profile-${Date.now()}`,
+      name: provider === 'google' ? 'Gemini' : '',
+      provider,
+      baseURL: '',
+      apiKey: '',
+      model: provider === 'google' ? 'gemini-2.5-flash' : '',
+    })
+    setTestStatus('idle')
+    setModels([])
+    setShowModelDropdown(false)
+  }
+
+  const handleEditProfile = (p: ModelProfile) => {
+    setEditingProfile({ ...p })
+    setTestStatus('idle')
+    setModels([])
+    setShowModelDropdown(false)
+  }
+
+  const handleSave = async () => {
+    if (!editingProfile) return
+    await window.lingyue.chat.upsertProfile(editingProfile)
+    await loadProfiles()
+    setEditingProfile(null)
+  }
+
+  const handleDelete = async (id: string) => {
+    await window.lingyue.chat.deleteProfile(id)
+    await loadProfiles()
+    if (editingProfile?.id === id) setEditingProfile(null)
+  }
+
+  const handleSetActive = async (id: string) => {
+    await window.lingyue.chat.setActiveProfile(id)
+    setActiveId(id)
+  }
+
+  const handleTest = async () => {
+    if (!editingProfile) return
+    setTestStatus('testing')
+    setTestError('')
+    const result = await window.lingyue.chat.testProfile(editingProfile)
+    if (result.ok) {
+      setTestStatus('success')
+    } else {
+      setTestStatus('error')
+      setTestError(result.error || '连接失败')
+    }
+  }
+
+  const handleListModels = async () => {
+    if (!editingProfile) return
+    setModelsLoading(true)
+    const result = await window.lingyue.chat.listModels(editingProfile)
+    setModels(result.models)
+    setModelsLoading(false)
+    if (result.models.length > 0) setShowModelDropdown(true)
+  }
+
+  const selectModel = (model: string) => {
+    if (!editingProfile) return
+    setEditingProfile({ ...editingProfile, model })
+    setShowModelDropdown(false)
+  }
+
+  const updateField = <K extends keyof ModelProfile>(key: K, value: ModelProfile[K]) => {
+    if (!editingProfile) return
+    setEditingProfile({ ...editingProfile, [key]: value })
+  }
+
+  return (
+    <div className="settings-scroll">
+      {/* ════════ 外观与行为 ════════ */}
+      <div className="settings-group">
+        <div className="settings-group__header">外观与行为</div>
+
+        {/* 开机自启动 */}
+        <div className="settings-card">
+          <div className="settings-card__icon"><Power size={18} /></div>
+          <div className="settings-card__body">
+            <div className="settings-card__title">开机自启动</div>
+            <div className="settings-card__desc">系统启动时自动运行灵月桌面</div>
+          </div>
+          <div className="settings-card__action">
+            <label className="toggle-switch">
+              <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
+              <div className="toggle-switch__track">
+                <div className="toggle-switch__thumb" />
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* 系统托盘 */}
+        <div className="settings-card">
+          <div className="settings-card__icon"><Monitor size={18} /></div>
+          <div className="settings-card__body">
+            <div className="settings-card__title">系统托盘图标</div>
+            <div className="settings-card__desc">在系统托盘区域显示图标</div>
+          </div>
+          <div className="settings-card__action">
+            <label className="toggle-switch">
+              <input type="checkbox" defaultChecked />
+              <div className="toggle-switch__track">
+                <div className="toggle-switch__thumb" />
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* 动画效果 */}
+        <div className="settings-card">
+          <div className="settings-card__icon"><Sparkles size={18} /></div>
+          <div className="settings-card__body">
+            <div className="settings-card__title">动画效果</div>
+            <div className="settings-card__desc">启用 UI 动画和过渡效果</div>
+          </div>
+          <div className="settings-card__action">
+            <label className="toggle-switch">
+              <input type="checkbox" checked={animations} onChange={(e) => setAnimations(e.target.checked)} />
+              <div className="toggle-switch__track">
+                <div className="toggle-switch__thumb" />
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* 语言 */}
+        <div className="settings-card">
+          <div className="settings-card__icon"><Globe size={18} /></div>
+          <div className="settings-card__body">
+            <div className="settings-card__title">语言</div>
+            <div className="settings-card__desc">选择应用显示语言</div>
+          </div>
+          <div className="settings-card__action">
+            <select className="settings-select" defaultValue="zh-CN">
+              <option value="zh-CN">简体中文</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* ════════ 模型配置 ════════ */}
+      <div className="settings-group">
+        <div className="settings-group__header">模型配置</div>
+
+        {/* Profile 列表 */}
+        <div className="model-profiles">
+          {profiles.map((p) => (
+            <div
+              key={p.id}
+              className={`model-profile-card ${activeId === p.id ? 'model-profile-card--active' : ''}`}
+              onClick={() => handleEditProfile(p)}
+            >
+              <div className="model-profile-card__indicator" />
+              <div className="model-profile-card__info">
+                <div className="model-profile-card__name">
+                  {p.provider === 'google' ? (p.model || 'Gemini') : (p.name || '未命名')}
+                </div>
+                <div className="model-profile-card__meta">
+                  <span className="model-profile-card__provider-badge">
+                    {PROVIDER_LABELS[p.provider || 'openai-compatible']}
+                  </span>
+                  <span>{p.model}</span>
+                </div>
+              </div>
+              <div className="model-profile-card__actions">
+                {activeId !== p.id && (
+                  <button
+                    className="model-profile-card__btn model-profile-card__btn--activate"
+                    onClick={(e) => { e.stopPropagation(); handleSetActive(p.id) }}
+                    title="设为激活"
+                  >
+                    <Zap size={14} />
+                  </button>
+                )}
+                <button
+                  className="model-profile-card__btn model-profile-card__btn--danger"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(p.id) }}
+                  title="删除"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+          {profiles.length === 0 && (
+            <div className="profile-empty">暂无模型配置，点击下方按钮添加</div>
+          )}
+        </div>
+
+        {/* 新增按钮 */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button className="settings-btn settings-btn--sm" onClick={() => handleNewProfile('openai-compatible')}>
+            <Plus size={14} /> OpenAI 兼容
+          </button>
+          <button className="settings-btn settings-btn--sm" onClick={() => handleNewProfile('google')}>
+            <Plus size={14} /> Google Gemini
+          </button>
+        </div>
+
+        {/* 编辑面板 */}
+        {editingProfile && (
+          <div className="profile-editor">
+            <h4 className="profile-editor__title">
+              {editingProfile.provider === 'google'
+                ? '配置 Google Gemini'
+                : editingProfile.name ? `编辑 — ${editingProfile.name}` : '新建配置'}
+            </h4>
+            <div className="profile-editor__grid">
+              {/* 名称 + Provider — 仅 OpenAI 兼容时显示 */}
+              {editingProfile.provider !== 'google' && (
+                <>
+                  <div className="form-field">
+                    <label className="form-field__label">名称</label>
+                    <input
+                      className="form-field__input"
+                      type="text"
+                      value={editingProfile.name}
+                      onChange={(e) => updateField('name', e.target.value)}
+                      placeholder="DeepSeek-V3"
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label className="form-field__label">提供商</label>
+                    <select
+                      className="settings-select"
+                      value={editingProfile.provider}
+                      onChange={(e) => {
+                        const provider = e.target.value as ModelProvider
+                        setEditingProfile({
+                          ...editingProfile,
+                          provider,
+                          baseURL: '',
+                          name: provider === 'google' ? 'Gemini' : editingProfile.name,
+                          model: provider === 'google' ? 'gemini-2.5-flash' : editingProfile.model,
+                        })
+                      }}
+                    >
+                      <option value="openai-compatible">OpenAI 兼容</option>
+                      <option value="google">Google Gemini</option>
+                    </select>
+                  </div>
+                  {/* API Base URL — 仅 OpenAI 兼容 */}
+                  <div className="form-field form-field--full">
+                    <label className="form-field__label">API Base URL</label>
+                    <input
+                      className="form-field__input"
+                      type="text"
+                      value={editingProfile.baseURL}
+                      onChange={(e) => updateField('baseURL', e.target.value)}
+                      placeholder="https://api.openai.com/v1"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* API Key */}
+              <div className="form-field form-field--full">
+                <label className="form-field__label">
+                  API Key
+                  {editingProfile.provider === 'google' && (
+                    <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 6 }}>
+                      从 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>Google AI Studio</a> 获取
+                    </span>
+                  )}
+                </label>
+                <input
+                  className="form-field__input"
+                  type="password"
+                  value={editingProfile.apiKey}
+                  onChange={(e) => updateField('apiKey', e.target.value)}
+                  placeholder={editingProfile.provider === 'google' ? 'AIzaSy...' : 'sk-...'}
+                />
+              </div>
+
+              {/* 模型 */}
+              <div className="form-field form-field--full">
+                <label className="form-field__label">模型</label>
+                <div className="model-input-row">
+                  <input
+                    className="form-field__input"
+                    type="text"
+                    value={editingProfile.model}
+                    onChange={(e) => updateField('model', e.target.value)}
+                    placeholder={editingProfile.provider === 'google' ? 'gemini-2.5-flash' : 'gpt-4o'}
+                  />
+                  <button
+                    className="model-fetch-btn"
+                    onClick={handleListModels}
+                    disabled={modelsLoading || !editingProfile.apiKey}
+                  >
+                    {modelsLoading ? <Loader2 size={14} className="spin" /> : <ChevronDown size={14} />}
+                    {modelsLoading ? '加载中' : '获取列表'}
+                  </button>
+                </div>
+                {showModelDropdown && models.length > 0 && (
+                  <div className="model-dropdown">
+                    {models.map((m) => (
+                      <button key={m} className="model-dropdown__item" onClick={() => selectModel(m)}>
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {models.length > 0 && !showModelDropdown && (
+                  <div className="model-count">
+                    共 {models.length} 个可用模型
+                    <button className="settings-link" onClick={() => setShowModelDropdown(true)}>查看</button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer: 测试 + 保存 */}
+            <div className="profile-editor__footer">
+              <button className="settings-btn" onClick={handleTest} disabled={testStatus === 'testing'}>
+                {testStatus === 'testing' && <Loader2 size={14} className="spin" />}
+                测试连接
+              </button>
+              <div className="test-status">
+                {testStatus === 'success' && (
+                  <span className="test-status--ok"><CheckCircle2 size={14} /> 连接成功</span>
+                )}
+                {testStatus === 'error' && (
+                  <span className="test-status--err"><XCircle size={14} /> {testError}</span>
+                )}
+              </div>
+              <div className="profile-editor__footer-right">
+                <button className="settings-btn" onClick={() => setEditingProfile(null)}>取消</button>
+                <button className="settings-btn settings-btn--primary" onClick={handleSave}>保存</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 提示 */}
+        <div className="info-bar info-bar--info" style={{ marginTop: 12 }}>
+          <span className="info-bar__icon">💡</span>
+          <div className="info-bar__body">
+            <div className="info-bar__title">关于模型配置</div>
+            <div className="info-bar__message">
+              支持 OpenAI 兼容 API（DeepSeek、OpenRouter 等）和 Google Gemini。
+              选择激活的配置后，AI 对话将使用该模型。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

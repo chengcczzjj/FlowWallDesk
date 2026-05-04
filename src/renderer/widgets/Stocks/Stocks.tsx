@@ -17,7 +17,7 @@ export function StocksWidget({ config }: { config?: Record<string, unknown> }) {
 
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
-  const timerRef = useRef<ReturnType<typeof setInterval>>()
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -35,7 +35,7 @@ export function StocksWidget({ config }: { config?: Record<string, unknown> }) {
 
     return () => {
       cancelled = true
-      clearInterval(timerRef.current)
+      if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [JSON.stringify(symbols), refreshSec])
 

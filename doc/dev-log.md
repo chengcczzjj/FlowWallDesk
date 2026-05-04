@@ -1,5 +1,27 @@
 # 灵月桌面 开发日志
 
+## [2026-05-04 23:09] 落地本地工作区 AI Chat Agent
+
+**变更摘要**: 完成本地工作区 AI Chat/Agent 主链路，支持模型配置、项目会话、工具调用过程 UI、受控文件读写、授权审批、Checkpoint、文件活动与结果验证。
+
+**涉及模块**:
+
+- `src/main/memory/`: 新增 SQLite/Drizzle 记忆数据库、会话事件、AgentRun、审批、Checkpoint、Artifact、文件变更、自动化与工具注册体系。
+- `src/main/ipc/chatIpc.ts` / `src/preload/main-ui.ts` / `src/shared/*`: 接入聊天、模型配置、项目工作区、AgentRun、审批和文件活动 IPC 类型。
+- `src/renderer/main-ui/pages/chat/`: 新增 Chat/Persona 页面，统一工具过程时间线、对话气泡、项目侧栏、Working in 文件活动与授权提示 UI。
+- `src/renderer/main-ui/pages/settings/`: 新增模型配置页，支持 OpenAI 兼容与 Google Gemini profile 管理和连接测试。
+- `package.json`: 接入 Vercel AI SDK、better-sqlite3、drizzle、文档/表格/OCR 等 Agent 工具依赖。
+
+**遇到的问题**:
+
+- 工具过程、模型回复和状态提示混在同一气泡中导致顺序混乱 → 按 `textOffset` 还原时间线，并把真实对话与系统状态分层显示。
+- 新文件写入前 checkpoint 缺少历史文件会误判失败 → 对不存在的新路径返回 skipped，避免阻断创建流程。
+- 成功生成文件后仍可能被旧失败兜底覆盖 → 增加成功交付跟踪，最终回复以实际交付结果为准。
+
+**Git Commit**: 已提交 — feat(agent): add local workspace chat agent
+
+---
+
 ## [2026-04-26 15:10] 新增多款时钟组件并优化画布交互
 
 **变更摘要**: 扩展悬浮时钟组件体系，新增图形时间、像素时钟和独立日期时钟，并优化悬浮组件拖拽、尺寸测量与碰撞吸附体验。

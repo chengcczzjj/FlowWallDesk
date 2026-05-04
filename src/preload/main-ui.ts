@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, ApiEndpointMeta } from '@shared/types'
+import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, ApiEndpointMeta, ChatConversation, ChatMessage, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile } from '@shared/types'
 
 const api = {
   app: {
@@ -50,6 +50,133 @@ const api = {
       ipcRenderer.invoke(IPC.DATA_FETCH_STOCKS, symbols),
     getApiRegistry: (): Promise<ApiEndpointMeta[]> =>
       ipcRenderer.invoke(IPC.DATA_GET_API_REGISTRY),
+  },
+  chat: {
+    /** 发送消息（同步返回 streamId，后续通过事件接收流式数据） */
+    sendMessage: (payload: { conversationId?: string; projectId?: string | null; mode?: ConversationMode; text: string; internal?: boolean; forceAgentRun?: boolean }): string =>
+      ipcRenderer.sendSync(IPC.CHAT_SEND_MESSAGE, payload),
+    stopStream: (streamId: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.CHAT_STOP_STREAM, streamId),
+    /** 监听流式 token */
+    onStreamChunk: (cb: (data: { streamId: string; delta: string }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { streamId: string; delta: string }) => cb(data)
+      ipcRenderer.on(IPC.CHAT_STREAM_CHUNK, handler)
+      return () => ipcRenderer.removeListener(IPC.CHAT_STREAM_CHUNK, handler)
+    },
+    /** 监听流式完成 */
+    onStreamEnd: (cb: (data: { streamId: string; full: string; conversationId: string }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { streamId: string; full: string; conversationId: string }) => cb(data)
+      ipcRenderer.on(IPC.CHAT_STREAM_END, handler)
+      return () => ipcRenderer.removeListener(IPC.CHAT_STREAM_END, handler)
+    },
+    /** 监听流式错误 */
+    onStreamError: (cb: (data: { streamId: string; error: string }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { streamId: string; error: string }) => cb(data)
+      ipcRenderer.on(IPC.CHAT_STREAM_ERROR, handler)
+      return () => ipcRenderer.removeListener(IPC.CHAT_STREAM_ERROR, handler)
+    },
+    /** 监听 Tool 调用事件（start/complete/error） */
+    onToolCall: (cb: (data: { streamId: string; toolCallId: string; toolName: string; input: unknown; status: 'start' | 'complete' | 'error'; output?: unknown; error?: string; durationMs?: number }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { streamId: string; toolCallId: string; toolName: string; input: unknown; status: 'start' | 'complete' | 'error'; output?: unknown; error?: string; durationMs?: number }) => cb(data)
+      ipcRenderer.on(IPC.CHAT_TOOL_CALL, handler)
+      return () => ipcRenderer.removeListener(IPC.CHAT_TOOL_CALL, handler)
+    },
+    /** 监听 AgentRun 运行事件 */
+    onAgentRunEvent: (cb: (data: { streamId: string } & AgentRunEvent) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { streamId: string } & AgentRunEvent) => cb(data)
+      ipcRenderer.on(IPC.AGENT_RUN_EVENT, handler)
+      return () => ipcRenderer.removeListener(IPC.AGENT_RUN_EVENT, handler)
+    },
+    newConversation: (mode?: ConversationMode): Promise<ChatConversation> =>
+      ipcRenderer.invoke(IPC.CHAT_NEW_CONVERSATION, mode),
+    listConversations: (): Promise<ChatConversation[]> =>
+      ipcRenderer.invoke(IPC.CHAT_LIST_CONVERSATIONS),
+    getHistory: (conversationId: string, limit?: number): Promise<ChatMessage[]> =>
+      ipcRenderer.invoke(IPC.CHAT_GET_HISTORY, conversationId, limit),
+    deleteConversation: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_DELETE_CONVERSATION, id),
+    renameConversation: (id: string, title: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_RENAME_CONVERSATION, id, title),
+    archiveConversation: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_ARCHIVE_CONVERSATION, id),
+    unarchiveConversation: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_UNARCHIVE_CONVERSATION, id),
+    moveConversation: (id: string, projectId: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_MOVE_CONVERSATION, id, projectId),
+    exportConversation: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_EXPORT_CONVERSATION, id),
+    listProfiles: (): Promise<ModelProfile[]> =>
+      ipcRenderer.invoke(IPC.CHAT_LIST_PROFILES),
+    getActiveProfile: (): Promise<ModelProfile | null> =>
+      ipcRenderer.invoke(IPC.CHAT_GET_ACTIVE_PROFILE),
+    upsertProfile: (profile: ModelProfile): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_UPSERT_PROFILE, profile),
+    deleteProfile: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_DELETE_PROFILE, id),
+    setActiveProfile: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_SET_ACTIVE_PROFILE, id),
+    testProfile: (profile: ModelProfile): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.CHAT_TEST_PROFILE, profile),
+    listModels: (profile: ModelProfile): Promise<{ models: string[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.CHAT_LIST_MODELS, profile),
+    savePersona: (persona: { name: string; prompt: string; avatar?: string }): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.CHAT_SAVE_PERSONA, persona),
+    getPersona: (): Promise<{ name: string; prompt: string; avatar?: string }> =>
+      ipcRenderer.invoke(IPC.CHAT_GET_PERSONA),
+    listAgentRuns: (threadId: string): Promise<AgentRun[]> =>
+      ipcRenderer.invoke(IPC.AGENT_RUN_LIST_BY_THREAD, threadId),
+    getAgentRun: (id: string): Promise<AgentRun | null> =>
+      ipcRenderer.invoke(IPC.AGENT_RUN_GET, id),
+    listApprovals: (runId: string): Promise<AgentApproval[]> =>
+      ipcRenderer.invoke(IPC.AGENT_APPROVAL_LIST_BY_RUN, runId),
+    resolveApproval: (id: string, decision: AgentApprovalDecision): Promise<AgentApproval | null> =>
+      ipcRenderer.invoke(IPC.AGENT_APPROVAL_RESOLVE, id, decision),
+    listFileChanges: (runId: string): Promise<AgentFileChange[]> =>
+      ipcRenderer.invoke(IPC.AGENT_FILE_CHANGE_LIST_BY_RUN, runId),
+    setFileChangeReviewState: (id: string, reviewState: AgentFileChangeReviewState): Promise<AgentFileChange | null> =>
+      ipcRenderer.invoke(IPC.AGENT_FILE_CHANGE_SET_REVIEW_STATE, id, reviewState),
+    restoreFileChange: (id: string): Promise<{ ok: boolean; restored?: string[]; skipped?: string[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_FILE_CHANGE_RESTORE, id),
+    openFileChange: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_FILE_CHANGE_OPEN, id),
+    showFileChangeInFolder: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_FILE_CHANGE_SHOW_IN_FOLDER, id),
+    listArtifacts: (runId: string): Promise<AgentArtifact[]> =>
+      ipcRenderer.invoke(IPC.AGENT_ARTIFACT_LIST_BY_RUN, runId),
+    openArtifact: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_ARTIFACT_OPEN, id),
+    showArtifactInFolder: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_ARTIFACT_SHOW_IN_FOLDER, id),
+    copyArtifactPath: (id: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_ARTIFACT_COPY_PATH, id),
+    listAutomations: (): Promise<AgentAutomation[]> =>
+      ipcRenderer.invoke(IPC.AGENT_AUTOMATION_LIST),
+    createAutomation: (data: { name: string; prompt: string; workspaceId?: string | null; conversationId?: string | null; scheduleType?: AgentAutomationScheduleType; intervalMinutes?: number | null; timeOfDay?: string | null }): Promise<AgentAutomation> =>
+      ipcRenderer.invoke(IPC.AGENT_AUTOMATION_CREATE, data),
+    updateAutomation: (id: string, data: { name?: string; prompt?: string; workspaceId?: string | null; conversationId?: string | null; scheduleType?: AgentAutomationScheduleType; intervalMinutes?: number | null; timeOfDay?: string | null; status?: AgentAutomationStatus }): Promise<AgentAutomation | null> =>
+      ipcRenderer.invoke(IPC.AGENT_AUTOMATION_UPDATE, id, data),
+    deleteAutomation: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.AGENT_AUTOMATION_DELETE, id),
+    runAutomationNow: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.AGENT_AUTOMATION_RUN_NOW, id),
+    listAutomationResults: (automationId?: string): Promise<AgentAutomationResult[]> =>
+      ipcRenderer.invoke(IPC.AGENT_AUTOMATION_RESULT_LIST, automationId),
+  },
+  project: {
+    create: (data: { name: string; path?: string; icon?: string; color?: string }): Promise<ChatProject> =>
+      ipcRenderer.invoke(IPC.PROJECT_CREATE, data),
+    list: (): Promise<ChatProject[]> =>
+      ipcRenderer.invoke(IPC.PROJECT_LIST),
+    get: (id: string): Promise<ChatProject | null> =>
+      ipcRenderer.invoke(IPC.PROJECT_GET, id),
+    update: (id: string, data: { name?: string; path?: string; icon?: string; color?: string; permissionProfile?: WorkspacePermissionProfile }): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.PROJECT_UPDATE, id, data),
+    delete: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.PROJECT_DELETE, id),
+    pickFolder: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.PROJECT_PICK_FOLDER),
+    openFolder: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.PROJECT_OPEN_FOLDER, id),
   },
 }
 

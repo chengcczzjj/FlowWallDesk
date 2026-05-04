@@ -2,7 +2,7 @@ import {
   Image as ImageIcon,
   LayoutGrid,
   Cat,
-  Brain,
+  MessageCircle,
   Settings,
   MoreHorizontal,
   Plus,
@@ -16,12 +16,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { LibraryPage } from './pages/LibraryPage'
 import { EmptyPage } from './pages/EmptyPage'
 import { WidgetsPage } from './pages/WidgetsPage'
+import { ChatPage } from './pages/chat/ChatPage'
+import { SettingsGeneralPage } from './pages/settings/SettingsGeneralPage'
 import { AddWallpaperDialog } from './components/AddWallpaperDialog'
 import './styles.css'
 
-type ActivityKey = 'library' | 'widgets' | 'pet' | 'memory' | 'settings'
+type ActivityKey = 'memory' | 'library' | 'widgets' | 'pet' | 'settings'
 
 const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label: string }[] }> = {
+  memory: { label: 'AI 对话' },
   library: {
     label: '壁纸资源',
     pages: [
@@ -38,7 +41,6 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
     ],
   },
   pet: { label: '桌宠' },
-  memory: { label: 'AI 记忆' },
   settings: {
     label: '设置',
     pages: [
@@ -66,7 +68,7 @@ function loadSavedNav(): { activity: ActivityKey; subPage: string } {
       }
     } catch { /* ignore */ }
   }
-  return { activity: 'library', subPage: 'library' }
+  return { activity: 'memory', subPage: '' }
 }
 
 export function App() {
@@ -129,6 +131,12 @@ export function App() {
       <div className="app-body">
         <nav className="activity-bar">
           <ActivityItem
+            icon={<MessageCircle size={20} />}
+            active={activity === 'memory'}
+            onClick={() => switchActivity('memory')}
+            title="AI 对话"
+          />
+          <ActivityItem
             icon={<ImageIcon size={20} />}
             active={activity === 'library'}
             onClick={() => switchActivity('library')}
@@ -146,12 +154,6 @@ export function App() {
             onClick={() => switchActivity('pet')}
             title="桌宠"
           />
-          <ActivityItem
-            icon={<Brain size={20} />}
-            active={activity === 'memory'}
-            onClick={() => switchActivity('memory')}
-            title="AI 记忆"
-          />
           <div className="activity-bar__spacer" />
           <ActivityItem
             icon={<Settings size={20} />}
@@ -163,6 +165,10 @@ export function App() {
         </nav>
 
         <div className="app-content">
+          {activity === 'memory' ? (
+            <ChatPage />
+          ) : (
+          <>
           <nav className="top-nav">
             <div className="top-nav__items">
               {tabs?.map((t) => (
@@ -201,13 +207,15 @@ export function App() {
               <WidgetsPage subPage={subPage} />
             )}
             {activity === 'pet' && <EmptyPage icon={<Cat size={48} />} title="桌宠" subtitle="规划中…" />}
-            {activity === 'memory' && (
-              <EmptyPage icon={<Brain size={48} />} title="AI 记忆" subtitle="规划中…" />
+            {activity === 'settings' && subPage === 'settings-general' && (
+              <SettingsGeneralPage />
             )}
-            {activity === 'settings' && (
+            {activity === 'settings' && subPage !== 'settings-general' && (
               <EmptyPage icon={<Settings size={48} />} title="设置" subtitle="即将到来…" />
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
 

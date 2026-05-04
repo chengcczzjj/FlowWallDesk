@@ -1,6 +1,6 @@
 # 灵月桌面 项目进展
 
-> 最后更新：2026-04-26
+> 最后更新：2026-05-04
 > 版本：0.1.0（早期开发）
 
 ## 技术栈
@@ -14,6 +14,7 @@
 | 动画     | Framer Motion 12                                                 |
 | 存储     | electron-store 8（`%APPDATA%/lingyue-desk/lingyue-config.json`） |
 | 壁纸嵌入 | electron-as-wallpaper 1.0.4（仅 Windows）                        |
+| AI/Agent | Vercel AI SDK v6 + SQLite/Drizzle + better-sqlite3               |
 
 ## 架构概览
 
@@ -109,6 +110,21 @@
 | 模态设置弹窗   | ✅ 完成 | WidgetSettingsDialog             |
 | 壁纸导入对话框 | ✅ 完成 | AddWallpaperDialog               |
 
+### AI Chat / 本地工作区 Agent ✅ 82%
+
+| 功能                 | 状态    | 说明                                                         |
+| -------------------- | ------- | ------------------------------------------------------------ |
+| 模型配置             | ✅ 完成 | 支持 OpenAI 兼容与 Google Gemini profile、模型列表和连接测试 |
+| 会话与项目工作区     | ✅ 完成 | 本地项目绑定、会话归类、项目侧栏和 Working in 上下文提示      |
+| 流式对话             | ✅ 完成 | AI SDK v6 多步工具调用，事件持久化到 SQLite                  |
+| Workspace 只读工具   | ✅ 完成 | 列目录、读文件、搜索文本、文件信息，带工作区边界校验         |
+| Workspace 写入工具   | ✅ 完成 | 创建/覆盖/补丁/移动/复制/回收区恢复，审批与文件变更记录       |
+| AgentRun 过程记录    | ✅ 完成 | 计划、工具调用、审批、Checkpoint、Artifact、验证结果可追踪    |
+| 工具过程 UI          | ✅ 完成 | 按真实时间线展示模型过程话和独立工具控件，状态提示与对话分层 |
+| Checkpoint/回滚      | ⚠️ 75%  | 文件快照、对比、恢复链路已具备，仍需更多 UI 复核入口         |
+| 自动化任务           | ⚠️ 60%  | Automation Store/Scheduler 与收件箱 UI 已接入，规则配置待完善 |
+| 文档/表格/OCR 工具   | ⚠️ 70%  | DOCX/XLSX/PDF/图片读取与生成工具已接入，复杂预览待增强        |
+
 ## 已知问题与经验
 
 | 问题                              | 根因                                        | 解决方案                       |
@@ -120,11 +136,11 @@
 
 ## 待办规划
 
-- [ ] Weather 天气数据源对接
-- [ ] SysMonitor 真实系统信息采集
 - [ ] QuickTools 功能实现（便签/截图/设置/重启）
 - [ ] Pet 桌面萌宠核心功能
 - [ ] Audio 实时音频输入对接
+- [ ] Agent 文件变更审查与 checkpoint 恢复 UI 增强
+- [ ] 自动化任务规则编辑与运行历史详情
 - [ ] 图标收纳组件（方案已设计，见 `doc/图标收纳组件方案.md`）
 - [ ] 应用打包与分发
 
@@ -139,3 +155,6 @@
 | `src/renderer/widgets/shared/constants.tsx`       | 颜色主题定义                 |
 | `src/renderer/widgets/FrostedGlassBackground.tsx` | 毛玻璃通用组件               |
 | `assets/wallpaper/<id>/widget-config.json`        | 壁纸绑定的组件配置           |
+| `src/main/memory/`                                 | AI Chat 记忆、AgentRun 与工具系统 |
+| `src/main/ipc/chatIpc.ts`                          | AI Chat / Agent IPC 注册     |
+| `src/renderer/main-ui/pages/chat/ChatPage.tsx`     | AI Chat 主界面与 Agent 过程 UI |

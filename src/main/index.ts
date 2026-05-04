@@ -8,7 +8,9 @@ import { registerAppIpc } from './ipc/appIpc'
 import { registerWallpaperIpc, restoreWallpaper } from './ipc/wallpaperIpc'
 import { registerWidgetIpc, restoreWidgets } from './ipc/widgetIpc'
 import { registerDataIpc } from './ipc/dataIpc'
+import { registerChatIpc } from './ipc/chatIpc'
 import { registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
+import { initMemorySystem } from './memory'
 
 // 必须在 app.ready 之前注册
 registerAssetSchemePrivileged()
@@ -41,6 +43,10 @@ app.whenReady().then(async () => {
   registerWallpaperIpc()
   registerWidgetIpc()
   registerDataIpc()
+  registerChatIpc()
+
+  // 初始化记忆系统（建库/建表）
+  initMemorySystem()
 
   // 创建窗口 — canvas 先于 mainWindow 创建，确保透明合成正确
   createWallpaperWindow()
