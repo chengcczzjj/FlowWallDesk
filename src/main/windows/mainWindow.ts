@@ -7,7 +7,12 @@ let mainWindow: BrowserWindow | null = null
 /** 标记本次应用会话是否已经展示过主窗口（用于导航状态恢复） */
 let hasShownMainWindow = false
 
-export function createMainWindow(): BrowserWindow {
+export interface MainWindowNavTarget {
+  activity: string
+  subPage?: string
+}
+
+export function createMainWindow(target?: MainWindowNavTarget): BrowserWindow {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show()
     mainWindow.focus()
@@ -62,11 +67,19 @@ export function createMainWindow(): BrowserWindow {
   hasShownMainWindow = true
 
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    const q = shouldRestore ? '?restore=1' : ''
+    const params = new URLSearchParams()
+    if (shouldRestore) params.set('restore', '1')
+    if (target?.activity) params.set('activity', target.activity)
+    if (target?.subPage) params.set('subPage', target.subPage)
+    const q = params.toString() ? `?${params.toString()}` : ''
     mainWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/main-ui/index.html${q}`)
   } else {
+    const query: Record<string, string> = {}
+    if (shouldRestore) query.restore = '1'
+    if (target?.activity) query.activity = target.activity
+    if (target?.subPage) query.subPage = target.subPage
     mainWindow.loadFile(join(__dirname, '../renderer/main-ui/index.html'), {
-      query: shouldRestore ? { restore: '1' } : undefined,
+      query: Object.keys(query).length > 0 ? query : undefined,
     })
   }
 

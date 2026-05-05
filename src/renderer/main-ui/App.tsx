@@ -38,6 +38,7 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
     pages: [
       { id: 'widgets-floating', label: '悬浮挂件' },
       { id: 'widgets-card', label: '卡片组件' },
+      { id: 'widgets-icons', label: '图标收纳' },
     ],
   },
   pet: { label: '桌宠' },
@@ -54,9 +55,22 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
 }
 
 /** 判断 URL 是否携带 restore 参数（窗口重建时恢复上次页面） */
-const shouldRestore = new URLSearchParams(window.location.search).has('restore')
+const initialParams = new URLSearchParams(window.location.search)
+const shouldRestore = initialParams.has('restore')
+
+function isActivityKey(value: string | null | undefined): value is ActivityKey {
+  return Boolean(value && NAV_TABS[value as ActivityKey])
+}
 
 function loadSavedNav(): { activity: ActivityKey; subPage: string } {
+  const activityParam = initialParams.get('activity')
+  if (isActivityKey(activityParam)) {
+    return {
+      activity: activityParam,
+      subPage: initialParams.get('subPage') || NAV_TABS[activityParam].pages?.[0]?.id || '',
+    }
+  }
+
   if (shouldRestore) {
     try {
       const saved = localStorage.getItem('lingyue-nav')
@@ -87,6 +101,14 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('lingyue-nav', JSON.stringify({ activity, subPage }))
   }, [activity, subPage])
+
+  useEffect(() => {
+    return window.lingyue.app.onNavigate((target) => {
+      if (!isActivityKey(target.activity)) return
+      setActivity(target.activity)
+      setSubPage(target.subPage || NAV_TABS[target.activity].pages?.[0]?.id || '')
+    })
+  }, [])
 
   const tabs = NAV_TABS[activity].pages
 

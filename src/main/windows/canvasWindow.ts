@@ -4,7 +4,7 @@ import { is } from '@electron-toolkit/utils'
 import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let koffi: any
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -13,7 +13,7 @@ try {
   koffi = null
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let u32: Record<string, any> | null = null
 
 function loadUser32Fns() {
@@ -85,8 +85,7 @@ function checkDesktopOccluded(): boolean {
       if (dvOwner && fgHwnd === dvOwner) return false
     }
     // 不计算 Electron 自身窗口
-    const { BrowserWindow: BW } = require('electron')
-    for (const w of BW.getAllWindows() as BrowserWindow[]) {
+    for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) {
         try {
           if (Number(w.getNativeWindowHandle().readBigInt64LE(0)) === fgHwnd) return false
@@ -180,13 +179,13 @@ export function createCanvasWindow(): BrowserWindow {
   if (canvasWindow && !canvasWindow.isDestroyed()) return canvasWindow
 
   const display = screen.getPrimaryDisplay()
-  const { width, height } = display.workAreaSize
+  const { x, y, width, height } = display.bounds
 
   canvasWindow = new BrowserWindow({
     width,
     height,
-    x: display.workArea.x,
-    y: display.workArea.y,
+    x,
+    y,
     show: false,
     frame: false,
     transparent: true,
@@ -281,6 +280,19 @@ export function getCanvasWindow(): BrowserWindow | null {
   return canvasWindow && !canvasWindow.isDestroyed() ? canvasWindow : null
 }
 
+export function isCanvasEditMode(): boolean {
+  return isEditing
+}
+
+export function setCanvasMousePassthrough(ignore: boolean): void {
+  if (!canvasWindow || canvasWindow.isDestroyed()) return
+  if (ignore) {
+    canvasWindow.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    canvasWindow.setIgnoreMouseEvents(false)
+  }
+}
+
 /** 编辑模式下画布 blur/focus 处理：失焦时降低层级让开始菜单/通知栏正常弹出 */
 function setupEditBlurFocus(): void {
   if (!canvasWindow || canvasWindow.isDestroyed()) return
@@ -320,14 +332,13 @@ export function setCanvasEditMode(on: boolean): void {
 }
 
 /** 用 Win32 EnumWindows 最小化所有非 Electron 的可见窗口 */
-function minimizeAllOtherWindows(): void {
+export function minimizeAllOtherWindows(): void {
   loadUser32Fns()
   if (!u32) return
 
   // 收集所有 Electron 窗口的 HWND，排除它们
   const electronHwnds = new Set<number>()
-  const { BrowserWindow: BW } = require('electron')
-  for (const w of BW.getAllWindows() as BrowserWindow[]) {
+  for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) {
       try {
         electronHwnds.add(Number(w.getNativeWindowHandle().readBigInt64LE(0)))

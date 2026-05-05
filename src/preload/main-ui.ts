@@ -6,6 +6,11 @@ const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.APP_GET_VERSION),
     quit: (): void => ipcRenderer.send(IPC.APP_QUIT),
+    onNavigate: (cb: (target: { activity: string; subPage?: string }) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, target: { activity: string; subPage?: string }) => cb(target)
+      ipcRenderer.on(IPC.APP_NAVIGATE, handler)
+      return () => ipcRenderer.off(IPC.APP_NAVIGATE, handler)
+    },
   },
   utils: {
     getFilePath: (file: File): string => webUtils.getPathForFile(file),

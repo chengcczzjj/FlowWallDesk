@@ -6,12 +6,48 @@ import { attachWindowAsWallpaperNative } from './attachWallpaperNative'
 let wallpaperWindow: BrowserWindow | null = null
 let attached = false
 let attachHint = ''
+let boundsListenerRegistered = false
 
 export function isWallpaperAttached(): boolean {
   return attached && !!getWallpaperWindow()
 }
 export function getAttachHint(): string {
   return attachHint
+}
+
+function getPrimaryDisplayBounds(): { x: number; y: number; width: number; height: number } {
+  const display = screen.getPrimaryDisplay()
+  const { x, y, width, height } = display.bounds
+  return { x, y, width, height }
+}
+
+function syncWallpaperBoundsToPrimaryDisplay(force = false): void {
+  const win = getWallpaperWindow()
+  if (!win) return
+  const bounds = getPrimaryDisplayBounds()
+  const current = win.getBounds()
+  if (
+    !force &&
+    current.x === bounds.x &&
+    current.y === bounds.y &&
+    current.width === bounds.width &&
+    current.height === bounds.height
+  ) {
+    return
+  }
+  win.setBounds(bounds, false)
+}
+
+function registerDisplayBoundsListener(): void {
+  if (boundsListenerRegistered) return
+  boundsListenerRegistered = true
+  const sync = (): void => {
+    syncWallpaperBoundsToPrimaryDisplay(true)
+    refreshWallpaperAttach()
+  }
+  screen.on('display-metrics-changed', sync)
+  screen.on('display-added', sync)
+  screen.on('display-removed', sync)
 }
 
 /**
@@ -22,14 +58,13 @@ export function getAttachHint(): string {
 export function createWallpaperWindow(): BrowserWindow {
   if (wallpaperWindow && !wallpaperWindow.isDestroyed()) return wallpaperWindow
 
-  const display = screen.getPrimaryDisplay()
-  const { width, height } = display.bounds
+  const { x, y, width, height } = getPrimaryDisplayBounds()
 
   wallpaperWindow = new BrowserWindow({
     width,
     height,
-    x: display.bounds.x,
-    y: display.bounds.y,
+    x,
+    y,
     show: false,
     frame: false,
     transparent: false,
@@ -55,13 +90,16 @@ export function createWallpaperWindow(): BrowserWindow {
   wallpaperWindow.setMenu(null)
   wallpaperWindow.setAlwaysOnTop(false)
   wallpaperWindow.setIgnoreMouseEvents(true, { forward: false })
+  registerDisplayBoundsListener()
 
   wallpaperWindow.on('ready-to-show', async () => {
     if (!wallpaperWindow) return
+    syncWallpaperBoundsToPrimaryDisplay()
     // 先把窗口显示出来（不显示的窗口 SetParent 后会被系统当不可见处理）
     wallpaperWindow.showInactive()
     const ok = await tryAttachToDesktop(wallpaperWindow)
     if (ok) {
+      syncWallpaperBoundsToPrimaryDisplay()
       attached = true
       console.log(`[wallpaper] 已贴到桌面 (${attachHint})`)
     } else {
@@ -98,9 +136,11 @@ export async function ensureWallpaperAttached(): Promise<boolean> {
   if (attached) return true
   const win = getWallpaperWindow()
   if (!win) return false
+  syncWallpaperBoundsToPrimaryDisplay()
   win.showInactive()
   const ok = await tryAttachToDesktop(win)
   if (ok) {
+    syncWallpaperBoundsToPrimaryDisplay()
     attached = true
     console.log(`[wallpaper] 重新贴桌面成功 (${attachHint})`)
   } else {
@@ -117,12 +157,14 @@ export async function ensureWallpaperAttached(): Promise<boolean> {
 export function refreshWallpaperAttach(): void {
   const win = getWallpaperWindow()
   if (!win || win.isDestroyed()) return
+  syncWallpaperBoundsToPrimaryDisplay()
   if (!attached) return
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const eaw = require('electron-as-wallpaper')
     if (typeof eaw.refresh === 'function') {
       eaw.refresh()
+      syncWallpaperBoundsToPrimaryDisplay()
       console.log('[wallpaper] 轻量刷新完成')
     }
   } catch {
@@ -169,6 +211,7 @@ async function tryAttachToDesktop(win: BrowserWindow): Promise<boolean> {
           forwardKeyboardInput: false,
           forwardMouseInput: false,
         })
+        syncWallpaperBoundsToPrimaryDisplay()
         attachHint = 'electron-as-wallpaper'
         return true
       } catch (err) {
@@ -189,7 +232,10 @@ async function tryAttachToDesktop(win: BrowserWindow): Promise<boolean> {
     if (i > 0) await wait(500)
     const r = await attachWindowAsWallpaperNative(win)
     attachHint = `native:${r.hint}`
-    if (r.ok) return true
+    if (r.ok) {
+      syncWallpaperBoundsToPrimaryDisplay()
+      return true
+    }
     console.warn(`[wallpaper] native attach #${i + 1} 失败: ${r.hint}`)
   }
   return false

@@ -1,5 +1,26 @@
 # 灵月桌面 开发日志
 
+## [2026-05-05 23:46] 完成桌面图标收纳与 Dock 系统按钮
+
+**变更摘要**: 落地图标收纳组件与桌面 Dock，支持桌面图标托管启动、跨壁纸全局保存、收纳外观设置、Dock 悬浮交互和系统快捷按钮。
+
+**涉及模块**:
+
+- `src/renderer/widgets/DesktopIcons/`: 新增纵向/横向/自适应收纳和 Dock，支持拖入图标、长按排序、resize、标题样式、隐藏名称、Dock 悬浮放大与 Win11 风格系统图标。
+- `src/main/ipc/desktopIconIpc.ts` / `src/shared/ipc-channels.ts` / `src/preload/canvas.ts`: 新增桌面图标导入、启动、刷新、删除恢复和 Dock 系统按钮 IPC。
+- `src/renderer/canvas/Canvas.tsx` / `src/renderer/widgets/FloatingToolbar.tsx` / `src/renderer/main-ui/pages/WidgetsPage.tsx`: 接入图标收纳管理页、外观工具栏、多实例、应用到全部收纳和收纳 resize 度量。
+- `src/main/windows/*` / `src/renderer/wallpaper/Wallpaper.tsx` / `src/renderer/widgets/FrostedGlassBackground.tsx`: 优化壁纸全屏贴合、毛玻璃抽帧和回到桌面/z-order 行为。
+- `doc/project-status.md` / `doc/图标收纳组件方案.md`: 更新项目状态与图标收纳实现说明。
+
+**遇到的问题**:
+
+- `.lnk/.url` 直接解析 target 启动不等同桌面双击，部分软件无法打开 → 优先交给 Windows Shell 打开原快捷方式，再回退 target 启动。
+- Dock 固定系统按钮初版没有跟随 Dock 放大参数，且视觉像背景底按钮 → 改为复用普通 Dock 距离缩放逻辑，并重做为 Win11 风格图标本体。
+
+**Git Commit**: 已提交 — feat(widget): 完善桌面图标收纳与 Dock
+
+---
+
 ## [2026-05-04 23:09] 落地本地工作区 AI Chat Agent
 
 **变更摘要**: 完成本地工作区 AI Chat/Agent 主链路，支持模型配置、项目会话、工具调用过程 UI、受控文件读写、授权审批、Checkpoint、文件活动与结果验证。

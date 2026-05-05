@@ -19,7 +19,7 @@
  */
 import type { BrowserWindow } from 'electron'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let koffi: any
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -57,7 +57,7 @@ interface Kernel32 {
 
 let user32: User32 | null = null
 let kernel32: Kernel32 | null = null
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let enumProto: any = null
 
 function loadUser32(): User32 | null {

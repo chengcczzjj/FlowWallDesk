@@ -11,11 +11,17 @@ import { WallpaperFrameCtx, WidgetPosCtx } from '../canvas/contexts'
  */
 export function FrostedGlassBackground({
   overlayColor = 'rgba(255,255,255,0.85)',
+  blurPx = 20,
 }: {
   overlayColor?: string
+  blurPx?: number
 }) {
   const frame = useContext(WallpaperFrameCtx)
   const pos = useContext(WidgetPosCtx)
+  const screenX = window.screenX || 0
+  const screenY = window.screenY || 0
+  const frameWidth = window.screen.width || window.innerWidth
+  const frameHeight = window.screen.height || window.innerHeight
 
   return (
     <div
@@ -33,17 +39,15 @@ export function FrostedGlassBackground({
           src={frame}
           style={{
             position: 'absolute',
-            left: -pos.x,
-            top: -pos.y,
-            width: window.innerWidth,
-            height: window.innerHeight,
+            left: -(screenX + pos.x),
+            top: -(screenY + pos.y),
+            width: frameWidth,
+            height: frameHeight,
             maxWidth: 'none',
             maxHeight: 'none',
-            filter: 'blur(20px) saturate(1.2)',
-            transform: 'scale(1.1)',
-            transformOrigin: `${pos.x}px ${pos.y}px`,
+            filter: `blur(${blurPx}px) saturate(1.14)`,
             pointerEvents: 'none',
-            objectFit: 'cover',
+            objectFit: 'fill',
           }}
           alt=""
           aria-hidden

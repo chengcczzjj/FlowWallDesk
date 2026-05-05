@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain, screen } from 'electron'
 import { promises as fs } from 'fs'
 import { join, basename, extname, dirname } from 'path'
 import { execFile } from 'child_process'
@@ -11,7 +11,7 @@ import {
   ensureWallpaperAttached,
 } from '../windows/wallpaperWindow'
 import { refreshCanvasZOrder, getCanvasWindow, isDesktopOccluded } from '../windows/canvasWindow'
-import { cancelPendingAutoSave } from './widgetIpc'
+import { cancelPendingAutoSave, loadWidgetsForWallpaper } from './widgetIpc'
 
 /**
  * 内置壁纸根目录：
@@ -215,7 +215,7 @@ async function scanFolder(folder: string, id: string): Promise<WallpaperItem | n
 
     if (!source) return null
 
-    let preview = await pickPreview(folder, info)
+    const preview = await pickPreview(folder, info)
 
     // 视频壁纸没有预览图时，异步生成 GIF 预览
     if (type === 'video' && !preview) {
@@ -267,8 +267,10 @@ function startMainCapture(): void {
     if (!wp || wp.isDestroyed() || !canvas || canvas.isDestroyed()) return
     try {
       const img = await wp.webContents.capturePage()
-      // 缩小到低分辨率 JPEG
-      const resized = img.resize({ width: 192, height: 108, quality: 'good' })
+      const display = screen.getPrimaryDisplay()
+      const width = 768
+      const height = Math.max(1, Math.round(width * display.bounds.height / Math.max(1, display.bounds.width)))
+      const resized = img.resize({ width, height, quality: 'good' })
       const b64 = resized.toJPEG(50).toString('base64')
       const dataUrl = `data:image/jpeg;base64,${b64}`
       canvas.webContents.send(IPC.WALLPAPER_FRAME, dataUrl)
@@ -323,27 +325,7 @@ export function registerWallpaperIpc(): void {
       stopMainCapture() // video/image 由渲染端抽帧
     }
 
-    // 自动加载壁纸文件夹中的组件配置（如果存在）
-    try {
-      const wpRoot = getWallpaperRoot()
-      const configPath = join(wpRoot, item.id, 'widget-config.json')
-      const txt = await fs.readFile(configPath, 'utf-8')
-      const data = JSON.parse(txt)
-      if (data.widgets && Array.isArray(data.widgets)) {
-        store.set('widgets', data.widgets)
-        const canvas = getCanvasWindow()
-        if (canvas && !canvas.isDestroyed()) {
-          canvas.webContents.send(IPC.WIDGET_SYNC, data.widgets)
-        }
-      }
-    } catch {
-      // 没有配置文件 → 该壁纸无组件，清空桌面
-      store.set('widgets', [])
-      const canvas = getCanvasWindow()
-      if (canvas && !canvas.isDestroyed()) {
-        canvas.webContents.send(IPC.WIDGET_SYNC, [])
-      }
-    }
+    await loadWidgetsForWallpaper(item.id)
 
     return true
   })

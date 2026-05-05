@@ -1078,6 +1078,13 @@ button {
   gap: 24px;
   margin-bottom: 48px;
 }
+.icon-manager-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 32px;
+}
 .component-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -1114,6 +1121,15 @@ button {
 .comp-card--nobg:hover {
   box-shadow: none;
   border-color: rgba(255, 255, 255, 0.35);
+}
+.icon-manager-card {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+}
+.icon-manager-card:hover {
+  transform: translateY(-2px) scale(1.01);
+  border-color: rgba(255, 255, 255, 0.38);
 }
 .comp-card--bordered {
   border: 1px solid var(--border-card);

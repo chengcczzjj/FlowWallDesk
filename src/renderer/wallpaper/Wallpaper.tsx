@@ -30,6 +30,58 @@ function flipToTransform(f?: string): string {
   }
 }
 
+function getSourceSize(source: CanvasImageSource): { width: number; height: number } {
+  if (source instanceof HTMLVideoElement) {
+    return { width: source.videoWidth || source.clientWidth || 1, height: source.videoHeight || source.clientHeight || 1 }
+  }
+  if (source instanceof HTMLImageElement) {
+    return { width: source.naturalWidth || source.clientWidth || 1, height: source.naturalHeight || source.clientHeight || 1 }
+  }
+  return { width: 1, height: 1 }
+}
+
+function drawWallpaperFrame(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  width: number,
+  height: number,
+  objectFit: React.CSSProperties['objectFit'],
+  transform: string
+): void {
+  const sourceSize = getSourceSize(source)
+  let drawWidth = width
+  let drawHeight = height
+  let drawX = 0
+  let drawY = 0
+
+  if (objectFit === 'cover' || objectFit === 'contain' || objectFit === 'scale-down') {
+    const scale = objectFit === 'cover'
+      ? Math.max(width / sourceSize.width, height / sourceSize.height)
+      : Math.min(width / sourceSize.width, height / sourceSize.height)
+    drawWidth = sourceSize.width * scale
+    drawHeight = sourceSize.height * scale
+    drawX = (width - drawWidth) / 2
+    drawY = (height - drawHeight) / 2
+  } else if (objectFit === 'none') {
+    drawWidth = sourceSize.width
+    drawHeight = sourceSize.height
+    drawX = (width - drawWidth) / 2
+    drawY = (height - drawHeight) / 2
+  }
+
+  ctx.clearRect(0, 0, width, height)
+  ctx.save()
+  if (transform === 'scaleX(-1)') {
+    ctx.translate(width, 0)
+    ctx.scale(-1, 1)
+  } else if (transform === 'scaleY(-1)') {
+    ctx.translate(0, height)
+    ctx.scale(1, -1)
+  }
+  ctx.drawImage(source, drawX, drawY, drawWidth, drawHeight)
+  ctx.restore()
+}
+
 /** 壁纸窗口：根据 type 渲染 video / image / web(iframe)。 */
 export function Wallpaper() {
   const [item, setItem] = useState<WallpaperItem | null>(null)
@@ -42,6 +94,8 @@ export function Wallpaper() {
   const [speed, setSpeed] = useState(1.0)
   const [scaling, setScaling] = useState('覆盖')
   const [flip, setFlip] = useState('无')
+  const objectFit = scalingToFit(scaling)
+  const transform = flipToTransform(flip)
 
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -49,8 +103,9 @@ export function Wallpaper() {
 
   useEffect(() => {
     const c = document.createElement('canvas')
-    c.width = 512
-    c.height = 288
+    const aspect = Math.max(0.1, window.screen.height / Math.max(1, window.screen.width))
+    c.width = 768
+    c.height = Math.max(1, Math.round(c.width * aspect))
     captureCanvasRef.current = c
     return () => {
       if (captureTimerRef.current) clearInterval(captureTimerRef.current)
@@ -69,10 +124,10 @@ export function Wallpaper() {
       source = imgRef.current
     }
     if (!source) return
-    ctx.drawImage(source, 0, 0, 512, 288)
-    const data = c.toDataURL('image/jpeg', 0.5)
+    drawWallpaperFrame(ctx, source, c.width, c.height, objectFit, transform)
+    const data = c.toDataURL('image/jpeg', 0.62)
     window.wallpaperBridge?.sendFrame?.(data)
-  }, [])
+  }, [objectFit, transform])
 
   // 根据壁纸类型启动/停止抽帧
   const pausedRef = useRef(false)
@@ -246,8 +301,6 @@ export function Wallpaper() {
     </div>
   ) : null
 
-  const objectFit = scalingToFit(scaling)
-  const transform = flipToTransform(flip)
   const mediaStyle: React.CSSProperties = {
     width: '100%',
     height: '100%',

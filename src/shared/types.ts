@@ -43,6 +43,47 @@ export interface WidgetInstance {
   config?: Record<string, unknown>
 }
 
+/** 桌面图标收纳条目 */
+export interface DesktopIconItem {
+  id: string
+  name: string
+  originalPath: string
+  managedPath: string
+  iconData?: string
+  targetPath?: string
+  targetArgs?: string
+  workingDirectory?: string
+  iconSourcePath?: string
+  iconIndex?: number
+  externalUrl?: string
+  extension?: string
+  isDirectory?: boolean
+  removedFromDesktop: boolean
+  x?: number
+  y?: number
+  order?: number
+  addedAt: number
+}
+
+export interface DesktopIconImportResult {
+  ok: boolean
+  items: DesktopIconItem[]
+  skipped?: string[]
+  error?: string
+}
+
+export interface DesktopIconLaunchResult {
+  ok: boolean
+  error?: string
+}
+
+export interface DesktopIconRestoreResult {
+  ok: boolean
+  restored: string[]
+  skipped: string[]
+  error?: string
+}
+
 /* ===== 数据服务类型 ===== */
 
 /** 新闻条目 */

@@ -1,5 +1,7 @@
 import { app, BrowserWindow } from 'electron'
-import { electronApp, optimizer } from '@electron-toolkit/utils'
+import { mkdirSync, rmSync } from 'fs'
+import { join } from 'path'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { createMainWindow, getMainWindow } from './windows/mainWindow'
 import { createWallpaperWindow } from './windows/wallpaperWindow'
 import { createCanvasWindow } from './windows/canvasWindow'
@@ -7,6 +9,7 @@ import { createTray } from './tray'
 import { registerAppIpc } from './ipc/appIpc'
 import { registerWallpaperIpc, restoreWallpaper } from './ipc/wallpaperIpc'
 import { registerWidgetIpc, restoreWidgets } from './ipc/widgetIpc'
+import { registerDesktopIconIpc } from './ipc/desktopIconIpc'
 import { registerDataIpc } from './ipc/dataIpc'
 import { registerChatIpc } from './ipc/chatIpc'
 import { registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
@@ -14,6 +17,27 @@ import { initMemorySystem } from './memory'
 
 // 必须在 app.ready 之前注册
 registerAssetSchemePrivileged()
+
+// 开发模式下把 Chromium 会话缓存挪到临时目录，避免默认 profile 缓存权限冲突刷屏。
+if (is.dev) {
+  const sessionDataPath = join(app.getPath('temp'), 'LingyueDesk', `electron-session-${process.pid}`)
+  const diskCachePath = join(sessionDataPath, 'Cache')
+  try {
+    mkdirSync(diskCachePath, { recursive: true })
+    app.setPath('sessionData', sessionDataPath)
+    app.commandLine.appendSwitch('disk-cache-dir', diskCachePath)
+    app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+    app.on('will-quit', () => {
+      try {
+        rmSync(sessionDataPath, { recursive: true, force: true })
+      } catch {
+        // ignore
+      }
+    })
+  } catch (error) {
+    console.warn('[startup] 开发缓存目录配置失败：', error)
+  }
+}
 
 // 单实例
 const gotTheLock = app.requestSingleInstanceLock()
@@ -42,6 +66,7 @@ app.whenReady().then(async () => {
   registerAppIpc()
   registerWallpaperIpc()
   registerWidgetIpc()
+  registerDesktopIconIpc()
   registerDataIpc()
   registerChatIpc()
 

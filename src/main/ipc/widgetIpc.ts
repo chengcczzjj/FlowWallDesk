@@ -4,12 +4,74 @@ import { join } from 'path'
 import { IPC } from '@shared/ipc-channels'
 import type { WidgetInstance } from '@shared/types'
 import { store } from '../store'
-import { getCanvasWindow, setCanvasEditMode } from '../windows/canvasWindow'
+import { getCanvasWindow, isCanvasEditMode, setCanvasEditMode, setCanvasMousePassthrough } from '../windows/canvasWindow'
+import { restoreDesktopIconsForWidget } from './desktopIconIpc'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
 const EDGE_PADDING = 24    // 距屏幕边缘间距
-const TASKBAR_MARGIN = 56  // 屏幕底部预留（开始菜单/任务栏）
+const BOTTOM_EDGE_PADDING = EDGE_PADDING
+const GLOBAL_ICON_WIDGET_TYPES = ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock']
+
+function canAddMultipleWidgetType(type: string): boolean {
+  return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive'].includes(type)
+}
+
+function isGlobalIconWidgetType(type: string): boolean {
+  return GLOBAL_ICON_WIDGET_TYPES.includes(type)
+}
+
+function getWallpaperScopedWidgets(widgets: WidgetInstance[]): WidgetInstance[] {
+  return widgets.filter((widget) => !isGlobalIconWidgetType(widget.type))
+}
+
+function getIconWidgets(widgets: WidgetInstance[]): WidgetInstance[] {
+  return widgets.filter((widget) => isGlobalIconWidgetType(widget.type))
+}
+
+function readStoredGlobalIconWidgets(): WidgetInstance[] | undefined {
+  const stored = store.get('globalIconWidgets')
+  return Array.isArray(stored) ? stored : undefined
+}
+
+function persistWidgets(widgets: WidgetInstance[]): void {
+  store.set('widgets', widgets)
+  store.set('globalIconWidgets', getIconWidgets(widgets))
+}
+
+async function readWallpaperWidgetConfig(wallpaperId: string): Promise<WidgetInstance[]> {
+  const wpRoot = getWallpaperRoot()
+  const configPath = join(wpRoot, wallpaperId, 'widget-config.json')
+  const txt = await fs.readFile(configPath, 'utf-8')
+  const data = JSON.parse(txt)
+  return data.widgets && Array.isArray(data.widgets) ? data.widgets : []
+}
+
+function resolveGlobalIconWidgets(wallpaperWidgets: WidgetInstance[]): WidgetInstance[] {
+  const storedGlobal = readStoredGlobalIconWidgets()
+  if (storedGlobal) return storedGlobal
+
+  const legacyRuntimeIcons = getIconWidgets(store.get('widgets'))
+  const migrated = legacyRuntimeIcons.length > 0 ? legacyRuntimeIcons : getIconWidgets(wallpaperWidgets)
+  store.set('globalIconWidgets', migrated)
+  return migrated
+}
+
+export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<WidgetInstance[]> {
+  let wallpaperWidgets: WidgetInstance[] = []
+  if (wallpaperId) {
+    try {
+      wallpaperWidgets = await readWallpaperWidgetConfig(wallpaperId)
+    } catch {
+      wallpaperWidgets = []
+    }
+  }
+
+  const merged = [...getWallpaperScopedWidgets(wallpaperWidgets), ...resolveGlobalIconWidgets(wallpaperWidgets)]
+  persistWidgets(merged)
+  syncToCanvas()
+  return merged
+}
 
 /** 根据 workArea 和已有组件，自动计算不重叠的放置位置 */
 function findPlacement(
@@ -18,10 +80,10 @@ function findPlacement(
   existing: WidgetInstance[]
 ): { x: number; y: number } {
   const display = screen.getPrimaryDisplay()
-  const area = display.workAreaSize
+  const area = display.bounds
 
   const maxX = area.width - EDGE_PADDING - w
-  const maxY = area.height - TASKBAR_MARGIN - h
+  const maxY = area.height - BOTTOM_EDGE_PADDING - h
 
   // 检查 (x,y) 是否与已有组件重叠
   const overlaps = (x: number, y: number): boolean =>
@@ -55,7 +117,7 @@ export function snapToGrid(x: number, y: number): { x: number; y: number } {
 
 /**
  * 综合处理：网格吸附 → 屏幕边界约束 → 重叠自动避让。
- * 返回离期望位置最近的、不与其他组件或任务栏重叠的合法坐标。
+ * 返回离期望位置最近的、不与其他组件重叠的合法坐标。
  */
 function resolvePosition(
   id: string,
@@ -63,20 +125,21 @@ function resolvePosition(
   y: number,
   w: number,
   h: number,
-  allWidgets: WidgetInstance[]
+  allWidgets: WidgetInstance[],
+  snapPosition = true
 ): { x: number; y: number } {
   const display = screen.getPrimaryDisplay()
-  const area = display.workAreaSize
+  const area = display.bounds
 
   // 1. 网格吸附
-  let sx = Math.round(x / GRID_GAP) * GRID_GAP
-  let sy = Math.round(y / GRID_GAP) * GRID_GAP
+  let sx = snapPosition ? Math.round(x / GRID_GAP) * GRID_GAP : x
+  let sy = snapPosition ? Math.round(y / GRID_GAP) * GRID_GAP : y
 
   // 2. 屏幕边界约束
   const minX = EDGE_PADDING
   const minY = EDGE_PADDING
   const maxX = area.width - EDGE_PADDING - w
-  const maxY = area.height - TASKBAR_MARGIN - h
+  const maxY = area.height - BOTTOM_EDGE_PADDING - h
   sx = Math.max(minX, Math.min(sx, Math.max(minX, maxX)))
   sy = Math.max(minY, Math.min(sy, Math.max(minY, maxY)))
 
@@ -139,7 +202,7 @@ function autoSaveToWallpaper(): void {
       if (!current) return
       const wpRoot = getWallpaperRoot()
       const folder = join(wpRoot, current.id)
-      const widgets = store.get('widgets')
+      const widgets = getWallpaperScopedWidgets(store.get('widgets'))
       await fs.writeFile(
         join(folder, 'widget-config.json'),
         JSON.stringify({ widgets }, null, 2),
@@ -154,8 +217,8 @@ export function registerWidgetIpc(): void {
 
   ipcMain.handle(IPC.WIDGET_ADD, (_e, w: WidgetInstance) => {
     const list = store.get('widgets')
-    // Each widget type can only have one instance
-    if (list.some((existing) => existing.type === w.type)) {
+    // Most widget types are single-instance; icon storage containers can have multiple copies.
+    if (!canAddMultipleWidgetType(w.type) && list.some((existing) => existing.type === w.type)) {
       return list
     }
     // Auto-place: find non-overlapping position from top-left
@@ -163,15 +226,19 @@ export function registerWidgetIpc(): void {
     w.x = x
     w.y = y
     list.push(w)
-    store.set('widgets', list)
+    persistWidgets(list)
     syncToCanvas()
     autoSaveToWallpaper()
+    if (!isCanvasEditMode()) setCanvasMousePassthrough(true)
     return list
   })
 
-  ipcMain.handle(IPC.WIDGET_REMOVE, (_e, id: string) => {
-    const list = store.get('widgets').filter((w) => w.id !== id)
-    store.set('widgets', list)
+  ipcMain.handle(IPC.WIDGET_REMOVE, async (_e, id: string) => {
+    const widgets = store.get('widgets')
+    const target = widgets.find((w) => w.id === id)
+    if (target) await restoreDesktopIconsForWidget(target)
+    const list = widgets.filter((w) => w.id !== id)
+    persistWidgets(list)
     syncToCanvas()
     autoSaveToWallpaper()
     return list
@@ -180,11 +247,11 @@ export function registerWidgetIpc(): void {
   ipcMain.handle(IPC.WIDGET_UPDATE, (_e, w: WidgetInstance) => {
     const list = store.get('widgets')
     // 网格吸附 + 边界约束 + 重叠避让
-    const resolved = resolvePosition(w.id, w.x, w.y, w.width, w.height, list)
+    const resolved = resolvePosition(w.id, w.x, w.y, w.width, w.height, list, !canAddMultipleWidgetType(w.type))
     w.x = resolved.x
     w.y = resolved.y
     const updated = list.map((it) => (it.id === w.id ? { ...it, ...w } : it))
-    store.set('widgets', updated)
+    persistWidgets(updated)
     syncToCanvas()
     autoSaveToWallpaper()
     return updated
@@ -196,7 +263,7 @@ export function registerWidgetIpc(): void {
     const updated = list.map((it) =>
       it.id === id ? { ...it, config: { ...(it.config || {}), ...config } } : it
     )
-    store.set('widgets', updated)
+    persistWidgets(updated)
     syncToCanvas()
     autoSaveToWallpaper()
     return updated
@@ -228,11 +295,16 @@ export function registerWidgetIpc(): void {
         { type: 'separator' },
         {
           label: '删除',
-          click: () => {
+          click: async () => {
             resolved = true
-            const list = store.get('widgets').filter((w) => w.id !== widgetId)
-            store.set('widgets', list)
+            const widgets = store.get('widgets')
+            const target = widgets.find((w) => w.id === widgetId)
+            if (target) await restoreDesktopIconsForWidget(target)
+            const list = widgets.filter((w) => w.id !== widgetId)
+            persistWidgets(list)
             syncToCanvas()
+            autoSaveToWallpaper()
+            if (!isCanvasEditMode()) setCanvasMousePassthrough(true)
             resolve('delete')
           },
         },
@@ -256,7 +328,7 @@ export function registerWidgetIpc(): void {
       if (!current) return false
       const wpRoot = getWallpaperRoot()
       const folder = join(wpRoot, current.id)
-      const widgets = store.get('widgets')
+      const widgets = getWallpaperScopedWidgets(store.get('widgets'))
       await fs.writeFile(
         join(folder, 'widget-config.json'),
         JSON.stringify({ widgets }, null, 2),
@@ -272,16 +344,8 @@ export function registerWidgetIpc(): void {
   // 加载壁纸文件夹中的组件配置
   ipcMain.handle(IPC.WIDGET_CONFIG_LOAD, async (_e, wallpaperId: string) => {
     try {
-      const wpRoot = getWallpaperRoot()
-      const configPath = join(wpRoot, wallpaperId, 'widget-config.json')
-      const txt = await fs.readFile(configPath, 'utf-8')
-      const data = JSON.parse(txt)
-      if (data.widgets && Array.isArray(data.widgets)) {
-        store.set('widgets', data.widgets)
-        syncToCanvas()
-        return true
-      }
-      return false
+      await loadWidgetsForWallpaper(wallpaperId)
+      return true
     } catch {
       return false
     }
@@ -305,28 +369,8 @@ const WIDGET_SIZE_MAP: Record<string, { w: number; h: number }> = {
 }
 
 export async function restoreWidgets(): Promise<void> {
-  // 尝试从当前壁纸文件夹加载组件配置
-  let loaded = false
-  try {
-    const current = store.get('wallpaper')?.current
-    if (current) {
-      const wpRoot = getWallpaperRoot()
-      const configPath = join(wpRoot, current.id, 'widget-config.json')
-      const txt = await fs.readFile(configPath, 'utf-8')
-      const data = JSON.parse(txt)
-      if (data.widgets && Array.isArray(data.widgets)) {
-        store.set('widgets', data.widgets)
-        loaded = true
-      }
-    }
-  } catch {
-    // 没有壁纸级配置
-  }
-
-  // 如果壁纸目录没有 widget-config.json，清空组件
-  if (!loaded) {
-    store.set('widgets', [])
-  }
+  const current = store.get('wallpaper')?.current
+  await loadWidgetsForWallpaper(current?.id)
 
   // 迁移旧版组件尺寸到标准尺寸
   const widgets = store.get('widgets') as WidgetInstance[]
@@ -341,7 +385,7 @@ export async function restoreWidgets(): Promise<void> {
     }
   }
   if (changed) {
-    store.set('widgets', widgets)
+    persistWidgets(widgets)
     // 通知画布更新
     const canvas = getCanvasWindow()
     if (canvas && !canvas.isDestroyed()) {

@@ -9,6 +9,8 @@ interface ModelSettings {
 interface Schema {
   wallpaper: WallpaperState
   widgets: WidgetInstance[]
+  /** 跨壁纸保存的图标收纳与 Dock 组件 */
+  globalIconWidgets?: WidgetInstance[]
   /** 主界面窗口最后位置 */
   mainWindowBounds?: { x: number; y: number; width: number; height: number }
   /** AI 模型配置 */

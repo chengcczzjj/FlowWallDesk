@@ -13,9 +13,10 @@ import { WhiteNoiseWidget } from './WhiteNoise/WhiteNoise'
 import { ElegantClock } from './ElegantClock/ElegantClock'
 import { PixelClock } from './PixelClock/PixelClock'
 import { GraphicDateTime } from './GraphicDateTime/GraphicDateTime'
+import { DesktopIconAdaptive, DesktopIconBox, DesktopIconDock, DesktopIconHorizontal } from './DesktopIcons/DesktopIcons'
 
 /** 组件类型 → 组件实现 的注册表 */
-export function renderWidget(w: WidgetInstance) {
+export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; resizing?: boolean }) {
   switch (w.type) {
     case 'clock':
       return <Clock config={w.config} />
@@ -25,6 +26,14 @@ export function renderWidget(w: WidgetInstance) {
       return <PixelClock config={w.config} />
     case 'graphicdatetime':
       return <GraphicDateTime config={w.config} />
+    case 'desktop-icons-box':
+      return <DesktopIconBox widget={w} editing={Boolean(options?.editing)} resizing={Boolean(options?.resizing)} />
+    case 'desktop-icons-horizontal':
+      return <DesktopIconHorizontal widget={w} editing={Boolean(options?.editing)} resizing={Boolean(options?.resizing)} />
+    case 'desktop-icons-adaptive':
+      return <DesktopIconAdaptive widget={w} editing={Boolean(options?.editing)} resizing={Boolean(options?.resizing)} />
+    case 'desktop-icons-dock':
+      return <DesktopIconDock widget={w} editing={Boolean(options?.editing)} />
     case 'calendar':
       return <CalendarWidget />
     case 'sysmonitor':
@@ -52,17 +61,46 @@ export function renderWidget(w: WidgetInstance) {
 
 /** 判断组件类型是否支持浮动工具栏（无底板组件） */
 export function hasFloatingToolbar(type: string): boolean {
-  return ['clock', 'elegantclock', 'pixelclock', 'graphicdatetime', 'audio', 'weather', 'whitenoise'].includes(type)
+  return [
+    'clock',
+    'elegantclock',
+    'pixelclock',
+    'graphicdatetime',
+    'audio',
+    'weather',
+    'whitenoise',
+    'desktop-icons-box',
+    'desktop-icons-horizontal',
+    'desktop-icons-adaptive',
+    'desktop-icons-dock',
+  ].includes(type)
 }
 
 /** 判断组件类型是否为悬浮组件（可自由调整大小） */
 export function isFloatingType(type: string): boolean {
-  return ['clock', 'elegantclock', 'pixelclock', 'graphicdatetime', 'audio', 'weather', 'whitenoise', 'text'].includes(
-    type
-  )
+  return [
+    'clock',
+    'elegantclock',
+    'pixelclock',
+    'graphicdatetime',
+    'audio',
+    'weather',
+    'whitenoise',
+    'text',
+    'desktop-icons-box',
+    'desktop-icons-horizontal',
+    'desktop-icons-adaptive',
+    'desktop-icons-dock',
+  ].includes(type)
 }
 
 /** 判断组件是否为自适应填充类型（不按 naturalSize 等比缩放，而是 stretch-fill） */
 export function isStretchFillType(type: string): boolean {
-  return type === 'audio'
+  return (
+    type === 'audio' ||
+    type === 'desktop-icons-box' ||
+    type === 'desktop-icons-horizontal' ||
+    type === 'desktop-icons-adaptive' ||
+    type === 'desktop-icons-dock'
+  )
 }

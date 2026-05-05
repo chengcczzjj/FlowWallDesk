@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { WidgetInstance, StockSymbol } from '@shared/types'
 import {
   Clock as ClockIcon,
@@ -22,6 +23,9 @@ import {
   Disc,
   Settings,
   RefreshCw,
+  Archive,
+  PanelBottom,
+  Trash2,
 } from 'lucide-react'
 import { getStylesForType } from '../../widgets/shared/constants'
 
@@ -79,6 +83,14 @@ const CARD_WIDGETS: WidgetCatalogItem[] = [
   { type: 'sysmonitor', name: '系统监控', icon: <Monitor size={20} />, size: 'medium' },
 ]
 
+/** 图标收纳组件（毛玻璃高透明度，可自由调大小） */
+const ICON_WIDGETS: WidgetCatalogItem[] = [
+  { type: 'desktop-icons-box', name: '纵向收纳', icon: <Archive size={20} />, size: 'small', floating: true },
+  { type: 'desktop-icons-horizontal', name: '横向收纳', icon: <Archive size={20} />, size: 'small', floating: true },
+  { type: 'desktop-icons-adaptive', name: '自适应收纳', icon: <Archive size={20} />, size: 'small', floating: true },
+  { type: 'desktop-icons-dock', name: '桌面 Dock', icon: <PanelBottom size={20} />, size: 'medium', floating: true },
+]
+
 /** 悬浮组件在桌面上的默认尺寸（0 表示 fit-content 自适应） */
 const FLOATING_DESKTOP_SIZES: Record<string, { w: number; h: number }> = {
   clock: { w: 0, h: 0 },
@@ -89,6 +101,14 @@ const FLOATING_DESKTOP_SIZES: Record<string, { w: number; h: number }> = {
   weather: { w: 0, h: 0 },
   whitenoise: { w: 0, h: 0 },
   text: { w: 0, h: 0 },
+  'desktop-icons-box': { w: 246, h: 344 },
+  'desktop-icons-horizontal': { w: 356, h: 242 },
+  'desktop-icons-adaptive': { w: 246, h: 242 },
+  'desktop-icons-dock': { w: 520, h: 82 },
+}
+
+function canAddMultipleWidgetType(type: string): boolean {
+  return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive'].includes(type)
 }
 
 /** 新闻来源选项 */
@@ -150,14 +170,18 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
 
   /** 已添加的组件类型集合 */
   const addedTypes = new Set(instances.map((i) => i.type))
+  const typeCounts = instances.reduce<Record<string, number>>((counts, item) => {
+    counts[item.type] = (counts[item.type] ?? 0) + 1
+    return counts
+  }, {})
 
   const addToDesktop = async (c: WidgetCatalogItem, config?: Record<string, unknown>) => {
-    if (addedTypes.has(c.type)) return
-    const id = `${c.type}-${Date.now()}`
+    if (!canAddMultipleWidgetType(c.type) && addedTypes.has(c.type)) return
+    const id = `${c.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const { w, h } =
       c.floating && FLOATING_DESKTOP_SIZES[c.type] ? FLOATING_DESKTOP_SIZES[c.type] : WIDGET_SIZES[c.size]
     const x = Math.round(window.screen.width / 2 - w / 2)
-    const y = Math.round(window.screen.height / 3 - h / 2)
+    const y = c.type === 'desktop-icons-dock' ? Math.max(24, Math.round(window.screen.height - h - 28)) : Math.round(window.screen.height / 3 - h / 2)
     const inst: WidgetInstance = { id, type: c.type, x, y, width: w, height: h, enabled: true, config }
     await window.lingyue.widget.add(inst)
     refresh()
@@ -169,6 +193,14 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
       await window.lingyue.widget.remove(inst.id)
       refresh()
     }
+  }
+
+  const removeAllFromDesktop = async (type: string) => {
+    const targets = instances.filter((i) => i.type === type)
+    for (const inst of targets) {
+      await window.lingyue.widget.remove(inst.id)
+    }
+    refresh()
   }
 
   /** 从已有桌面实例加载配置到设置状态 */
@@ -569,6 +601,23 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
             </div>
           </>
         )}
+
+        {subPage === 'widgets-icons' && (
+          <>
+            <div className="icon-manager-grid">
+              {ICON_WIDGETS.map((item) => (
+                <IconManagerPreview
+                  key={item.type}
+                  catalog={item}
+                  count={typeCounts[item.type] ?? 0}
+                  canAddMore={canAddMultipleWidgetType(item.type) || !addedTypes.has(item.type)}
+                  onAdd={() => addToDesktop(item, { items: [] })}
+                  onRemoveAll={() => removeAllFromDesktop(item.type)}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* ===== 设置弹窗 ===== */}
@@ -589,6 +638,297 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
           onClose={() => setSettingsDialog(null)}
         />
       )}
+    </div>
+  )
+}
+
+function IconManagerPreview({
+  catalog,
+  count,
+  canAddMore,
+  onAdd,
+  onRemoveAll,
+}: {
+  catalog: WidgetCatalogItem
+  count: number
+  canAddMore: boolean
+  onAdd: () => void
+  onRemoveAll: () => void
+}) {
+  const preview = getIconPreviewSpec(catalog.type)
+  const multi = canAddMultipleWidgetType(catalog.type)
+  return (
+    <div className="comp-card comp-card--nobg icon-manager-card" style={{ width: 196, height: 210 }}>
+      <div className="comp-content" style={{ position: 'relative', overflow: 'hidden', padding: 12, gap: 8, alignItems: 'center' }}>
+        <div style={iconManagerStageStyle}>
+          {catalog.type === 'desktop-icons-dock' ? <IconDockPreview /> : <IconBoxPreview variant={catalog.type} />}
+        </div>
+        <span style={{ ...iconManagerAccentStyle, background: preview.accent }} />
+        <div style={iconManagerNameRowStyle}>
+          <span style={iconManagerNameStyle}>{catalog.name}</span>
+          {count > 0 && <span style={iconManagerCountStyle}>{count}</span>}
+        </div>
+        {count > 0 && (
+          <button
+            type="button"
+            title={multi ? '全部删除' : '删除'}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemoveAll()
+            }}
+            style={iconManagerRemoveButtonStyle}
+          >
+            <Trash2 size={12} />
+            <span>{multi ? '全部删除' : '删除'}</span>
+          </button>
+        )}
+      </div>
+      {canAddMore && (
+        <div className="comp-hover-actions">
+          <button
+            className="comp-hover-btn btn-add"
+            title="添加到桌面"
+            onClick={(event) => {
+              event.stopPropagation()
+              onAdd()
+            }}
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface IconPreviewSpec {
+  columns: number
+  rows: number
+  iconSize: number
+  gap: number
+  surfaceWidth: number
+  surfaceHeight: number
+  count: number
+  accent: string
+}
+
+const ICON_PREVIEW_COLORS = ['#60a5fa', '#34d399', '#f59e0b', '#f472b6', '#a78bfa', '#22d3ee']
+
+const ICON_PREVIEW_SPECS: Record<string, IconPreviewSpec> = {
+  'desktop-icons-box': {
+    columns: 2,
+    rows: 3,
+    iconSize: 20,
+    gap: 6,
+    surfaceWidth: 90,
+    surfaceHeight: 118,
+    count: 6,
+    accent: '#38bdf8',
+  },
+  'desktop-icons-horizontal': {
+    columns: 3,
+    rows: 2,
+    iconSize: 20,
+    gap: 8,
+    surfaceWidth: 126,
+    surfaceHeight: 94,
+    count: 6,
+    accent: '#34d399',
+  },
+  'desktop-icons-adaptive': {
+    columns: 2,
+    rows: 2,
+    iconSize: 24,
+    gap: 9,
+    surfaceWidth: 104,
+    surfaceHeight: 104,
+    count: 4,
+    accent: '#f59e0b',
+  },
+}
+
+const iconManagerNameRowStyle: CSSProperties = {
+  width: '100%',
+  minHeight: 22,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  minWidth: 0,
+}
+
+const iconManagerNameStyle: CSSProperties = {
+  minWidth: 0,
+  color: 'var(--text-primary)',
+  fontSize: 13,
+  fontWeight: 600,
+  lineHeight: '20px',
+  textAlign: 'center',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
+const iconManagerCountStyle: CSSProperties = {
+  minWidth: 18,
+  height: 18,
+  padding: '0 6px',
+  borderRadius: 999,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(15,23,42,0.12)',
+  color: 'var(--text-primary)',
+  fontSize: 11,
+  fontWeight: 700,
+  lineHeight: '18px',
+}
+
+const iconManagerStageStyle: CSSProperties = {
+  width: '100%',
+  height: 120,
+  flex: '0 0 auto',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+}
+
+const iconManagerAccentStyle: CSSProperties = {
+  width: 28,
+  height: 3,
+  flex: '0 0 auto',
+  borderRadius: 999,
+  opacity: 0.72,
+}
+
+const iconManagerRemoveButtonStyle: CSSProperties = {
+  height: 24,
+  padding: '0 10px',
+  border: '1px solid rgba(239,68,68,0.22)',
+  borderRadius: 999,
+  background: 'rgba(239,68,68,0.1)',
+  color: 'rgba(185,28,28,0.9)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 5,
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'pointer',
+  flex: '0 0 auto',
+}
+
+function IconBoxPreview({ variant }: { variant: string }) {
+  const spec = getIconPreviewSpec(variant)
+  return (
+    <div
+      style={{
+        width: spec.surfaceWidth,
+        height: spec.surfaceHeight,
+        boxSizing: 'border-box',
+        position: 'relative',
+        borderRadius: 14,
+        border: '1px solid rgba(255,255,255,0.52)',
+        background: 'linear-gradient(145deg, rgba(255,255,255,0.48), rgba(255,255,255,0.16))',
+        boxShadow: '0 14px 28px rgba(15,23,42,0.13), inset 0 1px 0 rgba(255,255,255,0.58)',
+        display: 'grid',
+        gridTemplateColumns: `repeat(${spec.columns}, ${spec.iconSize}px)`,
+        gridTemplateRows: `repeat(${spec.rows}, ${spec.iconSize + 7}px)`,
+        alignContent: 'center',
+        justifyItems: 'center',
+        justifyContent: 'center',
+        gap: spec.gap,
+        padding: 8,
+      }}
+    >
+      {Array.from({ length: spec.count }).map((_, index) => {
+        const color = ICON_PREVIEW_COLORS[index % ICON_PREVIEW_COLORS.length]
+        return (
+          <div key={`${variant}-${index}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div
+              style={{
+                width: spec.iconSize,
+                height: spec.iconSize,
+                borderRadius: Math.max(6, spec.iconSize * 0.32),
+                background: `linear-gradient(145deg, ${color}, rgba(255,255,255,0.82))`,
+                boxShadow: '0 6px 12px rgba(15,23,42,0.16)',
+              }}
+            />
+            <div style={{ width: spec.iconSize, height: 3, borderRadius: 4, background: 'rgba(15,23,42,0.14)' }} />
+          </div>
+        )
+      })}
+      {variant === 'desktop-icons-box' && <div style={verticalPreviewHintStyle} />}
+      {variant === 'desktop-icons-horizontal' && <div style={horizontalPreviewHintStyle} />}
+    </div>
+  )
+}
+
+function getIconPreviewSpec(type: string): IconPreviewSpec {
+  return (
+    ICON_PREVIEW_SPECS[type] ?? {
+      columns: 4,
+      rows: 1,
+      iconSize: 20,
+      gap: 8,
+      surfaceWidth: 126,
+      surfaceHeight: 54,
+      count: 4,
+      accent: '#818cf8',
+    }
+  )
+}
+
+const verticalPreviewHintStyle: CSSProperties = {
+  position: 'absolute',
+  right: 6,
+  top: 18,
+  width: 3,
+  height: 82,
+  borderRadius: 999,
+  background: 'linear-gradient(180deg, rgba(56,189,248,0.12), rgba(56,189,248,0.58), rgba(56,189,248,0.12))',
+}
+
+const horizontalPreviewHintStyle: CSSProperties = {
+  position: 'absolute',
+  left: 16,
+  right: 16,
+  bottom: 6,
+  height: 3,
+  borderRadius: 999,
+  background: 'linear-gradient(90deg, rgba(52,211,153,0.12), rgba(52,211,153,0.58), rgba(52,211,153,0.12))',
+}
+
+function IconDockPreview() {
+  return (
+    <div
+      style={{
+        width: 126,
+        height: 68,
+        boxSizing: 'border-box',
+        borderRadius: 18,
+        border: '1px solid rgba(255,255,255,0.52)',
+        background: 'linear-gradient(145deg, rgba(255,255,255,0.46), rgba(255,255,255,0.16))',
+        boxShadow: '0 14px 28px rgba(15,23,42,0.13), inset 0 1px 0 rgba(255,255,255,0.58)',
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        gap: 7,
+        padding: '0 12px 9px',
+      }}
+    >
+      {[24, 32, 42, 32, 24].map((size, index) => (
+        <div
+          key={`${size}-${index}`}
+          style={{
+            width: size,
+            height: size,
+            borderRadius: Math.max(7, size * 0.26),
+            background: `linear-gradient(145deg, hsl(${196 + index * 34} 80% 62%), rgba(255,255,255,0.82))`,
+            boxShadow: '0 8px 15px rgba(15,23,42,0.17)',
+          }}
+        />
+      ))}
     </div>
   )
 }

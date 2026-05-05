@@ -1,6 +1,15 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WidgetInstance, NewsItem, StockItem, StockSymbol, ApiEndpointMeta } from '@shared/types'
+import type {
+  WidgetInstance,
+  NewsItem,
+  StockItem,
+  StockSymbol,
+  ApiEndpointMeta,
+  DesktopIconImportResult,
+  DesktopIconItem,
+  DesktopIconLaunchResult,
+} from '@shared/types'
 
 const api = {
   onSync: (cb: (list: WidgetInstance[]) => void): (() => void) => {
@@ -9,6 +18,7 @@ const api = {
     return () => ipcRenderer.off(IPC.WIDGET_SYNC, handler)
   },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
+  getFilePath: (file: File): string => webUtils.getPathForFile(file),
   setIgnoreMouse: (ignore: boolean): void => {
     ipcRenderer.send(IPC.CANVAS_SET_IGNORE_MOUSE, ignore)
   },
@@ -27,6 +37,15 @@ const api = {
   /** 保存当前组件配置到壁纸文件夹 */
   saveWidgetConfig: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.WIDGET_CONFIG_SAVE),
+  importDesktopIcons: (widgetId: string, filePaths: string[]): Promise<DesktopIconImportResult> =>
+    ipcRenderer.invoke(IPC.DESKTOP_ICON_IMPORT, widgetId, filePaths),
+  launchDesktopIcon: (item: DesktopIconItem): Promise<DesktopIconLaunchResult> =>
+    ipcRenderer.invoke(IPC.DESKTOP_ICON_LAUNCH, item),
+  refreshDesktopIcons: (items: DesktopIconItem[]): Promise<DesktopIconItem[]> =>
+    ipcRenderer.invoke(IPC.DESKTOP_ICON_REFRESH, items),
+  openSettings: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_SETTINGS),
+  openExplorer: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_EXPLORER),
+  showDesktop: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_SHOW_DESKTOP),
   /** 监听壁纸抽帧（用于毛玻璃效果） */
   onFrame: (cb: (data: string) => void): (() => void) => {
     const handler = (_: unknown, data: string) => cb(data)

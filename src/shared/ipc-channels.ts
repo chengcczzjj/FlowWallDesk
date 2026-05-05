@@ -6,6 +6,10 @@ export const IPC = {
   // 应用 / 窗口
   APP_QUIT: 'app:quit',
   APP_SHOW_MAIN: 'app:show-main',
+  APP_NAVIGATE: 'app:navigate',
+  APP_OPEN_SETTINGS: 'app:open-settings',
+  APP_OPEN_EXPLORER: 'app:open-explorer',
+  APP_SHOW_DESKTOP: 'app:show-desktop',
   APP_GET_VERSION: 'app:get-version',
   WIN_MINIMIZE: 'win:minimize',
   WIN_MAXIMIZE_TOGGLE: 'win:maximize-toggle',
@@ -33,6 +37,9 @@ export const IPC = {
   WIDGET_UPDATE_CONFIG: 'widget:update-config',
   WIDGET_CONFIG_SAVE: 'widget:config-save',
   WIDGET_CONFIG_LOAD: 'widget:config-load',
+  DESKTOP_ICON_IMPORT: 'desktop-icon:import',
+  DESKTOP_ICON_LAUNCH: 'desktop-icon:launch',
+  DESKTOP_ICON_REFRESH: 'desktop-icon:refresh',
   // 主进程 → 画布
   WIDGET_SYNC: 'widget:sync',
   // 画布 → 主进程：鼠标穿透切换
