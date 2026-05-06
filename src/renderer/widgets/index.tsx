@@ -49,7 +49,7 @@ export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; r
     case 'quicktools':
       return <QuickToolsWidget />
     case 'pet':
-      return <PetWidget />
+      return <PetWidget config={w.config} />
     case 'audio':
       return <AudioWidget config={w.config} />
     case 'whitenoise':

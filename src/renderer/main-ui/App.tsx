@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { LibraryPage } from './pages/LibraryPage'
 import { EmptyPage } from './pages/EmptyPage'
 import { WidgetsPage } from './pages/WidgetsPage'
+import { PixelPetPage } from './pages/pet/PixelPetPage'
 import { ChatPage } from './pages/chat/ChatPage'
 import { SettingsGeneralPage } from './pages/settings/SettingsGeneralPage'
 import { AddWallpaperDialog } from './components/AddWallpaperDialog'
@@ -41,7 +42,10 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
       { id: 'widgets-icons', label: '图标收纳' },
     ],
   },
-  pet: { label: '桌宠' },
+  pet: {
+    label: '桌宠',
+    pages: [{ id: 'pet-pixel', label: '像素宠物' }],
+  },
   settings: {
     label: '设置',
     pages: [
@@ -228,7 +232,7 @@ export function App() {
             {activity === 'widgets' && (
               <WidgetsPage subPage={subPage} />
             )}
-            {activity === 'pet' && <EmptyPage icon={<Cat size={48} />} title="桌宠" subtitle="规划中…" />}
+            {activity === 'pet' && subPage === 'pet-pixel' && <PixelPetPage />}
             {activity === 'settings' && subPage === 'settings-general' && (
               <SettingsGeneralPage />
             )}

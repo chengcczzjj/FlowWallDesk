@@ -1,5 +1,25 @@
 # 灵月桌面 开发日志
 
+## [2026-05-06 15:55] 接入像素宠物分页与高密度角色绘制
+
+**变更摘要**: 新增桌宠的像素宠物分页，接入默认鬣狗与晴蓝双角色、高密度像素绘制、动作库、模型生成入口和桌面 Pet widget 同步。
+
+**涉及模块**:
+
+- `src/renderer/main-ui/pages/pet/PixelPetPage.tsx` / `src/renderer/main-ui/styles.css` / `src/renderer/main-ui/App.tsx`: 新增像素宠物子分页，重做沉浸预览舞台、动作分类、宠物列表、配色、模型生成和输出控制。
+- `src/renderer/shared/pixel-pet.ts` / `src/renderer/shared/PixelPetCanvas.tsx`: 新增像素宠物状态、主题、默认宠物、Canvas 渲染循环，以及鬣狗和晴蓝 reference 高密度绘制管线。
+- `src/renderer/widgets/Pet/Pet.tsx` / `src/renderer/widgets/index.tsx`: 桌面 Pet 组件支持读取像素宠物配置并渲染当前动作。
+- `demo/pet-port-current/`: 保留干净参考预览、晴蓝动作 renderer、迁移指南和本地生成服务脚本。
+- `doc/project-status.md`: 更新 Pet 模块与桌宠分页进展。
+
+**遇到的问题**:
+
+- 只迁 UI 会导致角色外观和动作与参考预览不一致 → 将参考中的鬣狗与晴蓝高密度 renderer 分别迁入 shared 绘制管线，并为晴蓝单独保留全动作专用路径。
+
+**Git Commit**: 已提交 — feat(ui): add pixel pet page
+
+---
+
 ## [2026-05-06 15:42] 修复图标收纳与 Dock 稳定性问题
 
 **变更摘要**: 修复桌面图标收纳和 Dock 在真实使用中的导入、恢复、默认位置、批量拖拽和回收站兼容问题，并补充日志排查说明。

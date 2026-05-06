@@ -1,6 +1,6 @@
 # 灵月桌面 项目进展
 
-> 最后更新：2026-05-05
+> 最后更新：2026-05-06
 > 版本：0.1.0（早期开发）
 
 ## 技术栈
@@ -88,7 +88,7 @@
 | Stocks 自选股       | large 2×2    | ✅ 完成 | 双列网格最多6只，API 已对接    |
 | QuickTools 快捷工具 | medium 2×1   | ⚠️ 20%  | 仅 4 个按钮图标，无功能实现    |
 | SysMonitor 系统监控 | medium 2×1   | ⚠️ 20%  | 仅模拟数据，无真实系统信息采集 |
-| Pet 桌面萌宠        | small 1×1    | ⚠️ 10%  | 仅占位符                       |
+| Pet 桌面萌宠        | small 1×1    | ⚠️ 55%  | 像素宠物模式已接入，支持默认鬣狗/晴蓝、动作库和桌面同步，Q 版宠物待补 |
 
 **图标收纳组件（毛玻璃背景，可自由调大小）：**
 
@@ -120,6 +120,7 @@
 | 模态设置弹窗   | ✅ 完成 | WidgetSettingsDialog             |
 | 壁纸导入对话框 | ✅ 完成 | AddWallpaperDialog               |
 | 图标收纳管理   | ✅ 完成 | WidgetsPage 图标收纳子页，支持预览、数量、多实例和全部删除 |
+| 像素宠物分页   | ✅ 完成 | 桌宠 > 像素宠物子页，支持默认角色、动作预览、模型生成入口和同步桌面 |
 
 ### AI Chat / 本地工作区 Agent ✅ 82%
 
@@ -149,7 +150,7 @@
 ## 待办规划
 
 - [ ] QuickTools 功能实现（便签/截图/设置/重启）
-- [ ] Pet 桌面萌宠核心功能
+- [ ] Q 版桌宠分页与宠物行为增强
 - [ ] Audio 实时音频输入对接
 - [ ] Agent 文件变更审查与 checkpoint 恢复 UI 增强
 - [ ] 自动化任务规则编辑与运行历史详情
@@ -167,6 +168,9 @@
 | `src/renderer/widgets/shared/constants.tsx`       | 颜色主题定义                 |
 | `src/renderer/widgets/FrostedGlassBackground.tsx` | 毛玻璃通用组件               |
 | `src/renderer/widgets/DesktopIcons/DesktopIcons.tsx` | 图标收纳与桌面 Dock 组件     |
+| `src/renderer/main-ui/pages/pet/PixelPetPage.tsx`     | 像素宠物管理、动作预览和模型生成入口 |
+| `src/renderer/shared/pixel-pet.ts`                     | 像素宠物状态、主题、默认角色与 Canvas 绘制 |
+| `src/renderer/shared/PixelPetCanvas.tsx`                | 像素宠物 Canvas 渲染组件      |
 | `src/main/ipc/desktopIconIpc.ts`                  | 桌面图标导入、启动、刷新与恢复 IPC |
 | `assets/wallpaper/<id>/widget-config.json`        | 壁纸绑定的组件配置           |
 | `src/main/memory/`                                 | AI Chat 记忆、AgentRun 与工具系统 |
