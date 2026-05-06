@@ -5,13 +5,28 @@ import { IPC } from '@shared/ipc-channels'
 import type { WidgetInstance } from '@shared/types'
 import { store } from '../store'
 import { getCanvasWindow, isCanvasEditMode, setCanvasEditMode, setCanvasMousePassthrough } from '../windows/canvasWindow'
-import { restoreDesktopIconsForWidget } from './desktopIconIpc'
+import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIconIpc'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
 const EDGE_PADDING = 24    // 距屏幕边缘间距
 const BOTTOM_EDGE_PADDING = EDGE_PADDING
+const DOCK_DEFAULT_WIDTH = 340
+const DOCK_DEFAULT_HEIGHT = 88
+const DOCK_MIN_RESTORED_WIDTH = 240
+const DOCK_MIN_RESTORED_HEIGHT = 72
+const DOCK_BOTTOM_MARGIN = 72
 const GLOBAL_ICON_WIDGET_TYPES = ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock']
+const DEFAULT_DOCK_CONFIG: Record<string, unknown> = {
+  items: [],
+  dockStyle: 'glass',
+  dockTint: '#ffffff',
+  dockTintStrength: 0.1,
+  dockOpacity: 0.18,
+  dockBlur: 16,
+  dockReflection: false,
+  dockHoverScale: 1.58,
+}
 
 function canAddMultipleWidgetType(type: string): boolean {
   return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive'].includes(type)
@@ -19,6 +34,33 @@ function canAddMultipleWidgetType(type: string): boolean {
 
 function isGlobalIconWidgetType(type: string): boolean {
   return GLOBAL_ICON_WIDGET_TYPES.includes(type)
+}
+
+function withDefaultWidgetConfig(widget: WidgetInstance): WidgetInstance {
+  if (widget.type !== 'desktop-icons-dock') return widget
+  const config = widget.config ?? {}
+  const widthInvalid = typeof widget.width !== 'number' || !Number.isFinite(widget.width) || widget.width < DOCK_MIN_RESTORED_WIDTH
+  const heightInvalid = typeof widget.height !== 'number' || !Number.isFinite(widget.height) || widget.height < DOCK_MIN_RESTORED_HEIGHT
+  const positionInvalid = typeof widget.x !== 'number' || !Number.isFinite(widget.x) || typeof widget.y !== 'number' || !Number.isFinite(widget.y)
+  const width = widthInvalid ? DOCK_DEFAULT_WIDTH : widget.width
+  const height = heightInvalid ? DOCK_DEFAULT_HEIGHT : widget.height
+  const fallbackPlacement = widthInvalid || heightInvalid || positionInvalid ? getDockPlacement(width, height) : null
+  return {
+    ...widget,
+    x: fallbackPlacement?.x ?? widget.x,
+    y: fallbackPlacement?.y ?? widget.y,
+    width,
+    height,
+    config: {
+      ...DEFAULT_DOCK_CONFIG,
+      ...config,
+      items: Array.isArray(config.items) ? config.items : [],
+    },
+  }
+}
+
+function withDefaultWidgetConfigs(widgets: WidgetInstance[]): WidgetInstance[] {
+  return widgets.map((widget) => withDefaultWidgetConfig(widget))
 }
 
 function getWallpaperScopedWidgets(widgets: WidgetInstance[]): WidgetInstance[] {
@@ -67,7 +109,7 @@ export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<Wid
     }
   }
 
-  const merged = [...getWallpaperScopedWidgets(wallpaperWidgets), ...resolveGlobalIconWidgets(wallpaperWidgets)]
+  const merged = withDefaultWidgetConfigs([...getWallpaperScopedWidgets(wallpaperWidgets), ...resolveGlobalIconWidgets(wallpaperWidgets)])
   persistWidgets(merged)
   syncToCanvas()
   return merged
@@ -105,6 +147,17 @@ function findPlacement(
 
   // 全满了就放到右下角
   return { x: Math.max(EDGE_PADDING, maxX), y: Math.max(EDGE_PADDING, maxY) }
+}
+
+function getDockPlacement(width: number, height: number): { x: number; y: number } {
+  const display = screen.getPrimaryDisplay()
+  const area = display.bounds
+  const maxX = area.width - EDGE_PADDING - width
+  const maxY = area.height - BOTTOM_EDGE_PADDING - height
+  return {
+    x: Math.max(EDGE_PADDING, Math.min(Math.round((area.width - width) / 2), Math.max(EDGE_PADDING, maxX))),
+    y: Math.max(EDGE_PADDING, Math.min(Math.round(area.height - height - DOCK_BOTTOM_MARGIN), Math.max(EDGE_PADDING, maxY))),
+  }
 }
 
 /** 将坐标对齐到网格 */
@@ -212,8 +265,40 @@ function autoSaveToWallpaper(): void {
   }, 500)
 }
 
+async function removeWidgetWithRestore(id: string): Promise<{ list: WidgetInstance[]; deleted: boolean }> {
+  const widgets = store.get('widgets')
+  const target = widgets.find((w) => w.id === id)
+  if (!target) return { list: widgets, deleted: false }
+
+  const restoreResult = await restoreDesktopIconsForWidget(target)
+  if (!restoreResult.ok) {
+    const restoredIds = new Set(restoreResult.restoredItemIds ?? [])
+    const remainingItems = getDesktopIconItems(target).filter((item) => item.removedFromDesktop && !restoredIds.has(item.id))
+    if (target.type !== 'desktop-icons-dock' && remainingItems.length > 0) {
+      const retained = { ...target, config: { ...(target.config ?? {}), items: remainingItems } }
+      const updated = widgets.map((widget) => (widget.id === id ? retained : widget))
+      persistWidgets(updated)
+      syncToCanvas()
+      autoSaveToWallpaper()
+      console.warn('[widget] desktop icon restore incomplete, keeping widget:', restoreResult.skipped)
+      return { list: updated, deleted: false }
+    }
+    console.warn('[widget] desktop icon restore incomplete, removing widget:', restoreResult.skipped)
+  }
+
+  const list = widgets.filter((w) => w.id !== id)
+  persistWidgets(list)
+  syncToCanvas()
+  autoSaveToWallpaper()
+  return { list, deleted: true }
+}
+
 export function registerWidgetIpc(): void {
-  ipcMain.handle(IPC.WIDGET_LIST, () => store.get('widgets'))
+  ipcMain.handle(IPC.WIDGET_LIST, () => {
+    const list = withDefaultWidgetConfigs(store.get('widgets'))
+    persistWidgets(list)
+    return list
+  })
 
   ipcMain.handle(IPC.WIDGET_ADD, (_e, w: WidgetInstance) => {
     const list = store.get('widgets')
@@ -221,11 +306,13 @@ export function registerWidgetIpc(): void {
     if (!canAddMultipleWidgetType(w.type) && list.some((existing) => existing.type === w.type)) {
       return list
     }
-    // Auto-place: find non-overlapping position from top-left
-    const { x, y } = findPlacement(w.width, w.height, list)
-    w.x = x
-    w.y = y
-    list.push(w)
+    const widget = withDefaultWidgetConfig(w)
+    const placement = widget.type === 'desktop-icons-dock'
+      ? getDockPlacement(widget.width, widget.height)
+      : findPlacement(widget.width, widget.height, list)
+    widget.x = placement.x
+    widget.y = placement.y
+    list.push(widget)
     persistWidgets(list)
     syncToCanvas()
     autoSaveToWallpaper()
@@ -234,13 +321,7 @@ export function registerWidgetIpc(): void {
   })
 
   ipcMain.handle(IPC.WIDGET_REMOVE, async (_e, id: string) => {
-    const widgets = store.get('widgets')
-    const target = widgets.find((w) => w.id === id)
-    if (target) await restoreDesktopIconsForWidget(target)
-    const list = widgets.filter((w) => w.id !== id)
-    persistWidgets(list)
-    syncToCanvas()
-    autoSaveToWallpaper()
+    const { list } = await removeWidgetWithRestore(id)
     return list
   })
 
@@ -297,15 +378,9 @@ export function registerWidgetIpc(): void {
           label: '删除',
           click: async () => {
             resolved = true
-            const widgets = store.get('widgets')
-            const target = widgets.find((w) => w.id === widgetId)
-            if (target) await restoreDesktopIconsForWidget(target)
-            const list = widgets.filter((w) => w.id !== widgetId)
-            persistWidgets(list)
-            syncToCanvas()
-            autoSaveToWallpaper()
-            if (!isCanvasEditMode()) setCanvasMousePassthrough(true)
-            resolve('delete')
+            const { deleted } = await removeWidgetWithRestore(widgetId)
+            if (deleted && !isCanvasEditMode()) setCanvasMousePassthrough(true)
+            resolve(deleted ? 'delete' : null)
           },
         },
       ])
@@ -359,7 +434,6 @@ export function registerWidgetIpc(): void {
 const UNIT = 160
 /** 卡片组件的标准尺寸（悬浮组件使用 fit-content，不参与迁移） */
 const WIDGET_SIZE_MAP: Record<string, { w: number; h: number }> = {
-  weather:    { w: UNIT * 2 + GRID_GAP, h: UNIT * 2 + GRID_GAP }, // 大
   stocks:     { w: UNIT * 2 + GRID_GAP, h: UNIT * 2 + GRID_GAP }, // 大 2×2
   news:       { w: UNIT,                h: UNIT * 2 + GRID_GAP }, // 中-竖 1×2
   calendar:   { w: UNIT,                h: UNIT },            // 小

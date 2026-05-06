@@ -77,10 +77,19 @@ export interface DesktopIconLaunchResult {
   error?: string
 }
 
+export type DesktopIconContextMenuAction = 'open' | 'show-in-folder' | 'restore' | 'remove'
+
+export interface DesktopIconContextMenuResult {
+  ok: boolean
+  action?: DesktopIconContextMenuAction
+  error?: string
+}
+
 export interface DesktopIconRestoreResult {
   ok: boolean
   restored: string[]
   skipped: string[]
+  restoredItemIds?: string[]
   error?: string
 }
 

@@ -9,6 +9,7 @@ export const IPC = {
   APP_NAVIGATE: 'app:navigate',
   APP_OPEN_SETTINGS: 'app:open-settings',
   APP_OPEN_EXPLORER: 'app:open-explorer',
+  APP_OPEN_RECYCLE_BIN: 'app:open-recycle-bin',
   APP_SHOW_DESKTOP: 'app:show-desktop',
   APP_GET_VERSION: 'app:get-version',
   WIN_MINIMIZE: 'win:minimize',
@@ -40,6 +41,7 @@ export const IPC = {
   DESKTOP_ICON_IMPORT: 'desktop-icon:import',
   DESKTOP_ICON_LAUNCH: 'desktop-icon:launch',
   DESKTOP_ICON_REFRESH: 'desktop-icon:refresh',
+  DESKTOP_ICON_CONTEXT_MENU: 'desktop-icon:context-menu',
   // 主进程 → 画布
   WIDGET_SYNC: 'widget:sync',
   // 画布 → 主进程：鼠标穿透切换

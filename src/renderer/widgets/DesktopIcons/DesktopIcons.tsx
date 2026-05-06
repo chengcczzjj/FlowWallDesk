@@ -11,7 +11,7 @@ type DesktopIconVariant = 'vertical' | 'horizontal' | 'adaptive' | 'dock'
 type StorageVariant = Exclude<DesktopIconVariant, 'dock'>
 type StorageChromeStyle = 'plain' | 'titled'
 type DockChromeStyle = 'glass' | 'trapezoid'
-type DockSystemActionId = 'settings' | 'explorer' | 'desktop'
+type DockSystemActionId = 'settings' | 'explorer' | 'recycle-bin' | 'desktop'
 
 const CELL_WIDTH = 78
 const CELL_HEIGHT = 88
@@ -27,12 +27,12 @@ const DOCK_GAP = 8
 const DOCK_HORIZONTAL_INSET = 12
 const DOCK_SLOT_EXTRA = 18
 const DOCK_MIN_WIDTH = 96
-const DOCK_EMPTY_WIDTH = 260
+const DOCK_EMPTY_WIDTH = 340
 const DOCK_TRAPEZOID_SIDE_EXTRA = 48
 const DOCK_DEFAULT_TINT = '#ffffff'
-const DOCK_DEFAULT_OPACITY = 0.095
-const DOCK_DEFAULT_TINT_STRENGTH = 0.06
-const DOCK_DEFAULT_BLUR = 13
+const DOCK_DEFAULT_OPACITY = 0.18
+const DOCK_DEFAULT_TINT_STRENGTH = 0.1
+const DOCK_DEFAULT_BLUR = 16
 const DOCK_DEFAULT_HOVER_SCALE = 1.58
 const DOUBLE_CLICK_MS = 420
 const LONG_PRESS_REORDER_MS = 1000
@@ -48,6 +48,7 @@ const STORAGE_DEFAULT_BLUR = 15
 const DOCK_SYSTEM_ACTIONS: Array<{ id: DockSystemActionId; label: string }> = [
   { id: 'settings', label: '设置' },
   { id: 'explorer', label: '资源管理器' },
+  { id: 'recycle-bin', label: '回收站' },
   { id: 'desktop', label: '回到桌面' },
 ]
 const STORAGE_TITLE_HEIGHT = 38
@@ -357,11 +358,25 @@ function DesktopIconsWidget({
         void window.canvasBridge.openSettings()
       } else if (action === 'explorer') {
         void window.canvasBridge.openExplorer()
+      } else if (action === 'recycle-bin') {
+        void window.canvasBridge.openRecycleBin()
       } else {
         void window.canvasBridge.showDesktop()
       }
     },
     [editing]
+  )
+
+  const handleIconContextMenu = useCallback(
+    (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (editing) return
+      void window.canvasBridge.showDesktopIconContextMenu(widget.id, item).then((result) => {
+        if (result && !result.ok && result.error) console.warn('[desktop-icons] context menu action failed:', result.error)
+      })
+    },
+    [editing, widget.id]
   )
 
   const handleDrop = useCallback(
@@ -377,10 +392,10 @@ function DesktopIconsWidget({
       if (filePaths.length === 0) return
 
       const result = await window.canvasBridge.importDesktopIcons(widget.id, filePaths)
-      if (!result.ok || result.items.length === 0) return
-      await saveItems([...orderedItems, ...result.items])
+      if (!result.ok && result.error) console.warn('[desktop-icons] import failed:', result.error)
+      if (result.skipped?.length) console.warn('[desktop-icons] import skipped:', result.skipped)
     },
-    [orderedItems, saveItems, widget.id]
+    [widget.id]
   )
 
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -582,6 +597,7 @@ function DesktopIconsWidget({
             onPointerMove={handleIconPointerMove}
             onPointerUp={handleIconPointerUp}
             onPointerCancel={handleIconPointerCancel}
+            onContextMenu={handleIconContextMenu}
             onSystemAction={activateDockSystemAction}
           />
         ) : (
@@ -602,6 +618,7 @@ function DesktopIconsWidget({
               onPointerMove={handleIconPointerMove}
               onPointerUp={handleIconPointerUp}
               onPointerCancel={handleIconPointerCancel}
+              onContextMenu={handleIconContextMenu}
             />
             {storageHideLabels && hoveredStorageId && !draggingId && storageLayout && (
               <StorageHoverLabel
@@ -634,6 +651,7 @@ function StorageSurface({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
+  onContextMenu,
 }: {
   refEl: React.RefObject<HTMLDivElement | null>
   variant: StorageVariant
@@ -649,6 +667,7 @@ function StorageSurface({
   onPointerMove: (event: React.PointerEvent<HTMLElement>) => void
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
+  onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
 }) {
   return (
     <div
@@ -696,6 +715,7 @@ function StorageSurface({
                 onHoverItemId(null)
                 onPointerCancel(event)
               }}
+              onContextMenu={(event) => onContextMenu(item, event)}
               initial={{ opacity: 0, scale: 0.82 }}
               animate={{
                 opacity: 1,
@@ -816,6 +836,7 @@ function IconDockSurface({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
+  onContextMenu,
   onSystemAction,
 }: {
   items: DesktopIconItem[]
@@ -832,6 +853,7 @@ function IconDockSurface({
   onPointerMove: (event: React.PointerEvent<HTMLElement>) => void
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
+  onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
   onSystemAction: (action: DockSystemActionId) => void
 }) {
   const mouseX = useMotionValue(Number.POSITIVE_INFINITY)
@@ -905,6 +927,7 @@ function IconDockSurface({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
+            onContextMenu={onContextMenu}
           />
         ))}
       </AnimatePresence>
@@ -1039,8 +1062,44 @@ function DockSystemIcon({ action, size, fluid = false }: { action: DockSystemAct
         pointerEvents: 'none',
       }}
     >
-      {action === 'settings' ? <WinSettingsIcon /> : action === 'explorer' ? <WinExplorerIcon /> : <WinDesktopIcon />}
+      {action === 'settings' ? (
+        <WinSettingsIcon />
+      ) : action === 'explorer' ? (
+        <WinExplorerIcon />
+      ) : action === 'recycle-bin' ? (
+        <WinRecycleBinIcon />
+      ) : (
+        <WinDesktopIcon />
+      )}
     </span>
+  )
+}
+
+function WinRecycleBinIcon() {
+  return (
+    <svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true">
+      <defs>
+        <linearGradient id="ly-dock-recycle-a" x1="18" y1="12" x2="48" y2="55" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#f8fafc" />
+          <stop offset="0.5" stopColor="#bae6fd" />
+          <stop offset="1" stopColor="#38bdf8" />
+        </linearGradient>
+        <linearGradient id="ly-dock-recycle-b" x1="16" y1="25" x2="50" y2="57" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(255,255,255,0.84)" />
+          <stop offset="1" stopColor="rgba(14,165,233,0.58)" />
+        </linearGradient>
+        <radialGradient id="ly-dock-recycle-c" cx="24" cy="21" r="30" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(255,255,255,0.95)" />
+          <stop offset="1" stopColor="rgba(255,255,255,0)" />
+        </radialGradient>
+      </defs>
+      <path d="M23 13.5h18l2.6 5.7h7.9c1.7 0 3 1.3 3 3s-1.3 3-3 3h-39c-1.7 0-3-1.3-3-3s1.3-3 3-3h7.9z" fill="url(#ly-dock-recycle-a)" />
+      <path d="M18.2 25.2h27.6c2.7 0 4.9 2.3 4.6 5l-2.2 20.1c-.3 3-2.9 5.2-5.9 5.2H21.7c-3 0-5.6-2.2-5.9-5.2l-2.2-20.1c-.3-2.7 1.9-5 4.6-5z" fill="url(#ly-dock-recycle-b)" stroke="rgba(255,255,255,0.58)" strokeWidth="2" />
+      <path d="M22 29h20" stroke="rgba(255,255,255,0.72)" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M24.5 36.5h15l-3.1-3.1M39.5 36.5l-3.1 3.1M38.8 45.5h-15l3.1 3.1M23.8 45.5l3.1-3.1" fill="none" stroke="rgba(14,116,144,0.72)" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15.5 27.5h33" stroke="rgba(255,255,255,0.32)" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M17 26h30v15c-7-5.4-18.9-5.2-30 .3z" fill="url(#ly-dock-recycle-c)" opacity="0.74" />
+    </svg>
   )
 }
 
@@ -1165,6 +1224,7 @@ function DockIconButton({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
+  onContextMenu,
 }: {
   item: DesktopIconItem
   index: number
@@ -1181,6 +1241,7 @@ function DockIconButton({
   onPointerMove: (event: React.PointerEvent<HTMLElement>) => void
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
+  onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   const distance = useTransform(mouseX, (value) => {
@@ -1228,6 +1289,7 @@ function DockIconButton({
         mouseX.set(Number.POSITIVE_INFINITY)
         onPointerCancel(event)
       }}
+      onContextMenu={(event) => onContextMenu(item, event)}
       initial={{ opacity: 0, y: 14, scale: 0.9 }}
       animate={
         bouncing
@@ -1310,7 +1372,12 @@ function IconImage({ item, size, fluid = false }: { item: DesktopIconItem; size:
       }}
     >
       {item.iconData ? (
-        <img src={item.iconData} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        <img
+          src={item.iconData}
+          alt=""
+          draggable={false}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', imageRendering: 'auto' }}
+        />
       ) : item.extension === '.lnk' || item.originalPath.toLowerCase().endsWith('.lnk') ? (
         <AppWindow size={Math.round(imageSize * 0.58)} color="rgba(15,23,42,0.78)" />
       ) : item.isDirectory ? (
@@ -1529,7 +1596,7 @@ function dockChromeStyle(active: boolean, appearance: DockAppearance, flipped: b
     boxShadow: isTrapezoid
       ? `0 ${flipped ? -12 : 12}px 26px rgba(8,16,28,0.18), inset 0 ${flipped ? 12 : -12}px 18px ${alphaColor(appearance.tintColor, appearance.tintStrength * 0.5)}`
       : `0 18px 48px rgba(8,16,28,0.17), inset 0 1px 0 rgba(255,255,255,0.23), inset 0 0 0 999px ${alphaColor(appearance.tintColor, appearance.tintStrength * 0.12)}`,
-    background: alphaColor('#ffffff', appearance.opacity * 0.45),
+    background: alphaColor('#ffffff', appearance.opacity * 0.72),
     pointerEvents: 'none',
   }
 }
@@ -1621,7 +1688,7 @@ function isDesktopIconItem(value: unknown): value is DesktopIconItem {
 function needsMetadataRefresh(item: DesktopIconItem): boolean {
   if (!item.extension) return true
   if (!item.iconData) return true
-  if (item.extension === '.lnk') return true
+  if (item.extension === '.lnk' && !item.targetPath) return true
   if (item.extension === '.url' && !item.externalUrl) return true
   return false
 }
@@ -1824,7 +1891,7 @@ function getDockTargetIndex(clientX: number, rect: DOMRect, length: number): num
 }
 
 function getDockIconSize(height: number): number {
-  return Math.max(32, Math.min(52, height - 30))
+  return Math.max(ICON_SIZE, Math.min(56, height - 34))
 }
 
 function getDockPreferredWidth(itemCount: number, height: number, chromeStyle: DockChromeStyle = 'glass', keepEmptyWidth = false): number {

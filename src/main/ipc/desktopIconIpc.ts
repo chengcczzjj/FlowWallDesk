@@ -1,4 +1,4 @@
-import { app, ipcMain, nativeImage, shell } from 'electron'
+import { app, ipcMain, Menu, nativeImage, shell } from 'electron'
 import { promises as fs } from 'fs'
 import { dirname, extname, join, normalize, parse } from 'path'
 import { randomUUID } from 'crypto'
@@ -6,6 +6,7 @@ import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
 import type {
   DesktopIconImportResult,
+  DesktopIconContextMenuResult,
   DesktopIconItem,
   DesktopIconLaunchResult,
   DesktopIconRestoreResult,
@@ -20,16 +21,10 @@ const ICON_WIDGET_TYPES = new Set([
   'desktop-icons-adaptive',
   'desktop-icons-dock',
 ])
+const IMPORT_CONCURRENCY = 4
 
 export function isDesktopIconWidgetType(type: string): boolean {
   return ICON_WIDGET_TYPES.has(type)
-}
-
-function getWallpaperRoot(): string {
-  if (app.isPackaged) {
-    return join(process.resourcesPath, 'assets', 'wallpaper')
-  }
-  return join(__dirname, '../../assets/wallpaper')
 }
 
 function syncToCanvas(list: WidgetInstance[]): void {
@@ -37,16 +32,9 @@ function syncToCanvas(list: WidgetInstance[]): void {
   if (win && !win.isDestroyed()) win.webContents.send(IPC.WIDGET_SYNC, list)
 }
 
-async function saveWidgetsToWallpaper(): Promise<void> {
-  try {
-    const current = store.get('wallpaper')?.current
-    if (!current) return
-    const folder = join(getWallpaperRoot(), current.id)
-    const widgets = store.get('widgets').filter((widget) => !isDesktopIconWidgetType(widget.type))
-    await fs.writeFile(join(folder, 'widget-config.json'), JSON.stringify({ widgets }, null, 2), 'utf-8')
-  } catch {
-    /* ignore */
-  }
+function persistWidgets(list: WidgetInstance[]): void {
+  store.set('widgets', list)
+  store.set('globalIconWidgets', list.filter((widget) => isDesktopIconWidgetType(widget.type)))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,7 +52,7 @@ function isDesktopIconItem(value: unknown): value is DesktopIconItem {
   )
 }
 
-function getDesktopIconItems(widget: WidgetInstance): DesktopIconItem[] {
+export function getDesktopIconItems(widget: WidgetInstance): DesktopIconItem[] {
   const config = widget.config
   if (!isRecord(config) || !Array.isArray(config.items)) return []
   return config.items.filter(isDesktopIconItem)
@@ -117,6 +105,11 @@ function getDesktopRoots(): string[] {
   return roots.map((root) => normalize(root).toLowerCase())
 }
 
+function pathKey(filePath?: string): string | undefined {
+  const expanded = expandWindowsEnv(filePath)
+  return expanded ? normalize(expanded).toLowerCase() : undefined
+}
+
 function isFromDesktop(filePath: string): boolean {
   const normalized = normalize(filePath).toLowerCase()
   return getDesktopRoots().some((root) => {
@@ -126,6 +119,10 @@ function isFromDesktop(filePath: string): boolean {
 }
 
 async function movePath(sourcePath: string, targetPath: string): Promise<void> {
+  await fs.rename(sourcePath, targetPath)
+}
+
+async function restoreManagedPath(sourcePath: string, targetPath: string): Promise<void> {
   try {
     await fs.rename(sourcePath, targetPath)
     return
@@ -133,10 +130,18 @@ async function movePath(sourcePath: string, targetPath: string): Promise<void> {
     const stat = await fs.stat(sourcePath)
     if (stat.isDirectory()) {
       await fs.cp(sourcePath, targetPath, { recursive: true })
-      await fs.rm(sourcePath, { recursive: true, force: true })
+      try {
+        await fs.rm(sourcePath, { recursive: true, force: true })
+      } catch {
+        /* restored copy is already available; keep the managed duplicate */
+      }
     } else {
       await fs.copyFile(sourcePath, targetPath)
-      await fs.unlink(sourcePath)
+      try {
+        await fs.unlink(sourcePath)
+      } catch {
+        /* restored copy is already available; keep the managed duplicate */
+      }
     }
   }
 }
@@ -157,7 +162,8 @@ async function readIconData(candidates: IconCandidateInput[]): Promise<string | 
         const directImage = readImageFileIcon(filePath)
         if (directImage) return directImage
         const image = await app.getFileIcon(filePath, { size: 'large' })
-        if (!image.isEmpty()) return image.toDataURL()
+        const dataUrl = imageToDataUrl(image)
+        if (dataUrl) return dataUrl
       } catch {
         /* try next candidate */
       }
@@ -169,7 +175,17 @@ async function readIconData(candidates: IconCandidateInput[]): Promise<string | 
 function readImageFileIcon(filePath: string): string | undefined {
   if (!['.ico', '.png', '.jpg', '.jpeg'].includes(extname(filePath).toLowerCase())) return undefined
   const image = nativeImage.createFromPath(filePath)
+  return imageToDataUrl(image)
+}
+
+function imageToDataUrl(image: Electron.NativeImage): string | undefined {
   if (image.isEmpty()) return undefined
+  try {
+    const dataUrl = image.toDataURL({ scaleFactor: 2 })
+    if (dataUrl) return dataUrl
+  } catch {
+    /* fall back to the default representation */
+  }
   return image.toDataURL()
 }
 
@@ -205,6 +221,7 @@ function iconCandidatesFor(
     const preferredIcon = iconSourcePath && !isShortcutLikePath(iconSourcePath) ? iconSourcePath : undefined
     return [{ path: preferredIcon, index: iconIndex }, targetPath, { path: iconSourcePath, index: iconIndex }, sourcePath]
   }
+  if (extension === '.url') return [{ path: iconSourcePath, index: iconIndex }, sourcePath]
   return [sourcePath, iconSourcePath, targetPath]
 }
 
@@ -223,14 +240,23 @@ function readShortcut(filePath: string): Electron.ShortcutDetails | undefined {
   }
 }
 
-async function readInternetShortcutUrl(filePath: string): Promise<string | undefined> {
-  if (extname(filePath).toLowerCase() !== '.url') return undefined
+interface InternetShortcutDetails {
+  url?: string
+  iconFile?: string
+  iconIndex?: number
+}
+
+async function readInternetShortcut(filePath: string): Promise<InternetShortcutDetails> {
+  if (extname(filePath).toLowerCase() !== '.url') return {}
   try {
     const text = await fs.readFile(filePath, 'utf-8')
-    const match = text.match(/^\s*URL\s*=\s*(.+?)\s*$/im)
-    return match?.[1]?.trim()
+    const url = text.match(/^\s*URL\s*=\s*(.+?)\s*$/im)?.[1]?.trim()
+    const iconFile = text.match(/^\s*IconFile\s*=\s*(.+?)\s*$/im)?.[1]?.trim()
+    const iconIndexText = text.match(/^\s*IconIndex\s*=\s*(-?\d+)\s*$/im)?.[1]
+    const iconIndex = iconIndexText === undefined ? undefined : Number.parseInt(iconIndexText, 10)
+    return { url, iconFile, iconIndex: Number.isFinite(iconIndex) ? iconIndex : undefined }
   } catch {
-    return undefined
+    return {}
   }
 }
 
@@ -286,12 +312,13 @@ async function importOneDesktopIcon(widgetId: string, sourcePath: string): Promi
 
   const id = randomUUID()
   const shortcut = readShortcut(sourcePath)
-  const externalUrl = await readInternetShortcutUrl(sourcePath)
+  const internetShortcut = await readInternetShortcut(sourcePath)
+  const externalUrl = internetShortcut.url
   const stat = await fs.stat(sourcePath)
   const extension = extname(sourcePath).toLowerCase()
   const targetPath = expandWindowsEnv(shortcut?.target)
-  const iconSourcePath = expandWindowsEnv(shortcut?.icon) || targetPath
-  const iconIndex = shortcutIconIndex(shortcut)
+  const iconSourcePath = expandWindowsEnv(shortcut?.icon) || expandWindowsEnv(internetShortcut.iconFile) || targetPath
+  const iconIndex = shortcutIconIndex(shortcut) ?? internetShortcut.iconIndex
   const iconData = await readIconData(iconCandidatesFor(extension, sourcePath, iconSourcePath, targetPath, iconIndex))
   const removeOriginal = isFromDesktop(sourcePath)
   let managedPath = sourcePath
@@ -302,7 +329,12 @@ async function importOneDesktopIcon(widgetId: string, sourcePath: string): Promi
     const originalName = parse(sourcePath).base
     const targetName = `${id}-${safeSegment(originalName) || `icon${extname(sourcePath)}`}`
     managedPath = await nextAvailablePath(managedDir, targetName)
-    await movePath(sourcePath, managedPath)
+    try {
+      await movePath(sourcePath, managedPath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`移动到托管目录失败，原文件已保留：${message}`)
+    }
   }
 
   return {
@@ -324,6 +356,39 @@ async function importOneDesktopIcon(widgetId: string, sourcePath: string): Promi
   }
 }
 
+function findReusableDesktopIconItem(widgetId: string, sourcePath: string): DesktopIconItem | undefined {
+  const sourceKey = pathKey(sourcePath)
+  if (!sourceKey) return undefined
+
+  for (const widget of store.get('widgets')) {
+    if (widget.id === widgetId || !isDesktopIconWidgetType(widget.type)) continue
+    for (const item of getDesktopIconItems(widget)) {
+      if (pathKey(item.originalPath) === sourceKey || pathKey(item.managedPath) === sourceKey) return item
+    }
+  }
+  return undefined
+}
+
+async function importDesktopIconForWidget(widgetId: string, sourcePath: string): Promise<DesktopIconItem> {
+  try {
+    return await importOneDesktopIcon(widgetId, sourcePath)
+  } catch (error) {
+    const reusable = findReusableDesktopIconItem(widgetId, sourcePath)
+    if (!reusable) throw error
+
+    const existingPath = await getBestExistingPath(reusable)
+    if (!existingPath) throw error
+
+    return {
+      ...reusable,
+      id: randomUUID(),
+      order: undefined,
+      removedFromDesktop: false,
+      addedAt: Date.now(),
+    }
+  }
+}
+
 async function getBestExistingPath(item: DesktopIconItem): Promise<string | undefined> {
   for (const candidate of [item.managedPath, item.originalPath, item.targetPath]) {
     const filePath = expandWindowsEnv(candidate)
@@ -337,12 +402,13 @@ async function hydrateDesktopIconItem(item: DesktopIconItem): Promise<DesktopIco
   if (!sourcePath) return item
 
   const shortcut = readShortcut(sourcePath)
-  const externalUrl = await readInternetShortcutUrl(sourcePath)
+  const internetShortcut = await readInternetShortcut(sourcePath)
+  const externalUrl = internetShortcut.url
   const sourceExtension = extname(sourcePath).toLowerCase()
   const extension = item.extension || sourceExtension
   const targetPath = expandWindowsEnv(shortcut?.target) || item.targetPath
-  const iconSourcePath = expandWindowsEnv(shortcut?.icon) || item.iconSourcePath || targetPath
-  const iconIndex = shortcutIconIndex(shortcut) ?? item.iconIndex
+  const iconSourcePath = expandWindowsEnv(shortcut?.icon) || expandWindowsEnv(internetShortcut.iconFile) || item.iconSourcePath || targetPath
+  const iconIndex = shortcutIconIndex(shortcut) ?? internetShortcut.iconIndex ?? item.iconIndex
   const iconData = await readIconData([
     ...iconCandidatesFor(extension, sourcePath, iconSourcePath, targetPath, iconIndex),
     item.originalPath,
@@ -376,14 +442,98 @@ function appendItemsToWidget(widgetId: string, items: DesktopIconItem[]): boolea
 
   const config = isRecord(target.config) ? target.config : {}
   const existing = Array.isArray(config.items) ? config.items.filter(isDesktopIconItem) : []
-  const nextItems = [...existing, ...items].map((item, index) => ({ ...item, order: item.order ?? index }))
+  const nextItems = [...existing, ...items].map((item, index) => ({ ...item, order: index }))
   const updated = widgets.map((widget) =>
     widget.id === widgetId ? { ...widget, config: { ...config, items: nextItems } } : widget
   )
-  store.set('widgets', updated)
+  persistWidgets(updated)
   syncToCanvas(updated)
-  void saveWidgetsToWallpaper()
   return true
+}
+
+async function rollbackImportedDesktopIcon(item: DesktopIconItem): Promise<void> {
+  if (!item.removedFromDesktop) return
+  const result = await restoreOneDesktopIcon(item)
+  if (!result.ok) {
+    console.warn('[desktop-icons] rollback failed:', item.name, result.error)
+  }
+}
+
+async function appendImportedItemToWidget(widgetId: string, item: DesktopIconItem): Promise<void> {
+  try {
+    if (!appendItemsToWidget(widgetId, [item])) throw new Error('目标组件不存在')
+  } catch (error) {
+    await rollbackImportedDesktopIcon(item)
+    throw error
+  }
+}
+
+function updateDesktopIconItems(
+  widgetId: string,
+  updater: (items: DesktopIconItem[], widget: WidgetInstance) => DesktopIconItem[]
+): boolean {
+  const widgets = store.get('widgets')
+  const target = widgets.find((widget) => widget.id === widgetId)
+  if (!target || !isDesktopIconWidgetType(target.type)) return false
+  const nextItems = updater(getDesktopIconItems(target), target).map((item, index) => ({ ...item, order: index }))
+  const nextConfig = { ...(target.config ?? {}), items: nextItems }
+  const updated = widgets.map((widget) => (widget.id === widgetId ? { ...widget, config: nextConfig } : widget))
+  persistWidgets(updated)
+  syncToCanvas(updated)
+  return true
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(items[index], index)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+async function restoreOneDesktopIcon(item: DesktopIconItem): Promise<{ ok: boolean; itemId: string; restoredPath?: string; error?: string }> {
+  if (!item.removedFromDesktop) return { ok: true, itemId: item.id }
+
+  const managedPath = expandWindowsEnv(item.managedPath)
+  const originalPath = expandWindowsEnv(item.originalPath) || join(app.getPath('desktop'), item.name)
+  if (!managedPath || !(await pathExists(managedPath))) {
+    if (originalPath && (await pathExists(originalPath))) return { ok: true, itemId: item.id, restoredPath: originalPath }
+    return { ok: false, itemId: item.id, error: '托管文件不存在' }
+  }
+
+  let lastError = '恢复失败'
+  const fallbackDesktopPath = join(app.getPath('desktop'), parse(originalPath).base || item.name)
+  const restoreTargets = [...new Set([originalPath, fallbackDesktopPath].filter(Boolean))]
+  for (const desiredPath of restoreTargets) {
+    try {
+      const targetFolder = dirname(desiredPath)
+      await fs.mkdir(targetFolder, { recursive: true })
+      const targetPath = await nextAvailablePath(targetFolder, parse(desiredPath).base)
+      await restoreManagedPath(managedPath, targetPath)
+      return { ok: true, itemId: item.id, restoredPath: targetPath }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+  }
+  return { ok: false, itemId: item.id, error: lastError }
+}
+
+async function removeEmptyManagedDir(widgetId: string): Promise<void> {
+  try {
+    await fs.rmdir(getManagedDir(widgetId))
+  } catch {
+    /* keep non-empty managed dirs so failed restore files are not lost */
+  }
 }
 
 export async function restoreDesktopIconsForWidget(
@@ -396,33 +546,53 @@ export async function restoreDesktopIconsForWidget(
   if (!widget || !isDesktopIconWidgetType(widget.type)) return { ok: true, restored: [], skipped: [] }
 
   const restored: string[] = []
+  const restoredItemIds: string[] = []
   const skipped: string[] = []
   const items = getDesktopIconItems(widget)
 
   for (const item of items) {
     if (!item.removedFromDesktop) continue
-    try {
-      if (!(await pathExists(item.managedPath))) {
-        skipped.push(`${item.name}: 托管文件不存在`)
-        continue
-      }
-      const targetFolder = dirname(item.originalPath || join(app.getPath('desktop'), item.name))
-      await fs.mkdir(targetFolder, { recursive: true })
-      const targetPath = await nextAvailablePath(targetFolder, parse(item.originalPath || item.name).base)
-      await movePath(item.managedPath, targetPath)
-      restored.push(targetPath)
-    } catch (error) {
-      skipped.push(`${item.name}: ${error instanceof Error ? error.message : String(error)}`)
+    const result = await restoreOneDesktopIcon(item)
+    if (result.ok) {
+      restoredItemIds.push(item.id)
+      if (result.restoredPath) restored.push(result.restoredPath)
+    } else {
+      skipped.push(`${item.name}: ${result.error ?? '恢复失败'}`)
     }
   }
 
-  try {
-    await fs.rm(getManagedDir(widget.id), { recursive: true, force: true })
-  } catch {
-    /* ignore */
-  }
+  await removeEmptyManagedDir(widget.id)
 
-  return { ok: skipped.length === 0, restored, skipped }
+  return { ok: skipped.length === 0, restored, skipped, restoredItemIds }
+}
+
+async function revealDesktopIcon(item: DesktopIconItem): Promise<DesktopIconContextMenuResult> {
+  const hydrated = await hydrateDesktopIconItem(item)
+  for (const candidate of [hydrated.targetPath, hydrated.managedPath, hydrated.originalPath]) {
+    const filePath = expandWindowsEnv(candidate)
+    if (filePath && (await pathExists(filePath))) {
+      shell.showItemInFolder(filePath)
+      return { ok: true, action: 'show-in-folder' }
+    }
+  }
+  return { ok: false, action: 'show-in-folder', error: '文件不存在，无法定位' }
+}
+
+async function restoreDesktopIconFromWidget(widgetId: string, item: DesktopIconItem): Promise<DesktopIconContextMenuResult> {
+  const result = await restoreOneDesktopIcon(item)
+  if (!result.ok) return { ok: false, action: 'restore', error: result.error ?? '恢复失败' }
+  if (!updateDesktopIconItems(widgetId, (items) => items.filter((candidate) => candidate.id !== item.id))) {
+    return { ok: false, action: 'restore', error: '目标组件不存在' }
+  }
+  await removeEmptyManagedDir(widgetId)
+  return { ok: true, action: 'restore' }
+}
+
+function removeDesktopIconReference(widgetId: string, item: DesktopIconItem): DesktopIconContextMenuResult {
+  if (!updateDesktopIconItems(widgetId, (items) => items.filter((candidate) => candidate.id !== item.id))) {
+    return { ok: false, action: 'remove', error: '目标组件不存在' }
+  }
+  return { ok: true, action: 'remove' }
 }
 
 export async function launchDesktopIcon(item: DesktopIconItem): Promise<DesktopIconLaunchResult> {
@@ -474,18 +644,22 @@ export function registerDesktopIconIpc(): void {
       return { ...result, error: '没有可导入的图标' }
     }
 
+    const widgets = store.get('widgets')
+    const target = widgets.find((widget) => widget.id === widgetId)
+    if (!target || !isDesktopIconWidgetType(target.type)) {
+      return { ...result, error: '目标组件不存在' }
+    }
+
     const uniquePaths = [...new Set(filePaths.filter((item) => typeof item === 'string' && item.trim()))]
-    for (const filePath of uniquePaths) {
+    await mapWithConcurrency(uniquePaths, IMPORT_CONCURRENCY, async (filePath) => {
       try {
-        result.items.push(await importOneDesktopIcon(widgetId, filePath))
+        const item = await importDesktopIconForWidget(widgetId, filePath)
+        await appendImportedItemToWidget(widgetId, item)
+        result.items.push(item)
       } catch (error) {
         result.skipped?.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`)
       }
-    }
-
-    if (result.items.length > 0 && !appendItemsToWidget(widgetId, result.items)) {
-      return { ok: false, items: [], skipped: result.skipped, error: '目标组件不存在' }
-    }
+    })
 
     return { ...result, ok: result.items.length > 0 }
   })
@@ -495,5 +669,52 @@ export function registerDesktopIconIpc(): void {
   ipcMain.handle(IPC.DESKTOP_ICON_REFRESH, async (_event, items: DesktopIconItem[]) => {
     if (!Array.isArray(items)) return []
     return Promise.all(items.filter(isDesktopIconItem).map((item) => hydrateDesktopIconItem(item)))
+  })
+
+  ipcMain.handle(IPC.DESKTOP_ICON_CONTEXT_MENU, async (_event, widgetId: string, item: DesktopIconItem) => {
+    const win = getCanvasWindow()
+    if (!win || !isDesktopIconItem(item)) return null
+
+    return new Promise<DesktopIconContextMenuResult | null>((resolve) => {
+      let resolved = false
+      const settleCancel = () => {
+        if (resolved) return
+        resolved = true
+        resolve(null)
+      }
+      const runAction = async (action: () => Promise<DesktopIconContextMenuResult> | DesktopIconContextMenuResult) => {
+        if (resolved) return
+        resolved = true
+        try {
+          resolve(await action())
+        } catch (error) {
+          resolve({ ok: false, error: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      const menu = Menu.buildFromTemplate([
+        {
+          label: '打开',
+          click: () => void runAction(async () => ({ ...(await launchDesktopIcon(item)), action: 'open' })),
+        },
+        {
+          label: '打开文件所在位置',
+          click: () => void runAction(() => revealDesktopIcon(item)),
+        },
+        { type: 'separator' },
+        item.removedFromDesktop
+          ? {
+              label: '移回桌面',
+              click: () => void runAction(() => restoreDesktopIconFromWidget(widgetId, item)),
+            }
+          : {
+              label: '从收纳中移除',
+              click: () => void runAction(() => removeDesktopIconReference(widgetId, item)),
+            },
+      ])
+      menu.popup({
+        window: win,
+        callback: settleCancel,
+      })
+    })
   })
 }

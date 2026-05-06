@@ -7,6 +7,7 @@ import type {
   StockSymbol,
   ApiEndpointMeta,
   DesktopIconImportResult,
+  DesktopIconContextMenuResult,
   DesktopIconItem,
   DesktopIconLaunchResult,
 } from '@shared/types'
@@ -18,7 +19,13 @@ const api = {
     return () => ipcRenderer.off(IPC.WIDGET_SYNC, handler)
   },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
-  getFilePath: (file: File): string => webUtils.getPathForFile(file),
+  getFilePath: (file: File): string | undefined => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return undefined
+    }
+  },
   setIgnoreMouse: (ignore: boolean): void => {
     ipcRenderer.send(IPC.CANVAS_SET_IGNORE_MOUSE, ignore)
   },
@@ -43,8 +50,11 @@ const api = {
     ipcRenderer.invoke(IPC.DESKTOP_ICON_LAUNCH, item),
   refreshDesktopIcons: (items: DesktopIconItem[]): Promise<DesktopIconItem[]> =>
     ipcRenderer.invoke(IPC.DESKTOP_ICON_REFRESH, items),
+  showDesktopIconContextMenu: (widgetId: string, item: DesktopIconItem): Promise<DesktopIconContextMenuResult | null> =>
+    ipcRenderer.invoke(IPC.DESKTOP_ICON_CONTEXT_MENU, widgetId, item),
   openSettings: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_SETTINGS),
   openExplorer: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_EXPLORER),
+  openRecycleBin: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_RECYCLE_BIN),
   showDesktop: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_SHOW_DESKTOP),
   /** 监听壁纸抽帧（用于毛玻璃效果） */
   onFrame: (cb: (data: string) => void): (() => void) => {

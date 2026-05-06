@@ -1,5 +1,25 @@
 # 灵月桌面 开发日志
 
+## [2026-05-06 15:42] 修复图标收纳与 Dock 稳定性问题
+
+**变更摘要**: 修复桌面图标收纳和 Dock 在真实使用中的导入、恢复、默认位置、批量拖拽和回收站兼容问题，并补充日志排查说明。
+
+**涉及模块**:
+
+- `src/main/ipc/desktopIconIpc.ts` / `src/main/ipc/widgetIpc.ts`: 强化桌面文件夹导入保护、恢复回滚、批量导入、Dock 默认尺寸位置和删除恢复策略。
+- `src/renderer/widgets/DesktopIcons/DesktopIcons.tsx` / `src/renderer/canvas/Canvas.tsx`: 修复 Dock 底板塌陷、图标导入同步、右键菜单和导入失败日志。
+- `src/preload/*` / `src/main/ipc/appIpc.ts` / `src/shared/*`: 增加回收站系统按钮、Shell 虚拟对象容错和桌面图标 IPC 类型。
+- `doc/图标收纳组件方案.md`: 补充故障排查日志位置、日志含义和托管目录保护策略。
+
+**遇到的问题**:
+
+- 回收站等 Shell 虚拟对象没有真实文件路径，混在批量拖拽中会导致整批失败 → preload 捕获路径解析异常并跳过虚拟对象，Dock 默认提供回收站系统按钮。
+- 文件夹导入失败可能因 copy/delete 兜底造成源文件离开桌面且组件无记录 → 导入只使用安全 `rename`，记录写入失败时尝试回滚，失败原因写入主进程日志。
+
+**Git Commit**: 已提交 — fix(widget): 提升图标收纳与 Dock 稳定性
+
+---
+
 ## [2026-05-05 23:46] 完成桌面图标收纳与 Dock 系统按钮
 
 **变更摘要**: 落地图标收纳组件与桌面 Dock，支持桌面图标托管启动、跨壁纸全局保存、收纳外观设置、Dock 悬浮交互和系统快捷按钮。

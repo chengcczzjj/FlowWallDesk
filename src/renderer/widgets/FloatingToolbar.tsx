@@ -41,9 +41,9 @@ export function FloatingToolbar({
   const storageTitle = typeof config.storageTitle === 'string' ? config.storageTitle : '图标收纳'
   const storageHideLabels = config.storageHideLabels === true
   const dockTint = readHexColor(config.dockTint, '#ffffff')
-  const dockTintStrength = readNumber(config.dockTintStrength, 0.06, 0, 0.24)
-  const dockOpacity = readNumber(config.dockOpacity, 0.095, 0, 0.24)
-  const dockBlur = readNumber(config.dockBlur, 13, 6, 32)
+  const dockTintStrength = readNumber(config.dockTintStrength, 0.1, 0, 0.24)
+  const dockOpacity = readNumber(config.dockOpacity, 0.18, 0, 0.24)
+  const dockBlur = readNumber(config.dockBlur, 16, 6, 32)
   const dockStyle = config.dockStyle === 'trapezoid' ? 'trapezoid' : 'glass'
   const dockReflection = config.dockReflection === true
   const dockHoverScale = readNumber(config.dockHoverScale, 1.58, 1.1, 2.1)

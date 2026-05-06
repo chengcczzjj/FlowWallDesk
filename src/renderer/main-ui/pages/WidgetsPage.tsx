@@ -104,8 +104,9 @@ const FLOATING_DESKTOP_SIZES: Record<string, { w: number; h: number }> = {
   'desktop-icons-box': { w: 246, h: 344 },
   'desktop-icons-horizontal': { w: 356, h: 242 },
   'desktop-icons-adaptive': { w: 246, h: 242 },
-  'desktop-icons-dock': { w: 520, h: 82 },
+  'desktop-icons-dock': { w: 340, h: 88 },
 }
+const DOCK_BOTTOM_MARGIN = 72
 
 function canAddMultipleWidgetType(type: string): boolean {
   return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive'].includes(type)
@@ -181,7 +182,7 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
     const { w, h } =
       c.floating && FLOATING_DESKTOP_SIZES[c.type] ? FLOATING_DESKTOP_SIZES[c.type] : WIDGET_SIZES[c.size]
     const x = Math.round(window.screen.width / 2 - w / 2)
-    const y = c.type === 'desktop-icons-dock' ? Math.max(24, Math.round(window.screen.height - h - 28)) : Math.round(window.screen.height / 3 - h / 2)
+    const y = c.type === 'desktop-icons-dock' ? Math.max(24, Math.round(window.screen.height - h - DOCK_BOTTOM_MARGIN)) : Math.round(window.screen.height / 3 - h / 2)
     const inst: WidgetInstance = { id, type: c.type, x, y, width: w, height: h, enabled: true, config }
     await window.lingyue.widget.add(inst)
     refresh()

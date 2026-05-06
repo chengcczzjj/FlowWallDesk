@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
 import { getMainWindow, createMainWindow } from '../windows/mainWindow'
 import type { MainWindowNavTarget } from '../windows/mainWindow'
@@ -34,6 +35,20 @@ export function registerAppIpc(): void {
   ipcMain.handle(IPC.APP_OPEN_EXPLORER, async () => {
     const error = await shell.openPath(app.getPath('home'))
     return !error
+  })
+  ipcMain.handle(IPC.APP_OPEN_RECYCLE_BIN, () => {
+    if (process.platform !== 'win32') return false
+    try {
+      const child = spawn('explorer.exe', ['shell:RecycleBinFolder'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      })
+      child.unref()
+      return true
+    } catch {
+      return false
+    }
   })
   ipcMain.handle(IPC.APP_SHOW_DESKTOP, () => {
     const main = getMainWindow()

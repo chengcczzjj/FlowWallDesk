@@ -13,7 +13,13 @@ const api = {
     },
   },
   utils: {
-    getFilePath: (file: File): string => webUtils.getPathForFile(file),
+    getFilePath: (file: File): string | undefined => {
+      try {
+        return webUtils.getPathForFile(file)
+      } catch {
+        return undefined
+      }
+    },
   },
   window: {
     minimize: () => ipcRenderer.send(IPC.WIN_MINIMIZE),

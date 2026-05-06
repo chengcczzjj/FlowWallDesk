@@ -552,7 +552,7 @@ function DraggableWidget({
   const configStyle = canResize ? String((widget.config as Record<string, unknown>)?.style ?? '') : ''
   const prevConfigStyle = useRef(configStyle)
   useEffect(() => {
-    if (prevConfigStyle.current !== configStyle && prevConfigStyle.current !== '') {
+    if (!stretchFill && prevConfigStyle.current !== configStyle && prevConfigStyle.current !== '') {
       // 记录锚点（仅首次）
       if (anchorCenterXRef.current === null) {
         const curW = naturalSizeRef.current?.w ?? elRef.current?.offsetWidth ?? 0
@@ -598,11 +598,11 @@ function DraggableWidget({
       })
     }
     prevConfigStyle.current = configStyle
-  }, [configStyle])
+  }, [configStyle, stretchFill])
 
   /** 在 fit-content 首次渲染后记录自然尺寸（等待字体就绪再测量） */
   useEffect(() => {
-    if (canResize && size.w === 0 && !naturalSizeRef.current && elRef.current) {
+    if (canResize && !stretchFill && size.w === 0 && !naturalSizeRef.current && elRef.current) {
       let cancelled = false
       const measure = () => {
         if (cancelled || !elRef.current) return
@@ -622,7 +622,7 @@ function DraggableWidget({
       }
     }
     return undefined
-  }, [canResize, size.w, size.h, configStyle])
+  }, [canResize, stretchFill, size.w, size.h, configStyle])
 
   /**
    * 重启恢复：组件有保存的 size > 0 但 naturalSizeRef 为空。
@@ -632,6 +632,10 @@ function DraggableWidget({
   const didRestoreRef = useRef(false)
   useEffect(() => {
     if (!canResize || didRestoreRef.current) return undefined
+    if (stretchFill) {
+      didRestoreRef.current = true
+      return undefined
+    }
     if (initialSizeRef.current.w > 0 && !naturalSizeRef.current) {
       let cancelled = false
       // 临时设为 fit-content 以测量
@@ -671,7 +675,7 @@ function DraggableWidget({
       didRestoreRef.current = true
       return undefined
     }
-  }, [canResize])
+  }, [canResize, stretchFill])
 
   /** 获取实际渲染尺寸（使用 DOM 实际尺寸，避免约束尺寸与视觉尺寸不一致） */
   const getActualSize = useCallback(() => {
@@ -691,15 +695,15 @@ function DraggableWidget({
 
   /** 计算缩放比例 */
   const scaleRatio =
-    canResize && naturalSizeRef.current && size.w > 0
+    canResize && !stretchFill && naturalSizeRef.current && size.w > 0
       ? Math.min(size.w / naturalSizeRef.current.w, size.h / naturalSizeRef.current.h)
       : 1
 
   // 视觉内容尺寸 = naturalSize * scaleRatio，容器应匹配这个尺寸
   const visualW =
-    canResize && naturalSizeRef.current && size.w > 0 ? Math.round(naturalSizeRef.current.w * scaleRatio) : undefined
+    canResize && !stretchFill && naturalSizeRef.current && size.w > 0 ? Math.round(naturalSizeRef.current.w * scaleRatio) : undefined
   const visualH =
-    canResize && naturalSizeRef.current && size.w > 0 ? Math.round(naturalSizeRef.current.h * scaleRatio) : undefined
+    canResize && !stretchFill && naturalSizeRef.current && size.w > 0 ? Math.round(naturalSizeRef.current.h * scaleRatio) : undefined
 
   useEffect(() => {
     setPos({ x: widget.x, y: widget.y })
