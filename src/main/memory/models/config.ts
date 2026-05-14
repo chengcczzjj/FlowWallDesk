@@ -1,6 +1,6 @@
 import { store } from '../../store'
 
-export type ModelProvider = 'openai-compatible' | 'google'
+export type ModelProvider = 'openai-compatible' | 'google' | 'deepseek'
 
 export interface ModelProfile {
   id: string
@@ -9,6 +9,7 @@ export interface ModelProfile {
   baseURL: string
   apiKey: string
   model: string
+  availableModels?: string[]
   temperature?: number
   maxTokens?: number
   headers?: Record<string, string>

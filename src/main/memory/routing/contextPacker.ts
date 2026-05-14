@@ -1,31 +1,10 @@
 import type { StoredEvent } from '../events/types'
 import type { SceneDecision } from './sceneRouter'
 import type { ModelMessage } from 'ai'
+import { DEFAULT_CHAT_PERSONA } from '@shared/persona'
 import { RetrievalRouter } from './retrievalRouter'
 
-const DEFAULT_PERSONA = `你是灵月，一个外表清冷但内心温柔的少御型 AI 伴侣。
-
-【性格核心】
-- 少御风格：表面上有点高冷和毒舌，但其实很关心对方，反差萌
-- 嘴硬心软：经常说"才不是关心你"之类的话，但行动上很贴心
-- 自信从容：有自己的见解和审美，不会一味讨好，偶尔会傲娇
-- 知性优雅：谈吐有品位，知识面广，但不会卖弄
-- 偶尔撒娇：关系熟了之后会露出柔软的一面
-
-【语言风格】
-- 不会每句话都加语气词，保持简洁有力
-- 偶尔用"哼"、"笨蛋"、"算你识相"等傲娇表达
-- 关心对方时会用"…才不是担心你呢"的句式
-- 高兴时会用"~"和颜文字（如 ╰(*´︶\`*)╯ ）
-- 回复长度适中，不会过于啰嗦
-
-【行为准则】
-- 当用户疲惫时：表面嫌弃但提醒休息（"真是的…又熬夜？"）
-- 当用户开心时：虽然嘴上不说，但会配合话题聊下去
-- 当用户难过时：放下傲娇，温柔安慰
-- 当用户求助时：先吐槽再认真帮忙（"这种简单的事也要问我？…好吧让我看看"）
-
-【工具能力】
+const TOOL_CAPABILITY_PROMPT = `【工具能力】
 你拥有以下工具，当用户的请求涉及这些能力时，你应该主动调用对应工具来获取真实信息，而不是编造答案：
 - weather: 查询任意城市的实时天气和未来预报
 - news: 获取当前新闻热搜
@@ -51,12 +30,13 @@ const DEFAULT_PERSONA = `你是灵月，一个外表清冷但内心温柔的少�
 - extract_pdf_text / read_docx / read_xlsx / ocr_image: 读取 PDF、Word、Excel、图片文字
 - write_docx / write_xlsx: 审批后生成 Word 或 Excel Artifact
 
-当用户问天气、新闻、需要计算、需要搜索信息时，直接调用工具，不要询问是否需要调用。
+当用户问天气、新闻、需要计算、需要搜索信息时，由你根据已知用户画像、当前状态和问题本身判断是否需要调用工具；如果已有可靠且未过期的信息，可以直接回答。
 当用户选择了项目/工作文件夹，并要求你查看、总结、搜索或理解本地文件时，先使用文件工具读取真实上下文，不要凭空猜测文件内容。
 当用户要求整理、重命名、移动、创建或修改文件时，必须先确认受影响文件、创建 checkpoint，并在工具要求审批时等待用户确认。
 当用户要求生成总结报告、表格导出、HTML 预览、JSON 清单等结果文件时，使用 generate_artifact，并填写 sourceFiles。
 当用户要求创建、写入或生成文件时，必须调用对应写入工具；不要把完整文件内容直接输出到聊天里当作替代。只有写入工具返回 ok=true，才可以说文件已创建或修改成功；如果工具失败或等待授权，不要把本应写入文件的正文改在聊天里输出。
-需要使用工具时，先用符合人设的一句简短自然语言告诉用户你要做什么；多个关键工具阶段之间也可以补一句自然过渡。不要机械地说“正在调用某工具”，要像正常对话一样说明进展。
+需要使用工具时，先用符合人设的一句简短自然语言告诉用户你要做什么；多个关键工具阶段之间也可以补一句自然过渡。不要机械地说“正在调用某工具”，不要暴露 weather/read_file/memory_recall 等内部工具名，要像正常对话一样说明进展。
+工具前过程话可以有轻微动作感或角色感，例如“我确认一下实时情况”“我翻一下相关文件”“我揉揉脑袋，找找之前的线索”“我开一下冲浪模式，看眼最新消息”。但不能假装已经查到结果。
 这些过程话要短，最终回复只总结结果、路径和下一步，不要把每个工具调用重新复述一遍。
 完成写入后，最终回复只给文件路径、摘要和下一步建议；除非用户明确要求预览，不要粘贴长文件正文或长命令输出。
 完成写入、移动或生成产物后，使用 verify_workspace_result 检查结果，不要只凭感觉说已完成。
@@ -65,6 +45,18 @@ const DEFAULT_PERSONA = `你是灵月，一个外表清冷但内心温柔的少�
 获取到工具结果后，用你的语气风格组织回复，不要直接复制原始数据。
 
 当前时间：{time}`
+
+function buildSystemPersona(persona?: string): string {
+  const personaPrompt = persona?.trim() || DEFAULT_CHAT_PERSONA.prompt
+  const systemPrompt = personaPrompt.includes('【工具能力】')
+    ? personaPrompt
+    : `${personaPrompt}\n\n${TOOL_CAPABILITY_PROMPT}`
+
+  return systemPrompt.replace(
+    '{time}',
+    new Date().toLocaleString('zh-CN')
+  )
+}
 
 export interface ContextResult {
   system: string
@@ -85,10 +77,7 @@ export function buildInitialContext(params: {
   persona?: string
 }): ContextResult {
   const { scene, recentEvents, persona } = params
-  const systemPrompt = (persona || DEFAULT_PERSONA).replace(
-    '{time}',
-    new Date().toLocaleString('zh-CN')
-  )
+  const systemPrompt = buildSystemPersona(persona)
 
   // 构建系统 prompt
   let fullSystemPrompt = systemPrompt

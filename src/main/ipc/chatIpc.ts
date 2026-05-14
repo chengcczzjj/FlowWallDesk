@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { ipcMain, dialog, clipboard, shell } from 'electron'
 import { IPC } from '@shared/ipc-channels'
+import { DEFAULT_CHAT_PERSONA } from '@shared/persona'
 import { ChatService } from '../memory/chat/chatService'
 import { AgentRunStore } from '../memory/agent/agentRunStore'
 import { ArtifactStore } from '../memory/agent/artifactStore'
@@ -9,13 +10,14 @@ import { runAutomationNow } from '../memory/agent/automationScheduler'
 import { ApprovalStore } from '../memory/agent/approvalStore'
 import { CheckpointStore } from '../memory/agent/checkpointStore'
 import { FileChangeStore } from '../memory/agent/fileChangeStore'
+import { MemoryStore } from '../memory/memories/memoryStore'
 import { ProjectStore } from '../memory/projects/projectStore'
 import { ModelConfig } from '../memory/models/config'
 import { testConnection, listModels } from '../memory/models/chatModel'
 import { store } from '../store'
 import type { ConversationMode } from '../memory/events/types'
 import type { ModelProfile } from '../memory/models/config'
-import type { AgentApprovalDecision, AgentFileChangeReviewState, WorkspacePermissionProfile } from '@shared/types'
+import type { AgentApprovalDecision, AgentFileChangeReviewState, ChatMemory, WorkspacePermissionProfile } from '@shared/types'
 
 /** 当前正在进行的流式任务，用于 stop */
 const activeStreams = new Map<string, AbortController>()
@@ -72,6 +74,20 @@ async function showPathInFolder(absolutePath: string): Promise<{ ok: boolean; er
   return { ok: true }
 }
 
+function isMaskedApiKey(apiKey: string): boolean {
+  return apiKey.includes('...')
+}
+
+function resolveProfileApiKey(profile: ModelProfile): ModelProfile {
+  if (!isMaskedApiKey(profile.apiKey)) return profile
+  const saved = ModelConfig.listProfiles().find((p) => p.id === profile.id)
+  return saved?.apiKey ? { ...profile, apiKey: saved.apiKey } : profile
+}
+
+function prepareProfileForSave(profile: ModelProfile): ModelProfile {
+  return resolveProfileApiKey(profile)
+}
+
 export function registerChatIpc(): void {
   // ─── 聊天 ────────────────────────────────────────────────
   ipcMain.on(
@@ -82,49 +98,56 @@ export function registerChatIpc(): void {
       const controller = new AbortController()
       activeStreams.set(streamId, controller)
 
-      ChatService.sendMessage(
-        {
-          conversationId: payload.conversationId,
-          projectId: payload.projectId,
-          mode: payload.mode,
-          text: payload.text,
-          internal: payload.internal,
-          forceAgentRun: payload.forceAgentRun,
-          abortSignal: controller.signal,
-        },
-        {
-          onToken(delta) {
-            if (!sender.isDestroyed()) {
-              sender.send(IPC.CHAT_STREAM_CHUNK, { streamId, delta })
-            }
-          },
-          onDone(full, conversationId) {
-            activeStreams.delete(streamId)
-            if (!sender.isDestroyed()) {
-              sender.send(IPC.CHAT_STREAM_END, { streamId, full, conversationId })
-            }
-          },
-          onError(error) {
-            activeStreams.delete(streamId)
-            if (!sender.isDestroyed()) {
-              sender.send(IPC.CHAT_STREAM_ERROR, { streamId, error })
-            }
-          },
-          onToolCall(event) {
-            if (!sender.isDestroyed()) {
-              sender.send(IPC.CHAT_TOOL_CALL, { streamId, ...event })
-            }
-          },
-          onRunEvent(runEvent) {
-            if (!sender.isDestroyed()) {
-              sender.send(IPC.AGENT_RUN_EVENT, { streamId, ...runEvent })
-            }
-          },
-        }
-      )
-
       // 返回 streamId 让前端可以追踪
       event.returnValue = streamId
+
+      setImmediate(() => {
+        void ChatService.sendMessage(
+          {
+            conversationId: payload.conversationId,
+            projectId: payload.projectId,
+            mode: payload.mode,
+            text: payload.text,
+            internal: payload.internal,
+            forceAgentRun: payload.forceAgentRun,
+            abortSignal: controller.signal,
+          },
+          {
+            onToken(delta) {
+              if (!sender.isDestroyed()) {
+                sender.send(IPC.CHAT_STREAM_CHUNK, { streamId, delta })
+              }
+            },
+            onDone(full, conversationId) {
+              activeStreams.delete(streamId)
+              if (!sender.isDestroyed()) {
+                sender.send(IPC.CHAT_STREAM_END, { streamId, full, conversationId })
+              }
+            },
+            onError(error) {
+              activeStreams.delete(streamId)
+              if (!sender.isDestroyed()) {
+                sender.send(IPC.CHAT_STREAM_ERROR, { streamId, error })
+              }
+            },
+            onToolCall(event) {
+              if (!sender.isDestroyed()) {
+                sender.send(IPC.CHAT_TOOL_CALL, { streamId, ...event })
+              }
+            },
+            onRunEvent(runEvent) {
+              if (!sender.isDestroyed()) {
+                sender.send(IPC.AGENT_RUN_EVENT, { streamId, ...runEvent })
+              }
+            },
+          }
+        ).catch((error: unknown) => {
+          activeStreams.delete(streamId)
+          if (!sender.isDestroyed()) {
+            sender.send(IPC.CHAT_STREAM_ERROR, { streamId, error: (error as Error).message ?? String(error) })
+          }
+        })
+      })
     }
   )
 
@@ -195,22 +218,15 @@ export function registerChatIpc(): void {
 
   // ─── 模型 Profile 管理 ──────────────────────────────────
   ipcMain.handle(IPC.CHAT_LIST_PROFILES, () => {
-    const profiles = ModelConfig.listProfiles()
-    // 返回时隐藏 apiKey 中间部分
-    return profiles.map((p) => ({
-      ...p,
-      apiKey: p.apiKey ? `${p.apiKey.slice(0, 6)}...${p.apiKey.slice(-4)}` : '',
-    }))
+    return ModelConfig.listProfiles()
   })
 
   ipcMain.handle(IPC.CHAT_GET_ACTIVE_PROFILE, () => {
-    const p = ModelConfig.getActive()
-    if (!p) return null
-    return { ...p, apiKey: p.apiKey ? `${p.apiKey.slice(0, 6)}...${p.apiKey.slice(-4)}` : '' }
+    return ModelConfig.getActive()
   })
 
   ipcMain.handle(IPC.CHAT_UPSERT_PROFILE, (_e, profile: ModelProfile) => {
-    ModelConfig.upsertProfile(profile)
+    ModelConfig.upsertProfile(prepareProfileForSave(profile))
     return true
   })
 
@@ -225,11 +241,11 @@ export function registerChatIpc(): void {
   })
 
   ipcMain.handle(IPC.CHAT_TEST_PROFILE, async (_e, profile: ModelProfile) => {
-    return testConnection(profile)
+    return testConnection(resolveProfileApiKey(profile))
   })
 
   ipcMain.handle(IPC.CHAT_LIST_MODELS, async (_e, profile: ModelProfile) => {
-    return listModels(profile)
+    return listModels(resolveProfileApiKey(profile))
   })
 
   // ─── 人设 Persona ──────────────────────────────────────
@@ -239,7 +255,27 @@ export function registerChatIpc(): void {
   })
 
   ipcMain.handle(IPC.CHAT_GET_PERSONA, () => {
-    return store.get('persona') ?? { name: '灵月', prompt: '', avatar: '' }
+    return store.get('persona') ?? { name: DEFAULT_CHAT_PERSONA.name, prompt: '', avatar: '' }
+  })
+
+  ipcMain.handle(IPC.CHAT_LIST_MEMORIES, (): ChatMemory[] => {
+    try {
+      return MemoryStore.query({ limit: 12 }).map((memory) => ({
+        id: memory.id,
+        key: memory.key,
+        scope: memory.scope,
+        memoryType: memory.memoryType,
+        projectId: memory.projectId,
+        content: memory.content,
+        importance: memory.importance,
+        confidence: memory.confidence,
+        sensitivity: memory.sensitivity,
+        updatedAt: memory.updatedAt,
+      }))
+    } catch (error) {
+      console.warn('[chatIpc] list memories failed:', error)
+      return []
+    }
   })
 
   // ─── AgentRun ──────────────────────────────────────────

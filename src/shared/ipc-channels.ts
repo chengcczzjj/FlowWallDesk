@@ -83,6 +83,7 @@ export const IPC = {
   CHAT_LIST_MODELS: 'chat:list-models',
   CHAT_SAVE_PERSONA: 'chat:save-persona',
   CHAT_GET_PERSONA: 'chat:get-persona',
+  CHAT_LIST_MEMORIES: 'chat:list-memories',
 
   // AgentRun
   AGENT_RUN_LIST_BY_THREAD: 'agent-run:list-by-thread',

@@ -200,6 +200,21 @@ export interface ChatMessage {
   createdAt: number
 }
 
+export type ChatMemoryImportance = 'low' | 'medium' | 'high'
+
+export interface ChatMemory {
+  id: string
+  key: string
+  scope: string
+  memoryType: string | null
+  projectId: string | null
+  content: string
+  importance: ChatMemoryImportance
+  confidence: number
+  sensitivity: string
+  updatedAt: number
+}
+
 export type AgentRunStatus =
   | 'idle'
   | 'scoping'
@@ -370,7 +385,7 @@ export interface AgentAutomationResult {
   finishedAt: number | null
 }
 
-export type ModelProvider = 'openai-compatible' | 'google'
+export type ModelProvider = 'openai-compatible' | 'google' | 'deepseek'
 
 export interface ModelProfile {
   id: string
@@ -379,6 +394,7 @@ export interface ModelProfile {
   baseURL: string
   apiKey: string
   model: string
+  availableModels?: string[]
   temperature?: number
   maxTokens?: number
   headers?: Record<string, string>

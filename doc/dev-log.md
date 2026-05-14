@@ -1,5 +1,25 @@
 # 灵月桌面 开发日志
 
+## [2026-05-15 00:30] 完善 DeepSeek 与 Agent 人性化对话体验
+
+**变更摘要**: 修复 DeepSeek 工具循环、模型配置和 Agent 过程 UI，支持流式工具续聊、触发式记忆召回、人格化对话气泡与工具记录时间线。
+
+**涉及模块**:
+
+- `src/main/memory/models/` / `src/main/memory/chat/chatService.ts`: 新增 DeepSeek 专用流式工具循环，保留 `reasoning_content`，增加只读工具去重和工具前文本推流。
+- `src/renderer/main-ui/pages/chat/` / `src/shared/persona.ts`: 增强 Persona 管理、聊天主界面、工具记录时间线和人性化状态展示。
+- `src/renderer/main-ui/pages/settings/` / `src/main/ipc/chatIpc.ts`: 补齐 DeepSeek provider、模型列表、连接测试和 API Key 处理体验。
+- `doc/project-status.md` / `doc/VSCode智能体设计文档.md` / `doc/记忆系统设计说明.md`: 同步 Agent 当前实现、人性化 UI 分层和记忆召回边界。
+
+**遇到的问题**:
+
+- DeepSeek thinking 模型工具续聊需要回传 `reasoning_content`，AI SDK 兼容层会丢失该字段 → 新增 DeepSeek 专用 SSE 工具循环。
+- 模型文本和工具记录混排会导致气泡合并、记录丢失或重复显示 → 按 `textOffset` 构建对话/工具交错时间线，连续无文本间隔的重复工具才合并。
+
+**Git Commit**: 已提交 — feat(agent): enhance deepseek and humanized tool timeline
+
+---
+
 ## [2026-05-06 15:55] 接入像素宠物分页与高密度角色绘制
 
 **变更摘要**: 新增桌宠的像素宠物分页，接入默认鬣狗与晴蓝双角色、高密度像素绘制、动作库、模型生成入口和桌面 Pet widget 同步。

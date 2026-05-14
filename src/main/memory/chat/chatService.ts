@@ -8,11 +8,13 @@ import { classifyBasic } from '../routing/sceneRouter'
 import { buildInitialContext } from '../routing/contextPacker'
 import { ModelConfig } from '../models/config'
 import { streamChat } from '../models/chatModel'
-import { getToolSet, type ToolCallEvent } from '../tools'
+import { getToolSet, REGISTERED_TOOL_NAMES, type ToolCallEvent } from '../tools'
 import { buildToolRouterPrompt } from '../tools/toolRouter'
+import { store } from '../../store'
 import type { ConversationMode } from '../events/types'
 import type { ConversationRecord } from '../conversations/conversationStore'
 import type { AgentApproval, AgentRunEvent, AgentRunStatus } from '@shared/types'
+import type { ToolSet } from 'ai'
 
 export interface SendMessageParams {
   conversationId?: string
@@ -56,8 +58,92 @@ function createAbortError(): Error {
   return error
 }
 
+function getSavedPersonaPrompt(): string | undefined {
+  const persona = store.get('persona')
+  const prompt = persona?.prompt?.trim()
+  if (!prompt) return undefined
+
+  const name = persona?.name?.trim()
+  return name ? `${prompt}\n\n【当前人设名称】${name}` : prompt
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+const CACHED_READ_TOOL_NAMES = new Set([
+  'get_current_time',
+  'calculator',
+  'web_search',
+  'get_system_info',
+  'memory_recall',
+  'weather',
+  'news',
+  'list_directory',
+  'read_file',
+  'search_text',
+  'get_file_info',
+  'compare_file_versions',
+  'extract_pdf_text',
+  'read_docx',
+  'read_xlsx',
+  'ocr_image',
+])
+
+type ExecutableTool = { execute?: (...args: unknown[]) => unknown }
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+}
+
+function normalizeToolCacheInput(toolName: string, input: unknown): unknown {
+  if (toolName === 'weather') {
+    const record = asRecord(input)
+    const city = typeof record?.city === 'string'
+      ? record.city.trim().replace(/市$/, '').toLowerCase()
+      : ''
+    const days = typeof record?.days === 'number' ? record.days : 3
+    return { city, days }
+  }
+  return input
+}
+
+function toolCacheKey(toolName: string, input: unknown): string {
+  return `${toolName}:${stableStringify(normalizeToolCacheInput(toolName, input))}`
+}
+
+function shouldCacheToolCall(toolName: string): boolean {
+  return CACHED_READ_TOOL_NAMES.has(toolName)
+}
+
+function createCachedToolSet(tools: ToolSet): ToolSet {
+  const cache = new Map<string, Promise<unknown>>()
+  const wrapped: Record<string, unknown> = {}
+
+  for (const [toolName, toolDef] of Object.entries(tools)) {
+    const executable = toolDef as ExecutableTool
+    if (!shouldCacheToolCall(toolName) || typeof executable.execute !== 'function') {
+      wrapped[toolName] = toolDef
+      continue
+    }
+
+    wrapped[toolName] = {
+      ...toolDef,
+      execute: (...args: unknown[]) => {
+        const key = toolCacheKey(toolName, args[0])
+        const existing = cache.get(key)
+        if (existing) return existing
+        const promise = Promise.resolve(executable.execute!(...args))
+        cache.set(key, promise)
+        return promise
+      },
+    }
+  }
+
+  return wrapped as ToolSet
 }
 
 function booleanValue(record: Record<string, unknown> | null, key: string): boolean | null {
@@ -117,16 +203,9 @@ function summarizeSuccessfulDelivery(toolName: string, output: unknown): string 
   return `${toolName}: 已完成`
 }
 
-const AGENT_RUN_TOOL_NAMES = new Set([
-  'read_file',
-  'search_text',
-  'extract_pdf_text',
-  'read_docx',
-  'read_xlsx',
-  'ocr_image',
-  'create_checkpoint',
-  'restore_checkpoint',
-  'compare_file_versions',
+const AGENT_RUN_TOOL_NAMES = new Set<string>(REGISTERED_TOOL_NAMES)
+
+const WRITE_TOOL_NAMES = new Set([
   'create_file',
   'patch_file',
   'write_file',
@@ -136,14 +215,50 @@ const AGENT_RUN_TOOL_NAMES = new Set([
   'delete_to_trash',
   'restore_from_trash',
   'generate_artifact',
-  'verify_workspace_result',
-  'run_command',
   'write_docx',
   'write_xlsx',
 ])
 
+const READ_TOOL_NAMES = new Set([
+  'list_directory',
+  'read_file',
+  'search_text',
+  'get_file_info',
+  'web_search',
+  'weather',
+  'news',
+  'extract_pdf_text',
+  'read_docx',
+  'read_xlsx',
+  'ocr_image',
+])
+
 function shouldAttachAgentRunForTool(toolName: string): boolean {
   return AGENT_RUN_TOOL_NAMES.has(toolName)
+}
+
+function getToolPlanHint(toolName: string): string {
+  if (WRITE_TOOL_NAMES.has(toolName)) return '写入文件 生成产物 验证结果'
+  if (toolName === 'run_command') return '运行命令 验证结果'
+  if (toolName.includes('checkpoint')) return '创建快照 验证结果'
+  if (READ_TOOL_NAMES.has(toolName)) return '读取文件 搜索信息 分析上下文'
+  return '使用工具 获取信息 整理回复'
+}
+
+function summarizeCompletedTool(toolName: string, output: unknown): string {
+  const record = asRecord(output)
+  const path = stringValue(record, 'path')
+  const formatted = stringValue(record, 'formatted')
+  const abstract = stringValue(record, 'abstract')
+  const location = stringValue(record, 'location')
+  const result = record?.result
+
+  if (formatted) return `${toolName}: ${formatted}`
+  if (typeof result === 'number' || typeof result === 'string') return `${toolName}: ${result}`
+  if (path) return `${toolName}: ${path}`
+  if (abstract) return `${toolName}: ${abstract}`
+  if (location) return `${toolName}: ${location}`
+  return `${toolName}: 已完成`
 }
 
 export const ChatService = {
@@ -190,6 +305,7 @@ export const ChatService = {
     let hasPendingApproval = false
     const toolFailures: string[] = []
     const successfulDeliveries: string[] = []
+    const completedToolSummaries: string[] = []
     let full = ''
     const emitRunStatus = (status: AgentRunStatus, summary?: string) => {
       if (!run) return
@@ -222,7 +338,7 @@ export const ChatService = {
 
     // 4. 获取最近消息构建上下文
     const recent = EventStore.listRecent(conv.id, 30)
-    const { system, messages } = buildInitialContext({ scene, recentEvents: recent })
+    const { system, messages } = buildInitialContext({ scene, recentEvents: recent, persona: getSavedPersonaPrompt() })
     if (params.internal) messages.push({ role: 'user', content: text })
     const toolRouterSystem = buildToolRouterPrompt({ workspace })
     const workspaceRoot = workspace?.rootPath ?? workspace?.path
@@ -240,7 +356,10 @@ export const ChatService = {
     }
 
     // 6. 获取工具集
-    const tools = getToolSet(toolContext)
+    const rawTools = getToolSet(toolContext)
+    const tools = createCachedToolSet(rawTools)
+    const visibleToolOffsets = new Map<string, number>()
+    const hiddenDuplicateToolCallIds = new Set<string>()
 
     // 7. 流式调用（带 tool calling 支持）
     try {
@@ -252,9 +371,22 @@ export const ChatService = {
         maxSteps: 8,
         abortSignal: params.abortSignal,
         toolCallbacks: {
+          onTextDelta(delta) {
+            full += delta
+            callbacks.onToken(delta)
+          },
           onToolCallStart({ toolName, toolCallId, input }) {
+            if (shouldCacheToolCall(toolName)) {
+              const key = toolCacheKey(toolName, input)
+              const previousOffset = visibleToolOffsets.get(key)
+              if (previousOffset === full.length) {
+                hiddenDuplicateToolCallIds.add(toolCallId)
+                return
+              }
+              visibleToolOffsets.set(key, full.length)
+            }
             if (!run && shouldAttachAgentRunForTool(toolName)) {
-              ensureAgentRun('executing', '写入文件 生成产物 读取敏感文件 运行命令 验证结果')
+              ensureAgentRun('executing', getToolPlanHint(toolName))
             }
             if (run && toolName === 'create_checkpoint') {
               currentPlan = updatePlanForRunStatus(currentPlan, 'checkpointing')
@@ -292,11 +424,17 @@ export const ChatService = {
             })
           },
           onToolCallFinish({ toolName, toolCallId, output, error, durationMs }) {
+            if (hiddenDuplicateToolCallIds.has(toolCallId)) {
+              hiddenDuplicateToolCallIds.delete(toolCallId)
+              return
+            }
             const contextFiles = extractContextFiles(output)
             const approval = extractApproval(output)
             const failedTool = isFailedToolOutput(output, error)
             if (isSuccessfulDelivery(toolName, output)) {
               successfulDeliveries.push(summarizeSuccessfulDelivery(toolName, output))
+            } else if (!failedTool && !approval) {
+              completedToolSummaries.push(summarizeCompletedTool(toolName, output))
             }
             if (failedTool) {
               toolFailures.push(summarizeToolFailure(toolName, output, error))
@@ -377,6 +515,11 @@ export const ChatService = {
         callbacks.onToken(chunk)
       }
 
+      const finalStreamText = (await result.text).trim()
+      if (finalStreamText && finalStreamText !== full.trim()) {
+        full = finalStreamText
+      }
+
       // 8. 写入 AI 回复
       const failedSummary = toolFailures.slice(0, 3)
       const assistantText = hasPendingApproval
@@ -387,7 +530,21 @@ export const ChatService = {
               ...failedSummary.map((item) => `- ${item}`),
               '请调整权限、路径或工具参数后重试。',
             ].join('\n')
-          : full.trim() || (successfulDeliveries.length > 0 ? ['已完成本轮任务。', ...successfulDeliveries.slice(0, 3).map((item) => `- ${item}`)].join('\n') : full)
+          : full.trim() || (successfulDeliveries.length > 0
+              ? ['已完成本轮任务。', ...successfulDeliveries.slice(0, 3).map((item) => `- ${item}`)].join('\n')
+              : completedToolSummaries.length > 0
+                ? ['工具已执行完成，但模型没有继续生成总结。', ...completedToolSummaries.slice(0, 3).map((item) => `- ${item}`)].join('\n')
+                : full)
+
+      if (!assistantText.trim()) {
+        const finishReason = await Promise.resolve(result.finishReason).catch(() => undefined)
+        const rawFinishReason = await Promise.resolve(result.rawFinishReason).catch(() => undefined)
+        const reasonText = [finishReason, rawFinishReason].filter(Boolean).join(' / ')
+        throw new Error(reasonText
+          ? `模型没有返回可显示内容（${reasonText}）。请稍后重试或切换模型。`
+          : '模型没有返回可显示内容。请稍后重试或切换模型。')
+      }
+
       EventStore.append({
         conversationId: conv.id,
         eventType: 'assistant_message',

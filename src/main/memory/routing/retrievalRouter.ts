@@ -73,6 +73,12 @@ function detectDomains(text: string): string[] {
   return domains
 }
 
+function shouldRecallLongTermMemory(text: string, scene: SceneDecision): boolean {
+  if (scene.scene === 'private' || scene.scene === 'emotion') return true
+  if (/记得|还记|回忆|之前|以前|上次|刚才|那次|我们说过|我说过|你说过|按我.*偏好|我的偏好|老规矩|还是那个|继续.*方案|项目.*决策/.test(text)) return true
+  return false
+}
+
 export const RetrievalRouter = {
   /**
    * 根据场景和用户输入规划检索策略
@@ -85,26 +91,26 @@ export const RetrievalRouter = {
     const deep = scene.depth === 'deep'
     const maxContextChars = deep ? 3000 : 1500
 
-    // 确定允许查询的数据源
-    const sources: ('state' | 'memory' | 'events')[] = ['memory']
-    if (detectedDomains.length > 0 || scene.scene === 'tool') {
-      sources.unshift('state')
-    }
+    const recallMemory = shouldRecallLongTermMemory(userText, scene)
+
+    // 确定允许查询的数据源：当前状态可轻量读取，长期记忆只在明确需要历史时召回。
+    const sources: ('state' | 'memory' | 'events')[] = ['state']
+    if (recallMemory) sources.push('memory')
 
     // 构建记忆检索参数
     const memoryQuery: MemoryQueryOptions = {
       scopes: scene.allowed,
       keywords: keywords.length > 0 ? keywords : undefined,
-      limit: deep ? 12 : 6,
+      limit: deep ? 8 : 4,
     }
 
     // 状态检索 domains
     const domainMap: Record<string, string[]> = {
-      daily: ['user', 'preference', 'schedule', ...detectedDomains],
-      work: ['task', 'project', 'schedule', ...detectedDomains],
-      tool: ['device', 'system', 'task', ...detectedDomains],
-      emotion: ['user', 'preference'],
-      private: ['preference'],
+      daily: ['profile', 'user', 'preference', 'schedule', ...detectedDomains],
+      work: ['profile', 'task', 'project', 'schedule', ...detectedDomains],
+      tool: ['profile', 'device', 'system', 'task', ...detectedDomains],
+      emotion: ['profile', 'user', 'preference'],
+      private: ['profile', 'preference'],
     }
     const stateDomains = domainMap[scene.scene] ?? detectedDomains
 

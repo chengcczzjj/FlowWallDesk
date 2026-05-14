@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, ApiEndpointMeta, ChatConversation, ChatMessage, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile } from '@shared/types'
+import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile } from '@shared/types'
 
 const api = {
   app: {
@@ -134,6 +134,8 @@ const api = {
       ipcRenderer.invoke(IPC.CHAT_SAVE_PERSONA, persona),
     getPersona: (): Promise<{ name: string; prompt: string; avatar?: string }> =>
       ipcRenderer.invoke(IPC.CHAT_GET_PERSONA),
+    listMemories: (): Promise<ChatMemory[]> =>
+      ipcRenderer.invoke(IPC.CHAT_LIST_MEMORIES),
     listAgentRuns: (threadId: string): Promise<AgentRun[]> =>
       ipcRenderer.invoke(IPC.AGENT_RUN_LIST_BY_THREAD, threadId),
     getAgentRun: (id: string): Promise<AgentRun | null> =>

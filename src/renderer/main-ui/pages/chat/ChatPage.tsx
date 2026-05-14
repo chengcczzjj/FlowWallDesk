@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, forwardRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, forwardRef, type ReactNode } from 'react'
 import {
   Sparkles,
   ArrowUp,
@@ -31,8 +31,28 @@ import {
   Play,
   Pause,
   Inbox,
+  Brain,
+  Heart,
+  Target,
+  Zap,
+  X,
+  Maximize2,
 } from 'lucide-react'
-import type { AgentApproval, AgentApprovalDecision, AgentArtifact, AgentAutomation, AgentAutomationResult, AgentFileChange, AgentRun, ChatConversation, ChatProject, WorkspacePermissionProfile } from '@shared/types'
+import type { AgentApproval, AgentApprovalDecision, AgentArtifact, AgentAutomation, AgentAutomationResult, AgentFileChange, AgentRun, ChatConversation, ChatMemory, ChatProject, WorkspacePermissionProfile } from '@shared/types'
+import { PixelPetCanvas } from '@renderer/shared/PixelPetCanvas'
+import {
+  PIXEL_PET_CHANGE_EVENT,
+  PIXEL_PET_SETTINGS_KEY,
+  PIXEL_PET_STATES,
+  PIXEL_PET_STORAGE_KEY,
+  createDefaultPixelPets,
+  getActivePixelPet,
+  normalizePixelPet,
+  normalizePixelPetSettings,
+  type PixelPet,
+  type PixelPetSettings,
+  type PixelPetStateKey,
+} from '@renderer/shared/pixel-pet'
 import { PersonaPage } from './PersonaPage'
 import './chat.css'
 
@@ -44,6 +64,14 @@ type SortOrder = 'created' | 'updated'
 type DisplayFilter = 'all' | 'relevant'
 
 const CHAT_SIDEBAR_STATE_KEY = 'lingyue-chat-sidebar-state'
+const PET_IDLE_STATES: PixelPetStateKey[] = ['idle', 'sit', 'walk', 'reading', 'music', 'sleepy']
+const PET_TRANSIENT_MS = 1800
+const MEMORY_PLACEHOLDER_TYPES = [
+  { type: 'preference', label: '偏好', line: '喜欢的语气、工具和工作节奏会沉淀在这里' },
+  { type: 'relationship', label: '关系', line: '常提到的人、宠物和协作关系会归档在这里' },
+  { type: 'goal', label: '目标', line: '长期项目、计划和承诺会被整理成目标记忆' },
+  { type: 'episode', label: '片段', line: '一次对话里的关键事实会形成可回忆的碎片' },
+]
 
 interface DisplayMessage {
   id: string
@@ -75,7 +103,103 @@ interface ChatHistoryEvent {
   createdAt: number
 }
 
+interface ChatPetSnapshot {
+  pets: PixelPet[]
+  settings: PixelPetSettings
+  activePet: PixelPet
+}
+
 // ─── Helpers ──────────────────────────────────────────────
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function loadChatPetSnapshot(): ChatPetSnapshot {
+  const defaults = createDefaultPixelPets()
+  let pets = defaults
+
+  try {
+    const savedPets = JSON.parse(localStorage.getItem(PIXEL_PET_STORAGE_KEY) || '[]')
+    const defaultIds = new Set(defaults.map((pet) => pet.id))
+    const generatedPets = Array.isArray(savedPets)
+      ? savedPets
+          .filter((pet) => !defaultIds.has(isRecord(pet) ? String(pet.id || '') : ''))
+          .map(normalizePixelPet)
+      : []
+    pets = [...defaults, ...generatedPets]
+  } catch {
+    pets = defaults
+  }
+
+  let settings: PixelPetSettings
+  try {
+    settings = normalizePixelPetSettings(JSON.parse(localStorage.getItem(PIXEL_PET_SETTINGS_KEY) || '{}'), pets)
+  } catch {
+    settings = normalizePixelPetSettings({}, pets)
+  }
+
+  return {
+    pets,
+    settings,
+    activePet: getActivePixelPet(pets, settings),
+  }
+}
+
+function getDailyPetState(): PixelPetStateKey {
+  return PET_IDLE_STATES[Math.floor(Date.now() / 45_000) % PET_IDLE_STATES.length]
+}
+
+function inferPetStateFromText(text: string): PixelPetStateKey {
+  const value = text.toLowerCase()
+  if (/bug|报错|错误|失败|崩|error|fail/.test(value)) return 'error'
+  if (/新闻|搜索|网页|资料|查一下|search|web/.test(value)) return 'surfing'
+  if (/代码|开发|构建|修复|文件|项目|code|build|fix/.test(value)) return 'coding'
+  if (/记忆|整理|归档|总结|memory/.test(value)) return 'organizing'
+  if (/为什么|怎么|如何|\?|？/.test(value)) return 'thinking'
+  if (/难过|伤心|不开心|累|烦|焦虑|哭/.test(value)) return 'sorrow'
+  if (/开心|喜欢|太好了|棒|快乐|哈哈/.test(value)) return 'joy'
+  return 'speaking'
+}
+
+function getToolDrivenPetState(toolCalls: ToolCallDisplay[]): PixelPetStateKey | null {
+  const toolNames = toolCalls.map((item) => item.toolName)
+  if (toolNames.some((name) => name.includes('memory'))) return 'organizing'
+  if (toolNames.some((name) => name.includes('search') || name.includes('web') || name.includes('news'))) return 'surfing'
+  if (toolNames.some((name) => name.includes('file') || name.includes('workspace') || name.includes('command') || name.includes('code'))) return 'coding'
+  if (toolNames.length > 0) return 'thinking'
+  return null
+}
+
+function petStatusText(name: string, status: ChatStatus, state: PixelPetStateKey, toolCalls: ToolCallDisplay[], elapsedSeconds: number): string {
+  if (status === 'error') return `${name}这一步卡住了，等你看一眼。`
+  if (status === 'idle') return `${name}正在${PIXEL_PET_STATES[state].short}中...`
+  if (elapsedSeconds >= 25) return `${name}还在等结果回来，这轮有点慢。`
+  if (status === 'connecting') return `${name}正在接上思路...`
+  if (status === 'thinking') return `${name}在认真琢磨你的问题...`
+
+  const toolNames = toolCalls.map((item) => item.toolName)
+  if (toolNames.some((toolName) => toolName.includes('memory'))) return `${name}在翻找记忆线索...`
+  if (toolNames.some((toolName) => toolName.includes('search') || toolName.includes('web') || toolName.includes('news'))) return `${name}去看最新信息了...`
+  if (toolNames.some((toolName) => toolName.includes('file') || toolName.includes('workspace') || toolName.includes('command'))) return `${name}在处理工作区...`
+  return `${name}正在回应你...`
+}
+
+
+function memoryTypeLabel(type: string | null): string {
+  if (!type) return '片段'
+  if (type.includes('preference') || type.includes('偏好')) return '偏好'
+  if (type.includes('relationship') || type.includes('关系')) return '关系'
+  if (type.includes('goal') || type.includes('目标')) return '目标'
+  if (type.includes('project') || type.includes('项目')) return '项目'
+  return '片段'
+}
+
+function importanceLabel(importance: ChatMemory['importance']): string {
+  if (importance === 'high') return '重要'
+  if (importance === 'medium') return '常用'
+  return '轻量'
+}
+
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts
   if (diff < 60_000) return '刚刚'
@@ -191,6 +315,11 @@ function isOperationalAssistantText(text: string): boolean {
   if (value === '正在连接模型，准备开始处理。') return true
   if (value === '正在理解任务，并判断需要哪些工具。') return true
   if (value === '正在判断需要哪些工具，并开始执行合适的步骤。') return true
+  if (value === '我先接上模型，马上开始处理。') return true
+  if (value === '我先理一下你的需求，看看要查哪几处。') return true
+  if (value === '我先把线索铺开，处理过程会放在这里。') return true
+  if (value === '思考中') return true
+  if (value === '仍在思考中') return true
   if (value === '需要授权后继续。') return true
   if (value === '已停止运行。已完成的步骤会保留在任务记录里。') return true
   if (value.startsWith('工具执行未完成，未生成最终交付结果。')) return true
@@ -217,38 +346,65 @@ function splitTrailingOperationalText(text: string): { text: string; statusText:
   }
 }
 
-function splitAssistantTextForDisplay(text: string, toolCalls?: ToolCallDisplay[]): { processText: string; finalText: string; statusText: string } {
-  const calls = toolCalls ?? []
-  if (!text.trim()) return { processText: '', finalText: '', statusText: '' }
-  if (calls.length === 0) {
-    const finalParts = splitTrailingOperationalText(text)
-    return { processText: '', finalText: finalParts.text, statusText: finalParts.statusText }
-  }
+type AssistantContentItem =
+  | { type: 'bubble'; id: string; text: string }
+  | { type: 'tools'; id: string; calls: ToolCallDisplay[] }
+  | { type: 'status'; id: string; text: string }
 
-  const offsets = calls
-    .map((item) => item.textOffset)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+function buildAssistantContentTimeline(params: {
+  text: string
+  toolCalls?: ToolCallDisplay[]
+  live?: boolean
+  status?: ChatStatus
+  elapsedSeconds?: number
+}): AssistantContentItem[] {
+  const { text, toolCalls = [], live = false, status = 'idle', elapsedSeconds = 0 } = params
+  const finalParts = splitTrailingOperationalText(text)
+  const displayText = finalParts.text
+  const items: AssistantContentItem[] = []
+  const sortedCalls = toolCalls.map((call, index) => ({ call, index })).sort((a, b) => {
+    const left = a.call.textOffset ?? Number.MAX_SAFE_INTEGER
+    const right = b.call.textOffset ?? Number.MAX_SAFE_INTEGER
+    return left === right ? a.index - b.index : left - right
+  })
 
-  let processText = ''
-  let finalText = text
-  if (offsets.length > 0) {
-    const boundary = Math.max(0, Math.min(Math.max(...offsets), text.length))
-    processText = text.slice(0, boundary).trim()
-    finalText = text.slice(boundary).trim()
-  } else {
-    const paragraphs = splitParagraphs(text)
-    if (paragraphs.length > 1) {
-      processText = paragraphs.slice(0, -1).join('\n\n')
-      finalText = paragraphs[paragraphs.length - 1]
+  const appendText = (value: string) => {
+    for (const paragraph of splitParagraphs(value)) {
+      items.push({ type: 'bubble', id: `bubble-${items.length}`, text: paragraph })
     }
   }
 
-  const finalParts = splitTrailingOperationalText(finalText)
-  return {
-    processText,
-    finalText: finalParts.text,
-    statusText: finalParts.statusText,
+  let cursor = 0
+  let toolBlock: ToolCallDisplay[] = []
+  const flushToolBlock = () => {
+    if (toolBlock.length === 0) return
+    items.push({ type: 'tools', id: `tools-${items.length}`, calls: toolBlock })
+    toolBlock = []
   }
+
+  for (const { call } of sortedCalls) {
+    const offset = typeof call.textOffset === 'number'
+      ? Math.max(0, Math.min(call.textOffset, displayText.length))
+      : cursor
+    const segment = offset > cursor ? displayText.slice(cursor, offset) : ''
+    if (segment.trim()) {
+      flushToolBlock()
+      appendText(segment)
+    }
+    cursor = Math.max(cursor, offset)
+    toolBlock.push(call)
+  }
+
+  flushToolBlock()
+  if (cursor < displayText.length) appendText(displayText.slice(cursor))
+  if (finalParts.statusText.trim()) {
+    items.push({ type: 'status', id: `status-${items.length}`, text: finalParts.statusText.trim() })
+  }
+  if (items.length === 0 && live) {
+    items.push({ type: 'status', id: 'status-thinking', text: toolProgressSentence(toolCalls, status, elapsedSeconds) })
+  }
+
+  return items
 }
 
 function redactToolPayload(value: unknown): unknown {
@@ -340,10 +496,12 @@ function buildDisplayMessagesFromEvents(events: ChatHistoryEvent[]): DisplayMess
     }
 
     if (event.eventType === 'assistant_message') {
+      const assistantText = typeof event.content.text === 'string' ? event.content.text : ''
+      if (!assistantText.trim() && pendingTools.length === 0) continue
       result.push({
         id: event.id,
         role: 'assistant',
-        text: typeof event.content.text === 'string' ? event.content.text : '',
+        text: assistantText,
         status: 'done',
         timestamp: event.createdAt,
         toolCalls: pendingTools.length > 0 ? pendingTools.map((item) => ({ ...item })) : undefined,
@@ -388,7 +546,7 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
     const stderr = stringValue(output, 'stderr')
     const log = [stdout, stderr].filter(Boolean).join('\n')
     return {
-      title: tc.status === 'running' ? '正在运行命令' : ok === false || tc.status === 'error' ? '命令未完成' : '命令已运行',
+      title: ok === false || tc.status === 'error' ? '命令没跑完' : tc.status === 'running' ? '运行命令' : '命令已跑完',
       detail: command ? truncateSingleLine(command, 180) : label,
       meta: `cwd: ${cwd}`,
       log: log ? (log.length > 4000 ? `${log.slice(0, 4000)}\n...` : log) : undefined,
@@ -399,7 +557,7 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
   if (tc.toolName === 'create_file' || tc.toolName === 'write_file' || tc.toolName === 'patch_file') {
     const verb = tc.toolName === 'patch_file' ? '修改文件' : tc.toolName === 'write_file' ? '写入文件' : '创建文件'
     return {
-      title: tc.status === 'running' ? `正在${verb}` : ok === false || tc.status === 'error' ? `${verb}未完成` : `${verb}完成`,
+      title: ok === false || tc.status === 'error' ? `${verb}没完成` : tc.status === 'running' ? verb : `${verb}完成`,
       detail: pathValue ?? '等待文件路径',
       meta: error ?? hiddenContentMeta,
       path: pathValue ?? undefined,
@@ -411,7 +569,7 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
     const skippedPaths = stringArrayValue(output, 'skippedPaths')
     const protectedFiles = stringArrayValue(output, 'protectedFiles')
     return {
-      title: tc.status === 'running' ? '正在创建快照' : skippedPaths.length > 0 && protectedFiles.length === 0 ? '无需创建快照' : ok === false || tc.status === 'error' ? '快照未完成' : '快照已创建',
+      title: skippedPaths.length > 0 && protectedFiles.length === 0 ? '无需快照' : ok === false || tc.status === 'error' ? '快照没建好' : tc.status === 'running' ? '保护现场' : '快照已创建',
       detail: skippedPaths.length > 0 && protectedFiles.length === 0 ? `新文件无需快照：${skippedPaths[0]}` : protectedFiles[0] ?? toolPathFromCall(tc) ?? '保护受影响文件',
       meta: error ?? (skippedPaths.length > 0 ? `跳过 ${skippedPaths.length} 个不存在的新路径` : undefined),
       path: protectedFiles[0] ?? skippedPaths[0],
@@ -421,7 +579,7 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
 
   if (tc.toolName === 'generate_artifact' || tc.toolName === 'write_docx' || tc.toolName === 'write_xlsx') {
     return {
-      title: tc.status === 'running' ? '正在生成产物' : ok === false || tc.status === 'error' ? '产物生成未完成' : '产物已生成',
+      title: ok === false || tc.status === 'error' ? '产物没生成' : tc.status === 'running' ? '整理产物' : '产物已生成',
       detail: pathValue ?? stringValue(input, 'name') ?? label,
       meta: error ?? hiddenContentMeta,
       path: pathValue ?? undefined,
@@ -445,18 +603,30 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
   return { title: label, detail: pathValue ?? (error ? error : '工具调用'), path: pathValue ?? undefined, ok }
 }
 
-function toolProgressSentence(toolCalls: ToolCallDisplay[], status: ChatStatus): string {
+function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus, elapsedSeconds = 0): string {
   const latest = toolCalls[toolCalls.length - 1]
   if (!latest) {
-    if (status === 'connecting') return '正在连接模型，准备开始处理。'
-    return '正在理解任务，并判断需要哪些工具。'
+    if (elapsedSeconds >= 25) return '仍在思考中'
+    return '思考中'
   }
 
   const info = toolActivityInfo(latest)
   const target = info.detail && info.detail !== '工具调用' ? `：${info.detail}` : ''
-  if (latest.status === 'running') return `正在${info.title}${target}。`
-  if (latest.status === 'error' || info.ok === false) return `${info.title}${target}未完成，正在整理问题。`
-  return `${info.title}${target}已完成，继续处理下一步。`
+  if (latest.status === 'running') {
+    if (elapsedSeconds >= 25) return `这一步慢了一点，我还在等结果回来${target}。`
+    if (latest.toolName.includes('memory')) return `我回头找找之前留下的线索${target}。`
+    if (latest.toolName === 'search_text') return `我在工作区里翻一下相关线索${target}。`
+    if (latest.toolName === 'web_search' || latest.toolName === 'news') return `我去看眼最新信息${target}。`
+    if (latest.toolName === 'weather') return `我确认一下实时天气${target}。`
+    if (latest.toolName === 'read_file' || latest.toolName === 'list_directory' || latest.toolName === 'get_file_info') return `我先翻一下相关文件${target}。`
+    if (latest.toolName === 'create_checkpoint') return `我先留一个可恢复的保护点${target}。`
+    if (latest.toolName === 'create_file' || latest.toolName === 'write_file' || latest.toolName === 'patch_file') return `我把改动落到文件里${target}。`
+    if (latest.toolName === 'verify_workspace_result') return `我检查一下结果有没有对上${target}。`
+    if (latest.toolName === 'run_command') return `我跑一下命令，等结果回来${target}。`
+    return `我继续处理这一步${target}。`
+  }
+  if (latest.status === 'error' || info.ok === false) return `${info.title}${target}没有顺利完成，我整理一下问题。`
+  return `${info.title}${target}处理好了，我继续看下一步。`
 }
 
 function taskStepStatusClass(status: string): string {
@@ -596,6 +766,12 @@ export function ChatPage() {
   const [automations, setAutomations] = useState<AgentAutomation[]>([])
   const [automationResults, setAutomationResults] = useState<AgentAutomationResult[]>([])
   const [currentTaskRunId, setCurrentTaskRunId] = useState<string | null>(null)
+  const [chatMemories, setChatMemories] = useState<ChatMemory[]>([])
+  const [memoryPanelOpen, setMemoryPanelOpen] = useState(false)
+  const [petPanelOpen, setPetPanelOpen] = useState(false)
+  const [petSnapshot, setPetSnapshot] = useState<ChatPetSnapshot>(() => loadChatPetSnapshot())
+  const [sustainedPetState, setSustainedPetState] = useState<PixelPetStateKey>(() => getDailyPetState())
+  const [transientPetState, setTransientPetState] = useState<PixelPetStateKey | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -609,6 +785,7 @@ export function ChatPage() {
   const activeConvIdRef = useRef<string | null>(null)
   const activeToolCallsRef = useRef<ToolCallDisplay[]>([])
   const pendingPermissionUpdatesRef = useRef<Map<string, Promise<void>>>(new Map())
+  const transientPetTimerRef = useRef<number | null>(null)
 
   const selectProjectId = useCallback((projectId: string | null) => {
     selectedProjectIdRef.current = projectId
@@ -621,6 +798,15 @@ export function ChatPage() {
     setActiveToolCalls(next)
   }, [])
 
+  const showTransientPetState = useCallback((state: PixelPetStateKey, duration = PET_TRANSIENT_MS) => {
+    if (transientPetTimerRef.current) window.clearTimeout(transientPetTimerRef.current)
+    setTransientPetState(state)
+    transientPetTimerRef.current = window.setTimeout(() => {
+      setTransientPetState(null)
+      transientPetTimerRef.current = null
+    }, duration)
+  }, [])
+
   // Keep refs in sync with state
   useEffect(() => { selectedProjectIdRef.current = selectedProjectId }, [selectedProjectId])
   useEffect(() => { currentTaskRunIdRef.current = currentTaskRunId }, [currentTaskRunId])
@@ -628,6 +814,28 @@ export function ChatPage() {
   useEffect(() => {
     saveExpandedProjectIds(expandedProjects)
   }, [expandedProjects])
+
+  useEffect(() => {
+    const refreshPet = () => setPetSnapshot(loadChatPetSnapshot())
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === PIXEL_PET_SETTINGS_KEY || event.key === PIXEL_PET_STORAGE_KEY) refreshPet()
+    }
+    window.addEventListener(PIXEL_PET_CHANGE_EVENT, refreshPet)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener(PIXEL_PET_CHANGE_EVENT, refreshPet)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSustainedPetState(getDailyPetState()), 45_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => () => {
+    if (transientPetTimerRef.current) window.clearTimeout(transientPetTimerRef.current)
+  }, [])
 
   useEffect(() => {
     const activeProjectIds = new Set(projects.filter((project) => project.status === 'active').map((project) => project.id))
@@ -674,16 +882,22 @@ export function ChatPage() {
     setAutomationResults(results)
   }, [])
 
+  const loadMemories = useCallback(async () => {
+    const memories = await window.lingyue.chat.listMemories()
+    setChatMemories(memories)
+  }, [])
+
   useEffect(() => {
     loadConversations()
     loadProjects()
     loadAutomations()
+    loadMemories()
     window.lingyue.chat.getActiveProfile().then((p) => {
       if (p?.model) setModelName(p.model)
       else setModelName('未配置模型')
       setConnected(p ? null : false)
     })
-  }, [loadConversations, loadProjects, loadAutomations])
+  }, [loadConversations, loadProjects, loadAutomations, loadMemories])
 
   useEffect(() => {
     const timer = setInterval(() => { void loadAutomations() }, 30_000)
@@ -736,6 +950,12 @@ export function ChatPage() {
         setConnected(true)
         // 读取 ref 获取 tool calls（避免嵌套 setState）
         const toolCalls = activeToolCallsRef.current
+        if (!full.trim() && toolCalls.length === 0) {
+          setError('模型没有返回可显示内容。请稍后重试或切换模型。')
+          updateActiveToolCalls(() => [])
+          focusComposer()
+          return
+        }
         const messageId = `a-${Date.now()}`
         setMessages((prev) => [
           ...prev,
@@ -759,6 +979,7 @@ export function ChatPage() {
           }
         }
         loadConversations()
+        loadMemories()
         const runId = currentTaskRunIdRef.current
         window.lingyue.chat.listAgentRuns(conversationId).then((runs) => {
           setAgentRuns(runs)
@@ -783,6 +1004,7 @@ export function ChatPage() {
         streamIdRef.current = null
         setConnected(false)
         setError(err)
+        showTransientPetState('error', 2400)
         setMessages((prev) => {
           const copy = [...prev]
           const last = copy[copy.length - 1]
@@ -855,8 +1077,9 @@ export function ChatPage() {
 
     const streamId = window.lingyue.chat.sendMessage({ ...payload, text })
     streamIdRef.current = streamId
+    showTransientPetState(inferPetStateFromText(text), 3200)
     return true
-  }, [startTimer, updateActiveToolCalls])
+  }, [showTransientPetState, startTimer, updateActiveToolCalls])
 
   const handleSend = useCallback(async () => {
     const text = input.trim()
@@ -935,6 +1158,7 @@ export function ChatPage() {
   // ── Switch conversation ──
   const handleSelectConversation = useCallback((id: string) => {
     if (chatStatus !== 'idle') return
+    setSubView('chat')
     setActiveConvId(id)
     setError(null)
     // Sync project picker with conversation's project
@@ -1191,6 +1415,36 @@ export function ChatPage() {
   const selectedProjectArtifacts = useMemo(() => (
     currentRoundRun?.artifacts.slice(0, 6) ?? []
   ), [currentRoundRun])
+  const chatPet = petSnapshot.activePet
+  const chatPetSettings = petSnapshot.settings
+  const toolDrivenPetState = getToolDrivenPetState(activeToolCalls)
+  const displayPetState: PixelPetStateKey = chatStatus === 'error'
+    ? 'error'
+    : chatStatus === 'streaming'
+      ? toolDrivenPetState ?? 'speaking'
+      : chatStatus === 'connecting' || chatStatus === 'thinking'
+        ? transientPetState ?? 'thinking'
+        : transientPetState ?? sustainedPetState
+  const petStateMeta = PIXEL_PET_STATES[displayPetState]
+  const petStatusLine = petStatusText(chatPet.name, chatStatus, displayPetState, activeToolCalls, elapsedTime)
+  const petStats = useMemo(() => {
+    const busy = chatStatus !== 'idle' && chatStatus !== 'error'
+    const focused = displayPetState === 'thinking' || displayPetState === 'coding' || displayPetState === 'searching'
+    return {
+      mood: displayPetState === 'sorrow' ? 58 : displayPetState === 'error' ? 44 : displayPetState === 'joy' || displayPetState === 'delight' ? 94 : 82,
+      focus: focused ? 92 : busy ? 78 : 64,
+      vitality: displayPetState === 'sleepy' ? 46 : displayPetState === 'charging' ? 70 : busy ? 74 : 86,
+      bond: Math.min(1000, 680 + chatMemories.length * 18 + messages.length * 3),
+    }
+  }, [chatMemories.length, chatStatus, displayPetState, messages.length])
+  const memoryTypeCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const memory of chatMemories) {
+      const label = memoryTypeLabel(memory.memoryType)
+      counts.set(label, (counts.get(label) ?? 0) + 1)
+    }
+    return counts
+  }, [chatMemories])
 
   return (
     <div className="chat-layout">
@@ -1199,7 +1453,7 @@ export function ChatPage() {
         {/* Top action buttons */}
         <div className="chat-sidebar__actions">
           <button
-            className={`chat-sidebar__action-btn ${subView === 'chat' ? 'active' : ''}`}
+            className={`chat-sidebar__action-btn ${subView === 'chat' && activeConvId === null ? 'active' : ''}`}
             onClick={() => { setSubView('chat'); handleNewConversation() }}
             title="新对话"
           >
@@ -1347,6 +1601,45 @@ export function ChatPage() {
           </div>
         </div>
 
+        <section className="chat-memory-entry">
+          <button
+            type="button"
+            className={`chat-memory-entry__trigger ${memoryPanelOpen ? 'active' : ''}`}
+            onClick={() => setMemoryPanelOpen((open) => !open)}
+          >
+            <span className="chat-memory-entry__icon"><Brain size={16} /></span>
+            <span className="chat-memory-entry__main">
+              <span className="chat-memory-entry__title">记忆碎片</span>
+              <span className="chat-memory-entry__subtitle">{chatMemories.length > 0 ? `${chatMemories.length} 条可回忆内容` : '等待沉淀新的线索'}</span>
+            </span>
+            <span className="chat-memory-entry__count">{chatMemories.length || MEMORY_PLACEHOLDER_TYPES.length}</span>
+          </button>
+          {memoryPanelOpen && (
+            <div className="chat-memory-entry__panel">
+              {chatMemories.length > 0 ? (
+                chatMemories.slice(0, 4).map((memory) => (
+                  <div key={memory.id} className="chat-memory-entry__item">
+                    <span className="chat-memory-entry__type">{memoryTypeLabel(memory.memoryType)}</span>
+                    <span className="chat-memory-entry__text">{memory.content}</span>
+                    <span className="chat-memory-entry__meta">{importanceLabel(memory.importance)} · {relativeTime(memory.updatedAt)}</span>
+                  </div>
+                ))
+              ) : (
+                MEMORY_PLACEHOLDER_TYPES.map((item) => {
+                  const count = memoryTypeCounts.get(item.label) ?? 0
+                  return (
+                    <div key={item.type} className="chat-memory-entry__item chat-memory-entry__item--placeholder">
+                      <span className="chat-memory-entry__type">{item.label}</span>
+                      <span className="chat-memory-entry__text">{item.line}</span>
+                      <span className="chat-memory-entry__meta">{count > 0 ? `${count} 条` : '暂无内容'}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </section>
+
         {/* Connection status at bottom */}
         <div className="chat-sidebar__footer">
           <ConnectionDot connected={connected} />
@@ -1456,6 +1749,16 @@ export function ChatPage() {
         <PersonaPage />
       ) : (
         <main className="chat-main">
+          <header className="chat-pet-statusbar">
+            <div className="chat-pet-statusbar__left">
+              <span className="chat-pet-statusbar__signal"><Sparkles size={14} /></span>
+              <span className="chat-pet-statusbar__text">{petStatusLine}</span>
+            </div>
+            <button type="button" className="chat-focus-mode-btn" title="专注模式入口" onClick={() => showTransientPetState('inspiration', 2200)}>
+              <Maximize2 size={14} />
+              <span>开启专注模式</span>
+            </button>
+          </header>
           {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
           {isWelcome ? (
@@ -1535,25 +1838,14 @@ export function ChatPage() {
                     </div>
                     <div className="chat-msg__content">
                       {(() => {
-                        const hasTools = activeToolCalls.length > 0
-                        const hasRunningTools = activeToolCalls.some((item) => item.status === 'running')
-                        const parts = hasRunningTools
-                          ? { processText: streamingText, finalText: '', statusText: '' }
-                          : splitAssistantTextForDisplay(streamingText, activeToolCalls)
-                        const bubbleText = parts.finalText
-                        const shouldShowProcess = hasTools || Boolean(parts.processText.trim()) || Boolean(parts.statusText.trim())
-                        return (
-                          <>
-                            {shouldShowProcess && <ToolActivityPanel toolCalls={activeToolCalls} live narrative={parts.processText} statusText={parts.statusText} status={chatStatus} />}
-                            {bubbleText && (
-                              <div className="chat-msg__bubble">
-                                {bubbleText}
-                                <span className="chat-cursor" />
-                              </div>
-                            )}
-                            {!bubbleText && !shouldShowProcess && <ToolActivityPanel toolCalls={activeToolCalls} live status={chatStatus} />}
-                          </>
-                        )
+                        const items = buildAssistantContentTimeline({
+                          text: streamingText,
+                          toolCalls: activeToolCalls,
+                          live: true,
+                          status: chatStatus,
+                          elapsedSeconds: elapsedTime,
+                        })
+                        return <AssistantContentTimeline items={items} live />
                       })()}
                       {/* Elapsed time inside the streaming bubble */}
                       {elapsedTime > 0 && (
@@ -1625,8 +1917,71 @@ export function ChatPage() {
               </div>
             </>
           )}
+
+          <aside className="chat-pet-dock" aria-label="当前宠物">
+            {petPanelOpen && (
+              <div className="chat-pet-popover">
+                <div className="chat-pet-popover__header">
+                  <div>
+                    <div className="chat-pet-popover__name">{chatPet.name}</div>
+                    <div className="chat-pet-popover__state">{petStateMeta.line}</div>
+                  </div>
+                  <button type="button" className="chat-pet-popover__close" onClick={() => setPetPanelOpen(false)} title="关闭">
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="chat-pet-stats">
+                  <PetStatRow icon={<Heart size={14} />} label="心情" value={petStats.mood} tone="mood" />
+                  <PetStatRow icon={<Target size={14} />} label="专注" value={petStats.focus} tone="focus" />
+                  <PetStatRow icon={<Zap size={14} />} label="活力" value={petStats.vitality} tone="energy" />
+                  <PetStatRow icon={<Sparkles size={14} />} label="陪伴值" value={petStats.bond} max={1000} tone="bond" suffix={`/ 1000`} />
+                </div>
+                <div className="chat-pet-popover__ghost">属性同步中</div>
+              </div>
+            )}
+            <button type="button" className="chat-pet-stage" onClick={() => setPetPanelOpen((open) => !open)} title={chatPet.name}>
+              <PixelPetCanvas
+                pet={chatPet}
+                settings={chatPetSettings}
+                stateKey={displayPetState}
+                className="chat-pet-stage__canvas"
+                width={190}
+                height="auto"
+              />
+              <span className="chat-pet-stage__shadow" />
+            </button>
+          </aside>
         </main>
       )}
+    </div>
+  )
+}
+
+function PetStatRow({
+  icon,
+  label,
+  value,
+  max = 100,
+  tone,
+  suffix = '',
+}: {
+  icon: ReactNode
+  label: string
+  value: number
+  max?: number
+  tone: 'mood' | 'focus' | 'energy' | 'bond'
+  suffix?: string
+}) {
+  const percent = Math.max(0, Math.min(100, (value / max) * 100))
+  return (
+    <div className={`chat-pet-stat chat-pet-stat--${tone}`}>
+      <div className="chat-pet-stat__top">
+        <span className="chat-pet-stat__label">{icon}{label}</span>
+        <span className="chat-pet-stat__value">{Math.round(value)}{suffix}</span>
+      </div>
+      <div className="chat-pet-stat__track">
+        <span className="chat-pet-stat__fill" style={{ width: `${percent}%` }} />
+      </div>
     </div>
   )
 }
@@ -1673,16 +2028,50 @@ const TOOL_NAME_LABELS: Record<string, string> = {
 type ProcessFeedItem =
   | { type: 'text'; id: string; text: string }
   | { type: 'status'; id: string; text: string }
-  | { type: 'tool'; id: string; call: ToolCallDisplay }
+  | { type: 'tool'; id: string; call: ToolCallDisplay; count: number }
 
-function buildProcessTimeline(narrative: string, calls: ToolCallDisplay[], live: boolean, status: ChatStatus, statusText = ''): ProcessFeedItem[] {
+function mergeToolStatus(left: ToolCallDisplay['status'], right: ToolCallDisplay['status']): ToolCallDisplay['status'] {
+  if (left === 'running' || right === 'running') return 'running'
+  if (left === 'error' || right === 'error') return 'error'
+  return 'done'
+}
+
+function groupToolCalls(calls: ToolCallDisplay[]): { call: ToolCallDisplay; count: number }[] {
+  const groups = new Map<string, { call: ToolCallDisplay; count: number; order: number; durationMs: number | null }>()
+  calls.forEach((call, index) => {
+    const key = call.toolName
+    const existing = groups.get(key)
+    if (!existing) {
+      groups.set(key, {
+        call: { ...call },
+        count: 1,
+        order: typeof call.textOffset === 'number' ? call.textOffset : Number.MAX_SAFE_INTEGER - index,
+        durationMs: typeof call.durationMs === 'number' ? call.durationMs : null,
+      })
+      return
+    }
+
+    existing.count += 1
+    existing.durationMs = typeof call.durationMs === 'number'
+      ? (existing.durationMs ?? 0) + call.durationMs
+      : existing.durationMs
+    existing.call = {
+      ...existing.call,
+      status: mergeToolStatus(existing.call.status, call.status),
+      output: call.output ?? existing.call.output,
+      error: call.error ?? existing.call.error,
+      durationMs: existing.durationMs ?? existing.call.durationMs,
+    }
+  })
+  return [...groups.values()]
+    .sort((a, b) => a.order - b.order)
+    .map(({ call, count }) => ({ call, count }))
+}
+
+function buildProcessTimeline(narrative: string, calls: ToolCallDisplay[], live: boolean, status: ChatStatus, statusText = '', elapsedSeconds = 0): ProcessFeedItem[] {
   const items: ProcessFeedItem[] = []
   const text = narrative.trimEnd()
-  const sortedCalls = calls.map((call, index) => ({ call, index })).sort((a, b) => {
-    const left = a.call.textOffset ?? Number.MAX_SAFE_INTEGER
-    const right = b.call.textOffset ?? Number.MAX_SAFE_INTEGER
-    return left === right ? a.index - b.index : left - right
-  })
+  const sortedCalls = groupToolCalls(calls)
 
   const appendText = (value: string) => {
     for (const paragraph of splitParagraphs(value)) {
@@ -1691,15 +2080,12 @@ function buildProcessTimeline(narrative: string, calls: ToolCallDisplay[], live:
   }
 
   let cursor = 0
-  for (const { call } of sortedCalls) {
+  for (const { call, count } of sortedCalls) {
     const offset = typeof call.textOffset === 'number'
       ? Math.max(0, Math.min(call.textOffset, text.length))
       : cursor
     if (offset > cursor) appendText(text.slice(cursor, offset))
-    if (items.length === 0 && live && !text) {
-      items.push({ type: 'status', id: 'fallback-tool-start', text: '正在判断需要哪些工具，并开始执行合适的步骤。' })
-    }
-    items.push({ type: 'tool', id: call.toolCallId, call })
+    items.push({ type: 'tool', id: call.toolCallId, call, count })
     cursor = offset
   }
   if (cursor < text.length) appendText(text.slice(cursor))
@@ -1707,7 +2093,7 @@ function buildProcessTimeline(narrative: string, calls: ToolCallDisplay[], live:
     items.push({ type: 'status', id: `status-${items.length}`, text: statusText.trim() })
   }
   if (items.length === 0 && live) {
-    items.push({ type: 'status', id: 'fallback-thinking', text: toolProgressSentence(calls, status) })
+    items.push({ type: 'status', id: 'fallback-thinking', text: toolProgressSentence(calls, status, elapsedSeconds) })
   }
   return items
 }
@@ -1718,6 +2104,7 @@ function ToolActivityPanel({
   narrative = '',
   statusText = '',
   status = 'idle',
+  elapsedSeconds = 0,
 }: {
   toolCalls?: ToolCallDisplay[]
   live?: boolean
@@ -1725,9 +2112,10 @@ function ToolActivityPanel({
   statusText?: string
   defaultOpen?: boolean
   status?: ChatStatus
+  elapsedSeconds?: number
 }) {
   const calls = toolCalls ?? []
-  const timeline = buildProcessTimeline(narrative, calls, live, status, statusText)
+  const timeline = buildProcessTimeline(narrative, calls, live, status, statusText, elapsedSeconds)
 
   if (timeline.length === 0) return null
   return (
@@ -1736,7 +2124,7 @@ function ToolActivityPanel({
         {timeline.map((item) => {
           if (item.type === 'text') return <div key={item.id} className="process-feed__text chat-msg__bubble">{item.text}</div>
           if (item.type === 'status') return <ProcessStatusItem key={item.id} text={item.text} live={live} />
-          return <ToolProcessItem key={item.id} tc={item.call} />
+          return <ToolProcessItem key={item.id} tc={item.call} count={item.count} />
         })}
       </div>
     </div>
@@ -1757,21 +2145,29 @@ function ProcessStatusItem({ text, live }: { text: string; live?: boolean }) {
 }
 
 function compactToolTitle(toolName: string): string {
+  if (toolName === 'memory_recall') return '回忆'
+  if (toolName === 'memory_store' || toolName === 'memory_update' || toolName === 'memory_delete') return '记忆'
   if (toolName === 'create_checkpoint') return '快照'
   if (toolName === 'generate_artifact') return '产物'
   if (toolName === 'verify_workspace_result') return '验证'
   if (toolName === 'create_file' || toolName === 'write_file' || toolName === 'patch_file') return '文件'
   if (toolName === 'run_command') return '命令'
   if (toolName === 'search_text') return '搜索'
+  if (toolName === 'web_search') return '网页'
+  if (toolName === 'news') return '资讯'
+  if (toolName === 'weather') return '天气'
+  if (toolName === 'calculator') return '计算'
+  if (toolName === 'get_current_time') return '时间'
+  if (toolName === 'get_system_info') return '系统'
   if (toolName === 'read_file') return '读取'
-  return TOOL_NAME_LABELS[toolName] || toolName
+  return TOOL_NAME_LABELS[toolName] || '步骤'
 }
 
-function ToolProcessItem({ tc }: { tc: ToolCallDisplay }) {
+function ToolProcessItem({ tc, count = 1 }: { tc: ToolCallDisplay; count?: number }) {
   const info = toolActivityInfo(tc)
   const needsApproval = toolOutputNeedsApproval(tc.output)
   const failed = tc.status === 'error' || (info.ok === false && !needsApproval)
-  const stateText = tc.status === 'running' ? '执行中' : needsApproval ? '等待授权' : failed ? '失败' : '完成'
+  const stateText = tc.status === 'running' ? '处理中' : needsApproval ? '需要确认' : failed ? '没成功' : count > 1 ? `已处理 ${count} 次` : '已处理'
   const inputText = formatToolPayload(tc.input)
   const outputText = tc.error ? tc.error : formatToolPayload(tc.output)
   const title = compactToolTitle(tc.toolName)
@@ -1806,6 +2202,39 @@ function ToolProcessItem({ tc }: { tc: ToolCallDisplay }) {
   )
 }
 
+function AssistantContentTimeline({
+  items,
+  live = false,
+  showErrorBadge = false,
+}: {
+  items: AssistantContentItem[]
+  live?: boolean
+  showErrorBadge?: boolean
+}) {
+  const lastBubbleIndex = items.reduce((last, item, index) => item.type === 'bubble' ? index : last, -1)
+  return (
+    <>
+      {items.map((item, index) => {
+        if (item.type === 'bubble') {
+          return (
+            <div key={item.id} className="chat-msg__bubble">
+              {item.text}
+              {live && index === lastBubbleIndex && <span className="chat-cursor" />}
+              {showErrorBadge && index === lastBubbleIndex && (
+                <span className="chat-msg__error-badge">
+                  <AlertCircle size={12} /> 发送失败
+                </span>
+              )}
+            </div>
+          )
+        }
+        if (item.type === 'status') return <ProcessStatusItem key={item.id} text={item.text} live={live} />
+        return <ToolActivityPanel key={item.id} toolCalls={item.calls} live={live} />
+      })}
+    </>
+  )
+}
+
 // ─── Message Bubble ───────────────────────────────────────
 function MessageBubble({
   message,
@@ -1821,19 +2250,17 @@ function MessageBubble({
   onShowArtifact: (id: string) => void
 }) {
   const isUser = message.role === 'user'
-  const textParts = isUser
-    ? { processText: '', finalText: message.text, statusText: '' }
-    : splitAssistantTextForDisplay(message.text, message.toolCalls)
+  const assistantItems = isUser ? [] : buildAssistantContentTimeline({ text: message.text, toolCalls: message.toolCalls })
   return (
     <div className={`chat-msg chat-msg--${message.role}`}>
       <div className={`chat-msg__avatar ${isUser ? 'chat-msg__avatar--user' : 'chat-msg__avatar--ai'}`}>
         {isUser ? <User size={14} /> : <Bot size={16} />}
       </div>
       <div className="chat-msg__content">
-        {!isUser && <ToolActivityPanel toolCalls={message.toolCalls} narrative={textParts.processText} statusText={textParts.statusText} defaultOpen={message.processOpen} />}
-        {textParts.finalText && (
+        {!isUser && <AssistantContentTimeline items={assistantItems} showErrorBadge={message.status === 'error'} />}
+        {isUser && message.text && (
           <div className="chat-msg__bubble">
-            {textParts.finalText}
+            {message.text}
             {message.status === 'error' && (
               <span className="chat-msg__error-badge">
                 <AlertCircle size={12} /> 发送失败
@@ -1841,7 +2268,7 @@ function MessageBubble({
             )}
           </div>
         )}
-        {!textParts.finalText && message.status === 'error' && (
+        {!isUser && assistantItems.length === 0 && message.status === 'error' && (
           <ProcessStatusItem text="发送失败" />
         )}
         <MessageFileActions

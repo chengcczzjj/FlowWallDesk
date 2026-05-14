@@ -1,6 +1,6 @@
 # 灵月桌面 项目进展
 
-> 最后更新：2026-05-06
+> 最后更新：2026-05-15
 > 版本：0.1.0（早期开发）
 
 ## 技术栈
@@ -122,17 +122,18 @@
 | 图标收纳管理   | ✅ 完成 | WidgetsPage 图标收纳子页，支持预览、数量、多实例和全部删除 |
 | 像素宠物分页   | ✅ 完成 | 桌宠 > 像素宠物子页，支持默认角色、动作预览、模型生成入口和同步桌面 |
 
-### AI Chat / 本地工作区 Agent ✅ 82%
+### AI Chat / 本地工作区 Agent ✅ 88%
 
 | 功能                 | 状态    | 说明                                                         |
 | -------------------- | ------- | ------------------------------------------------------------ |
-| 模型配置             | ✅ 完成 | 支持 OpenAI 兼容与 Google Gemini profile、模型列表和连接测试 |
+| 模型配置             | ✅ 完成 | 支持 OpenAI 兼容、Google Gemini 与 DeepSeek profile、模型列表和连接测试 |
 | 会话与项目工作区     | ✅ 完成 | 本地项目绑定、会话归类、项目侧栏和 Working in 上下文提示      |
-| 流式对话             | ✅ 完成 | AI SDK v6 多步工具调用，事件持久化到 SQLite                  |
+| 流式对话             | ✅ 完成 | AI SDK v6 多步工具调用，DeepSeek 工具循环支持 SSE 流式输出，事件持久化到 SQLite |
 | Workspace 只读工具   | ✅ 完成 | 列目录、读文件、搜索文本、文件信息，带工作区边界校验         |
 | Workspace 写入工具   | ✅ 完成 | 创建/覆盖/补丁/移动/复制/回收区恢复，审批与文件变更记录       |
 | AgentRun 过程记录    | ✅ 完成 | 计划、工具调用、审批、Checkpoint、Artifact、验证结果可追踪    |
-| 工具过程 UI          | ✅ 完成 | 按真实时间线展示模型过程话和独立工具控件，状态提示与对话分层 |
+| 工具过程 UI          | ✅ 完成 | 按 `textOffset` 交错展示对话气泡和工具记录，连续重复工具去重，工具记录可展开 |
+| 人设化对话体验       | ✅ 完成 | Persona 管理、工具前自然短句、等待状态互斥、常驻画像/当前状态上下文已接入 |
 | Checkpoint/回滚      | ⚠️ 75%  | 文件快照、对比、恢复链路已具备，仍需更多 UI 复核入口         |
 | 自动化任务           | ⚠️ 60%  | Automation Store/Scheduler 与收件箱 UI 已接入，规则配置待完善 |
 | 文档/表格/OCR 工具   | ⚠️ 70%  | DOCX/XLSX/PDF/图片读取与生成工具已接入，复杂预览待增强        |
@@ -146,6 +147,8 @@
 | 6 个 IPC 通道未定义               | 遗漏                                        | 补齐 ipc-channels.ts           |
 | Electron acrylic 无法采样嵌入壁纸 | 系统限制                                    | 改用壁纸抽帧广播 + CSS blur    |
 | `.lnk/.url` 启动不稳定            | 直接 spawn 快捷方式目标不等同桌面双击行为  | 优先交给 Windows Shell 打开原快捷方式 |
+| DeepSeek thinking 模型工具续聊失败 | OpenAI 兼容适配会丢 `reasoning_content`      | 使用 DeepSeek 专用工具循环并回传 reasoning 内容 |
+| 工具过程 UI 顺序混乱              | 模型文本和工具事件只按单次切分展示           | 按 `textOffset` 构建对话/工具交错时间线 |
 
 ## 待办规划
 
@@ -174,5 +177,6 @@
 | `src/main/ipc/desktopIconIpc.ts`                  | 桌面图标导入、启动、刷新与恢复 IPC |
 | `assets/wallpaper/<id>/widget-config.json`        | 壁纸绑定的组件配置           |
 | `src/main/memory/`                                 | AI Chat 记忆、AgentRun 与工具系统 |
+| `src/main/memory/models/deepseekToolChat.ts`        | DeepSeek 工具调用与流式输出兼容层 |
 | `src/main/ipc/chatIpc.ts`                          | AI Chat / Agent IPC 注册     |
 | `src/renderer/main-ui/pages/chat/ChatPage.tsx`     | AI Chat 主界面与 Agent 过程 UI |

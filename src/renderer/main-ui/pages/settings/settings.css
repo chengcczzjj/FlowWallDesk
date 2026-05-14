@@ -482,6 +482,7 @@
 .model-input-row {
   display: flex;
   gap: 8px;
+  position: relative;
 }
 
 .model-input-row .form-field__input {
@@ -501,6 +502,7 @@
   color: var(--text-secondary);
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
   transition: all var(--transition-fast);
 }
 
@@ -517,13 +519,18 @@
 
 /* Model dropdown */
 .model-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
   max-height: 180px;
   overflow-y: auto;
   border: 1px solid var(--border-card);
   border-radius: var(--radius-sm);
-  margin-top: 6px;
+  margin-top: 4px;
   background: #fff;
   box-shadow: var(--shadow-flyout);
+  z-index: 100;
 }
 
 .model-dropdown__item {
@@ -549,6 +556,13 @@
   margin-top: 4px;
 }
 
+.model-error {
+  font-size: 11px;
+  color: #dc2626;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
 /* ── Editor Footer ── */
 .profile-editor__footer {
   display: flex;
@@ -558,10 +572,16 @@
   border-top: 1px solid var(--border-divider);
 }
 
+.profile-editor__footer .settings-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .profile-editor__footer-right {
   margin-left: auto;
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ── Buttons ── */
@@ -621,6 +641,9 @@
   display: flex;
   align-items: center;
   gap: 5px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .test-status--ok {
@@ -628,6 +651,8 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .test-status--err {
@@ -635,6 +660,9 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Empty State ── */

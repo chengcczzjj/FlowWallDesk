@@ -1,22 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Plus,
   Trash2,
   CheckCircle2,
   XCircle,
   Loader2,
-  ChevronDown,
+  List,
   Zap,
   Power,
   Monitor,
   Sparkles,
   Globe,
+  ExternalLink,
 } from 'lucide-react'
 import type { ModelProfile, ModelProvider } from '@shared/types'
 import './settings.css'
 
 const PROVIDER_LABELS: Record<ModelProvider, string> = {
   'openai-compatible': 'OpenAI 兼容',
+  'deepseek': 'DeepSeek',
   'google': 'Google Gemini',
 }
 
@@ -32,8 +34,22 @@ export function SettingsGeneralPage() {
   const [testError, setTestError] = useState('')
   const [models, setModels] = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelListError, setModelListError] = useState('')
   const [activeId, setActiveId] = useState('')
   const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Click outside to close model dropdown
+  useEffect(() => {
+    if (!showModelDropdown) return
+    const handler = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setShowModelDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showModelDropdown])
 
   const loadProfiles = useCallback(async () => {
     const list = await window.lingyue.chat.listProfiles()
@@ -58,13 +74,30 @@ export function SettingsGeneralPage() {
     })
     setTestStatus('idle')
     setModels([])
+    setModelListError('')
+    setShowModelDropdown(false)
+  }
+
+  const handleNewDeepSeekProfile = () => {
+    setEditingProfile({
+      id: `profile-${Date.now()}`,
+      name: 'DeepSeek',
+      provider: 'deepseek',
+      baseURL: 'https://api.deepseek.com',
+      apiKey: '',
+      model: 'deepseek-chat',
+    })
+    setTestStatus('idle')
+    setModels([])
+    setModelListError('')
     setShowModelDropdown(false)
   }
 
   const handleEditProfile = (p: ModelProfile) => {
     setEditingProfile({ ...p })
     setTestStatus('idle')
-    setModels([])
+    setModels(p.availableModels ?? [])
+    setModelListError('')
     setShowModelDropdown(false)
   }
 
@@ -102,10 +135,13 @@ export function SettingsGeneralPage() {
   const handleListModels = async () => {
     if (!editingProfile) return
     setModelsLoading(true)
+    setModelListError('')
     const result = await window.lingyue.chat.listModels(editingProfile)
     setModels(result.models)
     setModelsLoading(false)
-    if (result.models.length > 0) setShowModelDropdown(true)
+    setShowModelDropdown(false)
+    if (result.error) setModelListError(result.error)
+    setEditingProfile({ ...editingProfile, availableModels: result.models })
   }
 
   const selectModel = (model: string) => {
@@ -246,6 +282,9 @@ export function SettingsGeneralPage() {
           <button className="settings-btn settings-btn--sm" onClick={() => handleNewProfile('openai-compatible')}>
             <Plus size={14} /> OpenAI 兼容
           </button>
+          <button className="settings-btn settings-btn--sm" onClick={handleNewDeepSeekProfile}>
+            <Plus size={14} /> DeepSeek
+          </button>
           <button className="settings-btn settings-btn--sm" onClick={() => handleNewProfile('google')}>
             <Plus size={14} /> Google Gemini
           </button>
@@ -260,7 +299,7 @@ export function SettingsGeneralPage() {
                 : editingProfile.name ? `编辑 — ${editingProfile.name}` : '新建配置'}
             </h4>
             <div className="profile-editor__grid">
-              {/* 名称 + Provider — 仅 OpenAI 兼容时显示 */}
+              {/* 名称 + Provider — 仅 OpenAI 兼容 & DeepSeek 时显示 */}
               {editingProfile.provider !== 'google' && (
                 <>
                   <div className="form-field">
@@ -280,30 +319,37 @@ export function SettingsGeneralPage() {
                       value={editingProfile.provider}
                       onChange={(e) => {
                         const provider = e.target.value as ModelProvider
+                        setModels([])
+                        setModelListError('')
+                        setShowModelDropdown(false)
                         setEditingProfile({
                           ...editingProfile,
                           provider,
-                          baseURL: '',
-                          name: provider === 'google' ? 'Gemini' : editingProfile.name,
-                          model: provider === 'google' ? 'gemini-2.5-flash' : editingProfile.model,
+                          baseURL: provider === 'deepseek' ? 'https://api.deepseek.com' : '',
+                          name: provider === 'google' ? 'Gemini' : provider === 'deepseek' ? 'DeepSeek' : editingProfile.name,
+                          model: provider === 'google' ? 'gemini-2.5-flash' : provider === 'deepseek' ? 'deepseek-chat' : editingProfile.model,
+                          availableModels: undefined,
                         })
                       }}
                     >
                       <option value="openai-compatible">OpenAI 兼容</option>
+                      <option value="deepseek">DeepSeek</option>
                       <option value="google">Google Gemini</option>
                     </select>
                   </div>
-                  {/* API Base URL — 仅 OpenAI 兼容 */}
-                  <div className="form-field form-field--full">
-                    <label className="form-field__label">API Base URL</label>
-                    <input
-                      className="form-field__input"
-                      type="text"
-                      value={editingProfile.baseURL}
-                      onChange={(e) => updateField('baseURL', e.target.value)}
-                      placeholder="https://api.openai.com/v1"
-                    />
-                  </div>
+                  {/* API Base URL — 仅 OpenAI 兼容时显示（DeepSeek/Google 自动填入） */}
+                  {editingProfile.provider !== 'deepseek' && (
+                    <div className="form-field form-field--full">
+                      <label className="form-field__label">API Base URL</label>
+                      <input
+                        className="form-field__input"
+                        type="text"
+                        value={editingProfile.baseURL}
+                        onChange={(e) => updateField('baseURL', e.target.value)}
+                        placeholder="https://api.openai.com/v1"
+                      />
+                    </div>
+                  )}
                 </>
               )}
 
@@ -316,10 +362,15 @@ export function SettingsGeneralPage() {
                       从 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>Google AI Studio</a> 获取
                     </span>
                   )}
+                  {editingProfile.provider === 'deepseek' && (
+                    <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 6 }}>
+                      从 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>DeepSeek 开放平台</a> 获取
+                    </span>
+                  )}
                 </label>
                 <input
                   className="form-field__input"
-                  type="password"
+                  type="text"
                   value={editingProfile.apiKey}
                   onChange={(e) => updateField('apiKey', e.target.value)}
                   placeholder={editingProfile.provider === 'google' ? 'AIzaSy...' : 'sk-...'}
@@ -329,37 +380,36 @@ export function SettingsGeneralPage() {
               {/* 模型 */}
               <div className="form-field form-field--full">
                 <label className="form-field__label">模型</label>
-                <div className="model-input-row">
+                <div className="model-input-row" ref={modelDropdownRef}>
                   <input
                     className="form-field__input"
                     type="text"
                     value={editingProfile.model}
                     onChange={(e) => updateField('model', e.target.value)}
-                    placeholder={editingProfile.provider === 'google' ? 'gemini-2.5-flash' : 'gpt-4o'}
+                    onFocus={() => { if (models.length > 0) setShowModelDropdown(true) }}
+                    onClick={() => { if (models.length > 0) setShowModelDropdown(true) }}
+                    placeholder={editingProfile.provider === 'google' ? 'gemini-2.5-flash' : editingProfile.provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o'}
                   />
                   <button
                     className="model-fetch-btn"
                     onClick={handleListModels}
                     disabled={modelsLoading || !editingProfile.apiKey}
                   >
-                    {modelsLoading ? <Loader2 size={14} className="spin" /> : <ChevronDown size={14} />}
+                    {modelsLoading ? <Loader2 size={14} className="spin" /> : <List size={14} />}
                     {modelsLoading ? '加载中' : '获取列表'}
                   </button>
+                  {showModelDropdown && models.length > 0 && (
+                    <div className="model-dropdown">
+                      {models.map((m) => (
+                        <button key={m} className="model-dropdown__item" onClick={() => selectModel(m)}>
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {showModelDropdown && models.length > 0 && (
-                  <div className="model-dropdown">
-                    {models.map((m) => (
-                      <button key={m} className="model-dropdown__item" onClick={() => selectModel(m)}>
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {models.length > 0 && !showModelDropdown && (
-                  <div className="model-count">
-                    共 {models.length} 个可用模型
-                    <button className="settings-link" onClick={() => setShowModelDropdown(true)}>查看</button>
-                  </div>
+                {modelListError && (
+                  <div className="model-error">{modelListError}</div>
                 )}
               </div>
             </div>
@@ -394,6 +444,32 @@ export function SettingsGeneralPage() {
             <div className="info-bar__message">
               支持 OpenAI 兼容 API（DeepSeek、OpenRouter 等）和 Google Gemini。
               选择激活的配置后，AI 对话将使用该模型。
+            </div>
+          </div>
+        </div>
+
+        {/* 外部链接 */}
+        <div style={{ marginTop: 12 }}>
+          <div className="settings-group__header">外部链接</div>
+
+          <div
+            className="settings-card clickable"
+            onClick={() => window.open('https://platform.deepseek.com', '_blank')}
+          >
+            <div className="settings-card__icon">
+              <img
+                src="https://platform.deepseek.com/favicon.ico"
+                alt=""
+                style={{ width: 20, height: 20, borderRadius: 4 }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+            <div className="settings-card__body">
+              <div className="settings-card__title">DeepSeek 开放平台</div>
+              <div className="settings-card__desc">申请 API Key、查看文档、管理用量</div>
+            </div>
+            <div className="settings-card__action">
+              <ExternalLink size={16} />
             </div>
           </div>
         </div>

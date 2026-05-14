@@ -57,7 +57,7 @@ export const memoryStoreTool = tool({
 
 export const memoryRecallTool = tool({
   description:
-    '回忆之前存储的用户信息。当你需要查找用户之前说过的偏好、事实等信息时使用。可以用关键词模糊搜索。',
+    '回忆之前存储的用户信息。当你需要查找用户之前说过的偏好、事实等信息时使用。可以用关键词模糊搜索。如果返回 found=false 或 memories=[]，表示本轮没有相关记忆，不要再次调用本工具，直接基于空结果回复。',
   inputSchema: z.object({
     query: z.string().describe('搜索关键词，会在标签和内容中模糊匹配'),
     limit: z.number().optional().describe('返回结果数量上限，默认 5'),
