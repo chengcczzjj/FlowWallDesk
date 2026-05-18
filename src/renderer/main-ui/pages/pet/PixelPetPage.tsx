@@ -4,21 +4,22 @@ import type { WidgetInstance } from '@shared/types'
 import { PixelPetCanvas } from '@renderer/shared/PixelPetCanvas'
 import {
   PIXEL_PET_GENERATOR_ENDPOINT,
+  PIXEL_PET_CHANGE_EVENT,
   PIXEL_PET_HEIGHT,
   PIXEL_PET_SETTINGS_KEY,
   PIXEL_PET_STATE_GROUPS,
   PIXEL_PET_STATE_ORDER,
   PIXEL_PET_STATES,
   PIXEL_PET_STORAGE_KEY,
+  PIXEL_PET_THEME_EVENT,
   PIXEL_PET_THEME_KEYS,
   PIXEL_PET_THEMES,
   PIXEL_PET_WIDTH,
+  buildPixelPetThemeVars,
   createDefaultPixelPets,
-  colorMix,
   drawPixelPet,
   findPixelPetGroupIndex,
   getActivePixelPet,
-  hexToRgba,
   normalizePixelPet,
   normalizePixelPetSettings,
   resolvePixelPetPalette,
@@ -50,30 +51,7 @@ export function PixelPetPage() {
   const petWidget = instances.find((item) => item.type === 'pet')
 
   const pageStyle = useMemo(
-    () => {
-      const uiAccent = palette.accent2 || palette.accent
-      return ({
-        '--pet-bg': colorMix(palette.stage, '#eaf2fb', 0.34),
-        '--pet-bg-deep': colorMix(palette.accent, '#eef5fb', 0.82),
-        '--pet-accent': palette.accent,
-        '--pet-accent-2': palette.accent2,
-        '--pet-danger': palette.danger,
-        '--pet-stage': palette.stage,
-        '--pet-stage-grid': hexToRgba(palette.inkSoft || palette.ink, 0.1),
-        '--pet-ink': palette.ink,
-        '--pet-ink-soft': palette.inkSoft,
-        '--pet-line': colorMix(palette.stage, '#dfe6ef', 0.56),
-        '--pet-glass-line': hexToRgba(palette.inkSoft || palette.ink, 0.2),
-        '--pet-focus': hexToRgba(palette.accent, 0.26),
-        '--pet-ui-accent': uiAccent,
-        '--pet-ui-accent-soft': colorMix(palette.accent, '#ffffff', 0.84),
-        '--pet-ui-focus': hexToRgba(uiAccent, 0.18),
-        '--pet-theme-shadow': hexToRgba(palette.ink || '#243447', 0.11),
-        '--pet-theme-wash-1': hexToRgba(palette.accent, 0.11),
-        '--pet-theme-wash-2': hexToRgba(palette.accent2 || palette.accent, 0.08),
-        '--pet-theme-wash-3': hexToRgba(palette.maneLight || palette.belly || palette.accent, 0.07),
-      }) as CSSProperties
-    },
+    () => buildPixelPetThemeVars(palette) as CSSProperties,
     [palette]
   )
 
@@ -88,11 +66,17 @@ export function PixelPetPage() {
 
   useEffect(() => {
     localStorage.setItem(PIXEL_PET_STORAGE_KEY, JSON.stringify(pets.filter((pet) => !pet.locked)))
+    window.dispatchEvent(new CustomEvent(PIXEL_PET_CHANGE_EVENT))
   }, [pets])
 
   useEffect(() => {
     localStorage.setItem(PIXEL_PET_SETTINGS_KEY, JSON.stringify(settings))
+    window.dispatchEvent(new CustomEvent(PIXEL_PET_CHANGE_EVENT))
   }, [settings])
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent(PIXEL_PET_THEME_EVENT, { detail: pageStyle }))
+  }, [pageStyle])
 
   useEffect(() => {
     if (!notice) return
@@ -313,46 +297,28 @@ export function PixelPetPage() {
       <aside className="pixel-pet-control-panel">
         <section className="pixel-pet-tool-section">
           <h2>宠物</h2>
+          <label className="pixel-pet-field pixel-pet-field--select">
+            <span>选择宠物</span>
+            <div className="pixel-pet-select-row">
+              <select className="pixel-pet-select" value={activePet.id} onChange={(event) => selectPet(event.target.value)}>
+                {pets.map((pet) => (
+                  <option key={pet.id} value={pet.id}>
+                    {pet.name}
+                  </option>
+                ))}
+              </select>
+              {!activePet.locked && (
+                <button type="button" className="pixel-pet-delete-current" onClick={() => deletePet(activePet.id)}>
+                  删除
+                </button>
+              )}
+            </div>
+            <small className="pixel-pet-field-hint">{activePet.locked ? '内置参考角色' : activePet.sourceName || '由参考图生成'}</small>
+          </label>
           <label className="pixel-pet-field">
             <span>名字</span>
             <input value={settings.petName} maxLength={12} onChange={(event) => updateName(event.target.value)} />
           </label>
-          <div className="pixel-pet-list" aria-label="已保存桌宠">
-            {pets.map((pet) => (
-              <div
-                key={pet.id}
-                className="pixel-pet-item"
-                role="button"
-                tabIndex={0}
-                aria-pressed={pet.id === activePet.id}
-                onClick={() => selectPet(pet.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    selectPet(pet.id)
-                  }
-                }}
-              >
-                <span>
-                  <strong>{pet.name}</strong>
-                  <small>{pet.locked ? '默认宠物' : '模型生成'}</small>
-                </span>
-                {!pet.locked && (
-                  <button
-                    type="button"
-                    className="pixel-pet-delete"
-                    aria-label={`删除 ${pet.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      deletePet(pet.id)
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
         </section>
 
         <section className="pixel-pet-tool-section">
@@ -365,7 +331,7 @@ export function PixelPetPage() {
             <button type="button" className="pixel-pet-action-button" disabled={!pendingImage || generating} onClick={generatePetFromImage}>
               {generating ? '生成中' : '生成并保存桌宠'}
             </button>
-            <div className="pixel-pet-generator-note">需要本地模型服务：pet-generator-server.mjs，会自动选择人形或兽类骨架。</div>
+            <div className="pixel-pet-generator-note">需要本地模型服务：pet-generator-server.mjs；视觉模型提取外观配置，动作由内置骨架自动套用。</div>
             <div className={`pixel-pet-generator-status ${generatorError ? 'is-error' : ''}`}>{generatorStatus}</div>
           </div>
         </section>

@@ -1,5 +1,24 @@
 # 灵月桌面 开发日志
 
+## [2026-05-18 23:28] 完善搜索定位工具与桌面体验
+
+**变更摘要**: 接入多提供商联网搜索、隐私授权定位和天气自动位置查询，并优化壁纸加载、抽帧暂停、宠物主题与工具过程展示。
+
+**涉及模块**:
+
+- `src/main/memory/tools/` / `src/main/memory/chat/chatService.ts`: 新增 `get_user_location`，重做 `web_search` 多提供商与无 Key 兜底，天气工具支持按用户位置查询，并缓存重复只读工具调用。
+- `src/main/ipc/appIpc.ts` / `src/renderer/main-ui/pages/settings/SettingsGeneralPage.tsx`: 增加精准定位授权、验证和 Windows 定位设置入口。
+- `src/renderer/main-ui/pages/chat/` / `src/renderer/shared/pixel-pet.ts`: 增强搜索/定位工具过程展示和聊天宠物状态、主题同步。
+- `src/main/ipc/wallpaperIpc.ts` / `src/renderer/wallpaper/Wallpaper.tsx`: 壁纸媒体 ready 后再贴桌面，并在全屏遮挡时暂停抽帧与视频播放。
+
+**遇到的问题**:
+
+- 精准定位不能只保存开关状态，否则后端工具会误以为可用 → 设置页必须实际获取设备坐标成功后才保持开启，失败时回落城市级位置并提示打开系统定位设置。
+
+**Git Commit**: 已提交 — feat: improve agent tools and desktop experience
+
+---
+
 ## [2026-05-15 00:30] 完善 DeepSeek 与 Agent 人性化对话体验
 
 **变更摘要**: 修复 DeepSeek 工具循环、模型配置和 Agent 过程 UI，支持流式工具续聊、触发式记忆召回、人格化对话气泡与工具记录时间线。

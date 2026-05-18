@@ -9,6 +9,7 @@
 
 import { currentTimeTool } from './definitions/current-time'
 import { calculatorTool } from './definitions/calculator'
+import { userLocationTool } from './definitions/user-location'
 import { webSearchTool } from './definitions/web-search'
 import { readClipboardTool, writeClipboardTool } from './definitions/clipboard'
 import { openUrlTool } from './definitions/open-url'
@@ -42,6 +43,7 @@ export interface ToolCallEvent {
 export function getToolSet(context: WorkspaceToolContext = {}) {
   return {
     get_current_time: currentTimeTool,
+    get_user_location: userLocationTool,
     calculator: calculatorTool,
     web_search: webSearchTool,
     read_clipboard: readClipboardTool,

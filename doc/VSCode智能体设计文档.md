@@ -1,6 +1,6 @@
 # VS Code 智能体设计文档
 
-> 最后更新：2026-05-15
+> 最后更新：2026-05-17
 > 读者：产品设计、Agent 架构、提示词工程、前后端实现和后续接手开发者
 > 本文用于整理 VS Code / Copilot Agent 类工作区智能体的整体设计，并映射到灵月桌面现有本地工作区 Agent。它不替代 `AI对话与智能体设计说明.md`，而是单独聚焦“像 VS Code 一样在项目里工作的 Agent”。
 
@@ -155,6 +155,8 @@ sequenceDiagram
 | 上下文 | `buildInitialContext()` 注入人设、工具能力、RetrievalRouter 记忆/状态，以及最近用户/助手消息；历史 `tool_call/tool_result` 目前只落库和展示，不会结构化 replay 给下一轮模型。 |
 | 模型调用 | OpenAI 兼容和 Gemini 走 AI SDK `streamText()`；DeepSeek 有工具时走 `streamDeepSeekToolChat()`，手动保留并回传 `reasoning_content`，兼容 `deepseek-v4-pro` thinking tool calling。 |
 | AgentRun | 可由用户意图预创建，也可在任意注册工具开始执行时动态创建；工具过程会写入 `tool_call/tool_result` 事件并同步 AgentRun 状态。 |
+| 搜索工具 | `web_search` 已接入真实网页搜索：优先使用 `TAVILY_API_KEY`、`BRAVE_SEARCH_API_KEY`、`EXA_API_KEY`，无 Key 时使用 DuckDuckGo HTML + Bing HTML 兜底；DuckDuckGo Instant Answer 只作为摘要补充，不再作为主搜索结果来源。 |
+| 位置工具 | `get_user_location` 已接入位置获取：默认只使用 IP 城市级粗略位置；用户在通用设置中开启“精准定位授权”时必须实际获取设备坐标成功，开关才会保持开启；开启后位置工具会优先请求设备/系统 Geolocation，高精度不可用时设置页提供打开 Windows 定位设置入口；`weather` 未指定城市时会直接使用可用坐标查询，不再反复询问用户城市。 |
 | 权限 | 工作区路径、敏感文件、写入、删除和命令由 Permission Engine 与 ApprovalStore 控制；`workspace-write/full-access` 可自动通过部分普通写入。 |
 | 验证 | `verify_workspace_result` 当前偏文件、目录、文本和 Artifact 检查；typecheck/build/test 等命令级验证需要通过 `run_command` 执行。 |
 

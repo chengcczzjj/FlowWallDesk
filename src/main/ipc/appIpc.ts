@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
 import { getMainWindow, createMainWindow } from '../windows/mainWindow'
 import type { MainWindowNavTarget } from '../windows/mainWindow'
 import { minimizeAllOtherWindows, refreshCanvasZOrder } from '../windows/canvasWindow'
+import { getLocationPrivacySettings, requestPreciseLocationAuthorization, setPreciseLocationEnabled, validatePreciseLocationEnabled } from '../memory/tools/definitions/user-location'
 
 function showMainWindow(target?: MainWindowNavTarget): void {
   const win = getMainWindow() ?? createMainWindow(target)
@@ -24,6 +25,40 @@ function showMainWindow(target?: MainWindowNavTarget): void {
 
 export function registerAppIpc(): void {
   ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion())
+  ipcMain.handle(IPC.APP_GET_LOCATION_SETTINGS, () => getLocationPrivacySettings())
+  ipcMain.handle(IPC.APP_SET_PRECISE_LOCATION_ENABLED, (_e, enabled: boolean) => {
+    return { ok: true, settings: setPreciseLocationEnabled(enabled === true) }
+  })
+  ipcMain.handle(IPC.APP_REQUEST_PRECISE_LOCATION_AUTHORIZATION, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? getMainWindow()
+    const messageOptions: Electron.MessageBoxOptions = {
+      type: 'question',
+      title: '允许精准定位',
+      message: '允许灵月使用设备精准位置吗？',
+      detail: '开启后，AI 的天气和位置相关工具可以使用设备/系统定位返回的坐标。关闭时只使用粗略城市级位置。',
+      buttons: ['允许', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }
+    const result = win
+      ? await dialog.showMessageBox(win, messageOptions)
+      : await dialog.showMessageBox(messageOptions)
+    if (result.response !== 0) {
+      return { ok: false, settings: getLocationPrivacySettings(), error: '已取消精准定位授权。' }
+    }
+    return requestPreciseLocationAuthorization()
+  })
+  ipcMain.handle(IPC.APP_VALIDATE_PRECISE_LOCATION, () => validatePreciseLocationEnabled())
+  ipcMain.handle(IPC.APP_OPEN_LOCATION_SETTINGS, async () => {
+    if (process.platform !== 'win32') return false
+    try {
+      await shell.openExternal('ms-settings:privacy-location')
+      return true
+    } catch {
+      return false
+    }
+  })
   ipcMain.on(IPC.APP_QUIT, () => app.quit())
   ipcMain.on(IPC.APP_SHOW_MAIN, () => {
     showMainWindow()

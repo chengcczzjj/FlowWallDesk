@@ -12,6 +12,7 @@ import {
   Sparkles,
   Globe,
   ExternalLink,
+  MapPin,
 } from 'lucide-react'
 import type { ModelProfile, ModelProvider } from '@shared/types'
 import './settings.css'
@@ -26,6 +27,10 @@ export function SettingsGeneralPage() {
   /* ── General settings state ── */
   const [autoStart, setAutoStart] = useState(false)
   const [animations, setAnimations] = useState(true)
+  const [preciseLocationEnabled, setPreciseLocationEnabled] = useState(false)
+  const [locationBusy, setLocationBusy] = useState(false)
+  const [locationMessage, setLocationMessage] = useState('')
+  const [showLocationSettingsAction, setShowLocationSettingsAction] = useState(false)
 
   /* ── Model profiles state ── */
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
@@ -61,6 +66,35 @@ export function SettingsGeneralPage() {
   useEffect(() => {
     loadProfiles()
   }, [loadProfiles])
+
+  useEffect(() => {
+    let canceled = false
+    window.lingyue.app.getLocationSettings()
+      .then(async (settings) => {
+        if (canceled) return
+        setPreciseLocationEnabled(settings.preciseLocationEnabled)
+        if (!settings.preciseLocationEnabled) return
+
+        setLocationBusy(true)
+        setLocationMessage('正在验证精准定位是否可用')
+        const result = await window.lingyue.app.validatePreciseLocation()
+        if (canceled) return
+        setPreciseLocationEnabled(result.settings.preciseLocationEnabled)
+        if (result.ok) {
+          const accuracy = result.location?.accuracyMeters
+          setLocationMessage(accuracy ? `已验证，当前精度约 ${Math.round(accuracy)} 米` : '已验证精准定位可用')
+          setShowLocationSettingsAction(false)
+        } else {
+          setLocationMessage(result.error || '精准定位验证失败')
+          setShowLocationSettingsAction(true)
+        }
+      })
+      .catch(() => setLocationMessage('定位设置读取失败'))
+      .finally(() => {
+        if (!canceled) setLocationBusy(false)
+      })
+    return () => { canceled = true }
+  }, [])
 
   /* ── Profile actions ── */
   const handleNewProfile = (provider: ModelProvider = 'openai-compatible') => {
@@ -155,6 +189,39 @@ export function SettingsGeneralPage() {
     setEditingProfile({ ...editingProfile, [key]: value })
   }
 
+  const handlePreciseLocationToggle = async (enabled: boolean) => {
+    if (locationBusy) return
+    setLocationBusy(true)
+    setLocationMessage('')
+
+    try {
+      if (!enabled) {
+        const result = await window.lingyue.app.setPreciseLocationEnabled(false)
+        setPreciseLocationEnabled(result.settings.preciseLocationEnabled)
+        setLocationMessage('已关闭精准定位，将只使用粗略位置')
+        setShowLocationSettingsAction(false)
+        return
+      }
+
+      const result = await window.lingyue.app.requestPreciseLocationAuthorization()
+      setPreciseLocationEnabled(result.settings.preciseLocationEnabled)
+      if (result.ok) {
+        const accuracy = result.location?.accuracyMeters
+        setLocationMessage(accuracy ? `已开启，当前精度约 ${Math.round(accuracy)} 米` : '已开启精准定位')
+        setShowLocationSettingsAction(false)
+      } else {
+        setLocationMessage(result.error || '精准定位开启失败')
+        setShowLocationSettingsAction(true)
+      }
+    } catch (error) {
+      setPreciseLocationEnabled(false)
+      setLocationMessage((error as Error).message || '定位授权失败')
+      setShowLocationSettingsAction(false)
+    } finally {
+      setLocationBusy(false)
+    }
+  }
+
   return (
     <div className="settings-scroll">
       {/* ════════ 外观与行为 ════════ */}
@@ -224,6 +291,41 @@ export function SettingsGeneralPage() {
               <option value="zh-CN">简体中文</option>
               <option value="en">English</option>
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* ════════ 隐私与定位 ════════ */}
+      <div className="settings-group">
+        <div className="settings-group__header">隐私与定位</div>
+
+        <div className="settings-card">
+          <div className="settings-card__icon"><MapPin size={18} /></div>
+          <div className="settings-card__body">
+            <div className="settings-card__title">精准定位授权</div>
+            <div className="settings-card__desc">
+              默认关闭时 AI 只使用粗略位置；开关只有在实际获取设备坐标成功后才会开启
+            </div>
+            {locationMessage && <div className="settings-card__desc settings-card__desc--status">{locationMessage}</div>}
+            {showLocationSettingsAction && (
+              <button className="settings-btn settings-btn--sm location-settings-btn" onClick={() => window.lingyue.app.openLocationSettings()}>
+                <ExternalLink size={12} /> 打开 Windows 定位设置
+              </button>
+            )}
+          </div>
+          <div className="settings-card__action">
+            {locationBusy && <Loader2 size={14} className="spin" />}
+            <label className={`toggle-switch ${locationBusy ? 'toggle-switch--disabled' : ''}`}>
+              <input
+                type="checkbox"
+                checked={preciseLocationEnabled}
+                disabled={locationBusy}
+                onChange={(e) => handlePreciseLocationToggle(e.target.checked)}
+              />
+              <div className="toggle-switch__track">
+                <div className="toggle-switch__thumb" />
+              </div>
+            </label>
           </div>
         </div>
       </div>

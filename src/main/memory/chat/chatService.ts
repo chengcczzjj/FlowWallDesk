@@ -73,6 +73,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 const CACHED_READ_TOOL_NAMES = new Set([
   'get_current_time',
+  'get_user_location',
   'calculator',
   'web_search',
   'get_system_info',
@@ -100,6 +101,11 @@ function stableStringify(value: unknown): string {
 }
 
 function normalizeToolCacheInput(toolName: string, input: unknown): unknown {
+  if (toolName === 'get_user_location') {
+    const record = asRecord(input)
+    const precision = typeof record?.precision === 'string' ? record.precision : 'auto'
+    return { refresh: record?.refresh === true, precision }
+  }
   if (toolName === 'weather') {
     const record = asRecord(input)
     const city = typeof record?.city === 'string'
@@ -224,6 +230,7 @@ const READ_TOOL_NAMES = new Set([
   'read_file',
   'search_text',
   'get_file_info',
+  'get_user_location',
   'web_search',
   'weather',
   'news',

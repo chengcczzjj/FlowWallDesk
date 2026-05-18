@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { LibraryPage } from './pages/LibraryPage'
 import { EmptyPage } from './pages/EmptyPage'
 import { WidgetsPage } from './pages/WidgetsPage'
@@ -20,6 +21,18 @@ import { PixelPetPage } from './pages/pet/PixelPetPage'
 import { ChatPage } from './pages/chat/ChatPage'
 import { SettingsGeneralPage } from './pages/settings/SettingsGeneralPage'
 import { AddWallpaperDialog } from './components/AddWallpaperDialog'
+import {
+  PIXEL_PET_SETTINGS_KEY,
+  PIXEL_PET_STORAGE_KEY,
+  PIXEL_PET_THEME_EVENT,
+  buildPixelPetThemeVars,
+  createDefaultPixelPets,
+  getActivePixelPet,
+  normalizePixelPet,
+  normalizePixelPetSettings,
+  resolvePixelPetPalette,
+  type PixelPet,
+} from '@renderer/shared/pixel-pet'
 import './styles.css'
 
 type ActivityKey = 'memory' | 'library' | 'widgets' | 'pet' | 'settings'
@@ -62,6 +75,35 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
 const initialParams = new URLSearchParams(window.location.search)
 const shouldRestore = initialParams.has('restore')
 
+function loadPixelPetAppThemeStyle(): CSSProperties {
+  const defaults = createDefaultPixelPets()
+  let pets: PixelPet[] = defaults
+  try {
+    const saved = JSON.parse(localStorage.getItem(PIXEL_PET_STORAGE_KEY) || '[]')
+    const defaultIds = new Set(defaults.map((pet) => pet.id))
+    const generated = Array.isArray(saved)
+      ? saved.filter((pet) => !defaultIds.has(isRecord(pet) ? String(pet.id || '') : '')).map(normalizePixelPet)
+      : []
+    pets = [...defaults, ...generated]
+  } catch {
+    pets = defaults
+  }
+
+  let settings = normalizePixelPetSettings({}, pets)
+  try {
+    settings = normalizePixelPetSettings(JSON.parse(localStorage.getItem(PIXEL_PET_SETTINGS_KEY) || '{}'), pets)
+  } catch {
+    settings = normalizePixelPetSettings({}, pets)
+  }
+
+  const palette = resolvePixelPetPalette(getActivePixelPet(pets, settings), settings.theme)
+  return buildPixelPetThemeVars(palette) as CSSProperties
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
 function isActivityKey(value: string | null | undefined): value is ActivityKey {
   return Boolean(value && NAV_TABS[value as ActivityKey])
 }
@@ -93,6 +135,7 @@ export function App() {
   const saved = loadSavedNav()
   const [activity, setActivity] = useState<ActivityKey>(saved.activity)
   const [subPage, setSubPage] = useState<string>(saved.subPage)
+  const [appThemeStyle, setAppThemeStyle] = useState<CSSProperties>(() => loadPixelPetAppThemeStyle())
   const [search, setSearch] = useState('')
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -105,6 +148,23 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('lingyue-nav', JSON.stringify({ activity, subPage }))
   }, [activity, subPage])
+
+  useEffect(() => {
+    const syncStoredTheme = (event?: StorageEvent) => {
+      if (event && event.key !== PIXEL_PET_SETTINGS_KEY && event.key !== PIXEL_PET_STORAGE_KEY) return
+      setAppThemeStyle(loadPixelPetAppThemeStyle())
+    }
+    const syncLiveTheme = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, string>>).detail
+      setAppThemeStyle((detail || loadPixelPetAppThemeStyle()) as CSSProperties)
+    }
+    window.addEventListener('storage', syncStoredTheme)
+    window.addEventListener(PIXEL_PET_THEME_EVENT, syncLiveTheme)
+    return () => {
+      window.removeEventListener('storage', syncStoredTheme)
+      window.removeEventListener(PIXEL_PET_THEME_EVENT, syncLiveTheme)
+    }
+  }, [])
 
   useEffect(() => {
     return window.lingyue.app.onNavigate((target) => {
@@ -123,7 +183,10 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell app-shell--${activity} ${activity === 'library' ? 'app-shell--wallpaper' : 'app-shell--pet-theme'}`}
+      style={activity === 'library' ? undefined : appThemeStyle}
+    >
       <header className="title-bar">
         <span className="title-bar__text">灵月 · LingyueDesk</span>
         <div className="title-bar__spacer" />

@@ -370,6 +370,15 @@ export function Canvas() {
     }
   }, [editing, selectedId])
 
+  const onBgContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      if (!editing) return
+      event.preventDefault()
+      onBgClick()
+    },
+    [editing, onBgClick]
+  )
+
   const updateWidgetConfig = useCallback((id: string, newConfig: Record<string, unknown>, options?: ConfigUpdateOptions) => {
     setWidgets((prev) => {
       const source = prev.find((w) => w.id === id)
@@ -440,7 +449,7 @@ export function Canvas() {
 
   return (
     <WallpaperFrameCtx.Provider value={frame}>
-      <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick}>
+      <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick} onContextMenu={onBgContextMenu}>
         {widgets
           .filter((w) => w.enabled)
           .map((w) => (

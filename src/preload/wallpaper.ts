@@ -22,6 +22,10 @@ const api = {
   sendFrame: (data: string): void => {
     ipcRenderer.send(IPC.WALLPAPER_FRAME, data)
   },
+  /** 通知主进程壁纸内容已可显示，避免空白窗口先贴到桌面 */
+  notifyReady: (itemId: string, source: string): void => {
+    ipcRenderer.send(IPC.WALLPAPER_READY, { itemId, source })
+  },
   /** 监听全屏遮挡暂停/恢复帧捕获 */
   onPauseCapture: (cb: (paused: boolean) => void): (() => void) => {
     const handler = (_: unknown, paused: boolean) => cb(paused)

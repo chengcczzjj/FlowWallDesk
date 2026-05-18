@@ -538,6 +538,45 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
   const content = stringValue(input, 'content')
   const hiddenContentMeta = content ? `内容 ${content.length} 字，已隐藏` : undefined
 
+  if (tc.toolName === 'get_user_location') {
+    const displayName = stringValue(output, 'displayName')
+    const source = stringValue(output, 'source')
+    const precision = stringValue(output, 'precision')
+    const approximate = booleanValue(output, 'approximate')
+    const accuracyMeters = typeof output?.accuracyMeters === 'number' ? output.accuracyMeters : null
+    const precisionText = precision === 'device'
+      ? accuracyMeters ? `设备定位，精度约 ${Math.round(accuracyMeters)} 米` : '设备定位'
+      : approximate ? '城市级近似位置' : null
+    const meta = [precisionText, source ? `来源：${source}` : null].filter(Boolean).join(' · ')
+    return {
+      title: ok === false || tc.status === 'error' ? '定位没完成' : tc.status === 'running' ? '获取位置' : '已获取位置',
+      detail: tc.status === 'running' ? '正在获取当前位置' : displayName ? `当前位置：${displayName}` : (error ?? '当前位置'),
+      meta: error ?? (meta || undefined),
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'web_search') {
+    const query = stringValue(input, 'query')
+    const resultCount = typeof output?.resultCount === 'number'
+      ? output.resultCount
+      : Array.isArray(output?.results) ? output.results.length : null
+    const provider = stringValue(output, 'providerLabel') ?? stringValue(output, 'provider')
+    const action = tc.status === 'running'
+      ? '正在搜索'
+      : ok === false || tc.status === 'error'
+        ? '搜索失败'
+        : typeof resultCount === 'number'
+          ? `找到 ${resultCount} 条`
+          : '已搜索'
+    return {
+      title: ok === false || tc.status === 'error' ? '网页搜索没完成' : tc.status === 'running' ? '搜索网页' : '网页搜索完成',
+      detail: query ? `${action}：${truncateSingleLine(query, 90)}` : '正在搜索网页',
+      meta: error ?? (provider ? `来源：${provider}` : undefined),
+      ok,
+    }
+  }
+
   if (tc.toolName === 'run_command') {
     const args = stringArrayValue(input, 'args')
     const command = [stringValue(input, 'command'), ...args].filter(Boolean).join(' ')
@@ -615,8 +654,10 @@ function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus,
   if (latest.status === 'running') {
     if (elapsedSeconds >= 25) return `这一步慢了一点，我还在等结果回来${target}。`
     if (latest.toolName.includes('memory')) return `我回头找找之前留下的线索${target}。`
+    if (latest.toolName === 'get_user_location') return `我先确认一下当前位置${target}。`
     if (latest.toolName === 'search_text') return `我在工作区里翻一下相关线索${target}。`
-    if (latest.toolName === 'web_search' || latest.toolName === 'news') return `我去看眼最新信息${target}。`
+    if (latest.toolName === 'web_search') return `正在搜索网页${target}。`
+    if (latest.toolName === 'news') return `我去看眼最新信息${target}。`
     if (latest.toolName === 'weather') return `我确认一下实时天气${target}。`
     if (latest.toolName === 'read_file' || latest.toolName === 'list_directory' || latest.toolName === 'get_file_info') return `我先翻一下相关文件${target}。`
     if (latest.toolName === 'create_checkpoint') return `我先留一个可恢复的保护点${target}。`
@@ -1989,6 +2030,7 @@ function PetStatRow({
 // ─── Tool Call Display ─────────────────────────────────────
 const TOOL_NAME_LABELS: Record<string, string> = {
   get_current_time: '获取时间',
+  get_user_location: '获取位置',
   calculator: '计算器',
   web_search: '网络搜索',
   read_clipboard: '读取剪贴板',
@@ -2153,9 +2195,10 @@ function compactToolTitle(toolName: string): string {
   if (toolName === 'create_file' || toolName === 'write_file' || toolName === 'patch_file') return '文件'
   if (toolName === 'run_command') return '命令'
   if (toolName === 'search_text') return '搜索'
-  if (toolName === 'web_search') return '网页'
+  if (toolName === 'web_search') return '网页搜索'
   if (toolName === 'news') return '资讯'
   if (toolName === 'weather') return '天气'
+  if (toolName === 'get_user_location') return '位置'
   if (toolName === 'calculator') return '计算'
   if (toolName === 'get_current_time') return '时间'
   if (toolName === 'get_system_info') return '系统'
@@ -2167,7 +2210,13 @@ function ToolProcessItem({ tc, count = 1 }: { tc: ToolCallDisplay; count?: numbe
   const info = toolActivityInfo(tc)
   const needsApproval = toolOutputNeedsApproval(tc.output)
   const failed = tc.status === 'error' || (info.ok === false && !needsApproval)
-  const stateText = tc.status === 'running' ? '处理中' : needsApproval ? '需要确认' : failed ? '没成功' : count > 1 ? `已处理 ${count} 次` : '已处理'
+  let stateText = tc.status === 'running' ? '处理中' : needsApproval ? '需要确认' : failed ? '没成功' : count > 1 ? `已处理 ${count} 次` : '已处理'
+  if (tc.toolName === 'web_search') {
+    stateText = tc.status === 'running' ? '搜索中' : needsApproval ? '需要确认' : failed ? '没成功' : count > 1 ? `已搜索 ${count} 次` : '已搜索'
+  }
+  if (tc.toolName === 'get_user_location') {
+    stateText = tc.status === 'running' ? '定位中' : failed ? '没成功' : count > 1 ? `已定位 ${count} 次` : '已定位'
+  }
   const inputText = formatToolPayload(tc.input)
   const outputText = tc.error ? tc.error : formatToolPayload(tc.output)
   const title = compactToolTitle(tc.toolName)

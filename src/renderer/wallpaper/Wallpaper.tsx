@@ -86,8 +86,12 @@ function drawWallpaperFrame(
 export function Wallpaper() {
   const [item, setItem] = useState<WallpaperItem | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [mediaReady, setMediaReady] = useState(false)
+  const [videoStarted, setVideoStarted] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
+  const playRetryTimerRef = useRef<number | null>(null)
+  const readyReportedRef = useRef<string | null>(null)
 
   // 实时设置状态
   const [volume, setVolume] = useState(50)
@@ -96,6 +100,45 @@ export function Wallpaper() {
   const [flip, setFlip] = useState('无')
   const objectFit = scalingToFit(scaling)
   const transform = flipToTransform(flip)
+
+  const clearPlayRetry = useCallback(() => {
+    if (playRetryTimerRef.current !== null) {
+      window.clearTimeout(playRetryTimerRef.current)
+      playRetryTimerRef.current = null
+    }
+  }, [])
+
+  const markMediaReady = useCallback(() => {
+    if (!item) return
+    setMediaReady(true)
+    const readyKey = `${item.id}:${item.source}`
+    if (readyReportedRef.current === readyKey) return
+    readyReportedRef.current = readyKey
+    window.wallpaperBridge?.notifyReady?.(item.id, item.source)
+  }, [item])
+
+  const playVideo = useCallback(
+    (attempt = 0) => {
+      const v = videoRef.current
+      if (!v || item?.type !== 'video') return
+      clearPlayRetry()
+      v.volume = Math.max(0, Math.min(1, volume / 100))
+      v.muted = volume === 0 || !videoStarted || attempt > 0
+      v.playbackRate = speed
+      v.play()
+        .then(() => {
+          setVideoStarted(true)
+          if (volume > 0) v.muted = false
+        })
+        .catch((e: DOMException) => {
+          console.warn('[wallpaper] video.play 被拒:', e.name, e.message)
+          if (attempt >= 3 || videoRef.current !== v) return
+          v.muted = true
+          playRetryTimerRef.current = window.setTimeout(() => playVideo(attempt + 1), attempt === 0 ? 250 : 1000)
+        })
+    },
+    [clearPlayRetry, item?.type, speed, videoStarted, volume]
+  )
 
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -109,8 +152,16 @@ export function Wallpaper() {
     captureCanvasRef.current = c
     return () => {
       if (captureTimerRef.current) clearInterval(captureTimerRef.current)
+      clearPlayRetry()
     }
-  }, [])
+  }, [clearPlayRetry])
+
+  useEffect(() => {
+    setMediaReady(false)
+    setVideoStarted(false)
+    readyReportedRef.current = null
+    clearPlayRetry()
+  }, [clearPlayRetry, item?.id, item?.source])
 
   const captureFrame = useCallback(() => {
     const c = captureCanvasRef.current
@@ -173,18 +224,20 @@ export function Wallpaper() {
       } else {
         // 恢复视频播放和帧捕获
         if (item?.type === 'video') {
-          videoRef.current?.play().catch(() => {})
+          playVideo()
           startCapture()
         }
       }
     })
     return () => off?.()
-  }, [item, startCapture, stopCapture])
+  }, [item, playVideo, startCapture, stopCapture])
 
   useEffect(() => {
     const off = window.wallpaperBridge?.onLoad((it) => {
       console.log('[wallpaper] onLoad', it)
       setErr(null)
+      setMediaReady(false)
+      setVideoStarted(false)
       setItem(it)
       // 加载壁纸自带的设置
       if (it.settings) {
@@ -198,6 +251,9 @@ export function Wallpaper() {
     window.wallpaperBridge?.getCurrent?.().then((state) => {
       if (state?.current) {
         console.log('[wallpaper] initial pull', state.current)
+        setErr(null)
+        setMediaReady(false)
+        setVideoStarted(false)
         setItem(state.current)
         const s = state.current.settings
         if (s) {
@@ -236,9 +292,9 @@ export function Wallpaper() {
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = Math.max(0, Math.min(1, volume / 100))
-      videoRef.current.muted = volume === 0
+      videoRef.current.muted = volume === 0 || !videoStarted
     }
-  }, [volume, item])
+  }, [volume, item, videoStarted])
 
   useEffect(() => {
     if (videoRef.current) {
@@ -248,36 +304,12 @@ export function Wallpaper() {
 
   useEffect(() => {
     if (item?.type === 'video' && videoRef.current) {
-      const v = videoRef.current
-      v.muted = volume === 0
-      v.volume = Math.max(0, Math.min(1, volume / 100))
-      v.playbackRate = speed
-      v.play().catch((e: DOMException) => {
-        console.warn('[wallpaper] video.play 被拒:', e.name, e.message)
-      })
+      playVideo()
     }
-  }, [item])
+  }, [item, playVideo])
 
   if (!item) {
-    // 调试色块：如果你能在桌面上看到一个全屏红色 + "壁纸窗口已贴桌面"字样，
-    // 说明窗口已经成功贴到 Wallpaper 层。然后在主 UI 里点应用即可看到真壁纸。
-    return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          background: '#c0392b',
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 28,
-          fontFamily: 'Segoe UI, sans-serif',
-        }}
-      >
-        壁纸窗口已贴桌面（请在主界面选择并应用一个壁纸）
-      </div>
-    )
+    return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
   }
 
   const src = toAssetUrl(item.source) ?? ''
@@ -306,20 +338,40 @@ export function Wallpaper() {
     height: '100%',
     objectFit,
     transform,
-    background: '#000',
+    background: 'transparent',
+    opacity: mediaReady ? 1 : 0,
+    transition: 'opacity 120ms ease-out',
   }
 
   if (item.type === 'video') {
     return (
       <>
         <video
+          key={item.source}
           ref={videoRef}
           src={src}
           autoPlay
-          muted={volume === 0}
+          muted={volume === 0 || !videoStarted}
           loop
           playsInline
-          onError={() => setErr(`video 加载失败 (${item.source})`)}
+          preload="auto"
+          onLoadedData={() => {
+            markMediaReady()
+            captureFrame()
+            playVideo()
+          }}
+          onCanPlay={() => {
+            markMediaReady()
+            playVideo()
+          }}
+          onPlaying={() => {
+            markMediaReady()
+            setVideoStarted(true)
+          }}
+          onError={() => {
+            setErr(`video 加载失败 (${item.source})`)
+            markMediaReady()
+          }}
           style={mediaStyle}
         />
         {errorOverlay}
@@ -331,10 +383,17 @@ export function Wallpaper() {
     return (
       <>
         <img
+          key={item.source}
           ref={imgRef}
           src={src}
-          onLoad={captureFrame}
-          onError={() => setErr(`image 加载失败 (${item.source})`)}
+          onLoad={() => {
+            markMediaReady()
+            captureFrame()
+          }}
+          onError={() => {
+            setErr(`image 加载失败 (${item.source})`)
+            markMediaReady()
+          }}
           style={mediaStyle}
         />
         {errorOverlay}
@@ -346,14 +405,19 @@ export function Wallpaper() {
     return (
       <>
         <iframe
+          key={item.source}
           src={src}
-          onError={() => setErr(`iframe 加载失败 (${item.source})`)}
-          style={{ width: '100%', height: '100%', border: 0, background: '#000', transform }}
+          onLoad={markMediaReady}
+          onError={() => {
+            setErr(`iframe 加载失败 (${item.source})`)
+            markMediaReady()
+          }}
+          style={{ ...mediaStyle, border: 0 }}
         />
         {errorOverlay}
       </>
     )
   }
 
-  return <div style={{ width: '100%', height: '100%', background: '#000' }} />
+  return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
 }

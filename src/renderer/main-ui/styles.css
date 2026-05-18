@@ -69,6 +69,26 @@ button {
   color: inherit;
 }
 
+*,
+*::before,
+*::after {
+  cursor: default !important;
+}
+
+input:not([type]),
+input[type='email'],
+input[type='number'],
+input[type='password'],
+input[type='search'],
+input[type='tel'],
+input[type='text'],
+input[type='url'],
+textarea,
+[contenteditable='true'],
+[contenteditable='plaintext-only'] {
+  cursor: text !important;
+}
+
 ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -94,6 +114,77 @@ button {
   flex-direction: column;
   width: 100%;
   height: 100vh;
+}
+
+.app-shell--pet-theme {
+  --accent: var(--pet-ui-accent);
+  --accent-hover: color-mix(in srgb, var(--pet-ui-accent), #1f2937 22%);
+  --accent-light: var(--pet-ui-accent-soft);
+  --accent-bg: var(--pet-ui-focus);
+  --bg-card: color-mix(in srgb, rgba(255, 255, 255, 0.76), var(--pet-bg) 20%);
+  --bg-card-hover: color-mix(in srgb, rgba(255, 255, 255, 0.92), var(--pet-bg) 14%);
+  --bg-acrylic: color-mix(in srgb, rgba(255, 255, 255, 0.6), var(--pet-bg) 20%);
+  --border-card: var(--pet-line);
+  --border-card-highlight: rgba(255, 255, 255, 0.72);
+  --border-control: var(--pet-line);
+  --border-divider: var(--pet-glass-line);
+  --shadow-card: 0 14px 34px var(--pet-theme-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  --shadow-flyout: 0 20px 52px var(--pet-theme-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  color: #202733;
+}
+
+.app-shell--pet-theme .title-bar,
+.app-shell--pet-theme .activity-bar,
+.app-shell--pet-theme .top-nav {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.34)),
+    color-mix(in srgb, var(--pet-bg), rgba(255, 255, 255, 0.58) 58%);
+  border-color: var(--pet-glass-line);
+  backdrop-filter: blur(28px) saturate(1.32);
+  -webkit-backdrop-filter: blur(28px) saturate(1.32);
+}
+
+.app-shell--pet-theme .app-content {
+  isolation: isolate;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.18)),
+    linear-gradient(135deg, var(--pet-bg), var(--pet-bg-deep));
+}
+
+.app-shell--pet-theme .app-content::before {
+  content: '';
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(118deg, transparent 4% 27%, var(--pet-theme-wash-1) 44%, transparent 63%),
+    linear-gradient(36deg, transparent 0 32%, var(--pet-theme-wash-2) 54%, transparent 76%),
+    linear-gradient(162deg, transparent 0 18%, var(--pet-theme-wash-3) 41%, transparent 68%);
+  background-size: 160% 160%, 145% 145%, 180% 180%;
+  filter: blur(52px) saturate(0.96);
+  opacity: 0.52;
+  animation: pixelPetAmbientThemeDrift 18s ease-in-out infinite alternate;
+}
+
+.app-shell--pet-theme .app-content::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.3), transparent 38%, rgba(255, 255, 255, 0.18)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 6px);
+  opacity: 0.28;
+  mix-blend-mode: screen;
+}
+
+.app-shell--pet-theme .top-nav,
+.app-shell--pet-theme .page-content,
+.app-shell--pet-theme .chat-layout {
+  position: relative;
+  z-index: 1;
 }
 
 .app-body {
@@ -217,6 +308,17 @@ button {
   color: var(--accent);
   background: var(--accent-light);
 }
+.app-shell--pet-theme .activity-bar__item:hover,
+.app-shell--pet-theme .nav-btn:hover {
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.72), var(--pet-bg) 14%);
+  color: #202733;
+}
+
+.app-shell--pet-theme .activity-bar__item.active {
+  color: #202733;
+  background: var(--pet-ui-accent-soft);
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
 .activity-bar__item.active::before {
   content: '';
   position: absolute;
@@ -287,6 +389,22 @@ button {
 .nav-item.active {
   color: var(--text-primary);
   font-weight: 600;
+}
+.app-shell--pet-theme .nav-item {
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.app-shell--pet-theme .nav-item:hover {
+  border-color: color-mix(in srgb, var(--pet-glass-line), #ffffff 18%);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.app-shell--pet-theme .nav-item.active {
+  border-color: var(--pet-ui-accent);
+  background: var(--pet-ui-accent-soft);
+  color: #202733;
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
 }
 .nav-item.active::after {
   content: '';
@@ -716,6 +834,211 @@ button {
   color: var(--text-secondary);
 }
 
+.app-shell--pet-theme .empty-page {
+  color: #65707e;
+}
+
+.app-shell--pet-theme .empty-page__title {
+  color: #202733;
+}
+
+.app-shell--pet-theme .settings-scroll {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell--pet-theme .settings-group__header {
+  color: var(--pet-ui-accent);
+}
+
+.app-shell--pet-theme .settings-group__header::before {
+  background: var(--pet-ui-accent);
+  box-shadow: 0 0 10px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .settings-card,
+.app-shell--pet-theme .settings-expander,
+.app-shell--pet-theme .model-profile-card,
+.app-shell--pet-theme .profile-editor,
+.app-shell--pet-theme .profile-empty {
+  border-color: var(--pet-line);
+  border-top-color: rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.74), var(--pet-bg) 18%);
+  box-shadow: var(--shadow-card);
+}
+
+.app-shell--pet-theme .settings-card:hover,
+.app-shell--pet-theme .settings-expander:hover,
+.app-shell--pet-theme .model-profile-card:hover {
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.88), var(--pet-bg) 12%);
+  border-color: color-mix(in srgb, var(--pet-ui-accent), var(--pet-line) 36%);
+}
+
+.app-shell--pet-theme .model-profile-card--active {
+  border-color: var(--pet-ui-accent);
+  background: var(--pet-ui-accent-soft);
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .settings-select,
+.app-shell--pet-theme .form-field__input,
+.app-shell--pet-theme .combo-box {
+  border-color: var(--pet-line);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.66);
+}
+
+.app-shell--pet-theme .settings-select:focus,
+.app-shell--pet-theme .form-field__input:focus,
+.app-shell--pet-theme .combo-box:focus {
+  border-color: var(--pet-ui-accent);
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .settings-btn,
+.app-shell--pet-theme .model-fetch-btn {
+  border-color: var(--pet-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.app-shell--pet-theme .settings-btn:hover,
+.app-shell--pet-theme .model-fetch-btn:hover {
+  border-color: color-mix(in srgb, var(--pet-ui-accent), var(--pet-line) 30%);
+  background: var(--pet-ui-accent-soft);
+  color: #202733;
+}
+
+.app-shell--pet-theme .settings-btn--primary {
+  border-color: var(--pet-ui-accent);
+  background: var(--pet-ui-accent);
+  color: #fff;
+}
+
+.app-shell--pet-theme .chat-layout {
+  color: #202733;
+}
+
+.app-shell--pet-theme .chat-sidebar {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.3)),
+    color-mix(in srgb, var(--pet-bg), rgba(255, 255, 255, 0.54) 54%);
+  border-right-color: var(--pet-glass-line);
+  backdrop-filter: blur(30px) saturate(1.24);
+  -webkit-backdrop-filter: blur(30px) saturate(1.24);
+}
+
+.app-shell--pet-theme .chat-sidebar__action-btn,
+.app-shell--pet-theme .chat-sidebar__project-header,
+.app-shell--pet-theme .chat-sidebar__item,
+.app-shell--pet-theme .chat-topics__chip,
+.app-shell--pet-theme .chat-input__tool-btn,
+.app-shell--pet-theme .permission-menu__trigger,
+.app-shell--pet-theme .chat-input__model-tag {
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.app-shell--pet-theme .chat-sidebar__action-btn:hover,
+.app-shell--pet-theme .chat-sidebar__project-header:hover,
+.app-shell--pet-theme .chat-sidebar__item:hover,
+.app-shell--pet-theme .chat-topics__chip:hover,
+.app-shell--pet-theme .chat-input__tool-btn:hover,
+.app-shell--pet-theme .permission-menu__trigger:hover {
+  border-color: color-mix(in srgb, var(--pet-ui-accent), var(--pet-line) 38%);
+  background: rgba(255, 255, 255, 0.58);
+  color: #202733;
+}
+
+.app-shell--pet-theme .chat-sidebar__action-btn.active,
+.app-shell--pet-theme .chat-sidebar__item.active,
+.app-shell--pet-theme .permission-menu__item.active {
+  border-color: var(--pet-ui-accent);
+  background: var(--pet-ui-accent-soft);
+  color: #202733;
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .chat-welcome__avatar-ring,
+.app-shell--pet-theme .chat-msg--assistant .chat-msg__avatar,
+.app-shell--pet-theme .chat-msg__avatar--ai {
+  background: linear-gradient(135deg, var(--pet-ui-accent-soft), rgba(255, 255, 255, 0.68));
+  color: var(--pet-ui-accent);
+  box-shadow: 0 10px 30px var(--pet-theme-shadow);
+}
+
+.app-shell--pet-theme .chat-msg--assistant .chat-msg__bubble,
+.app-shell--pet-theme .chat-input-wrapper,
+.app-shell--pet-theme .chat-ctx-menu,
+.app-shell--pet-theme .chat-sort-menu,
+.app-shell--pet-theme .chat-input__add-menu,
+.app-shell--pet-theme .persona-page__templates,
+.app-shell--pet-theme .persona-page__input,
+.app-shell--pet-theme .persona-page__textarea,
+.app-shell--pet-theme .permission-menu__menu,
+.app-shell--pet-theme .tool-activity,
+.app-shell--pet-theme .process-status,
+.app-shell--pet-theme .process-tool__summary,
+.app-shell--pet-theme .process-tool__details,
+.app-shell--pet-theme .message-files {
+  border-color: var(--pet-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.76), var(--pet-bg) 14%);
+  box-shadow: var(--shadow-card);
+}
+
+.app-shell--pet-theme .chat-input-wrapper:focus-within {
+  border-color: var(--pet-ui-accent);
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.9), var(--pet-bg) 10%);
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .persona-page__template-btn {
+  border-color: var(--pet-line);
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.68), var(--pet-bg) 16%);
+}
+
+.app-shell--pet-theme .persona-page__template-btn:hover,
+.app-shell--pet-theme .persona-page__input:focus,
+.app-shell--pet-theme .persona-page__textarea:focus {
+  border-color: var(--pet-ui-accent);
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.9), var(--pet-bg) 10%);
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .persona-page__template-btn.active {
+  border-color: var(--pet-ui-accent);
+  background: var(--pet-ui-accent-soft);
+  color: #202733;
+  box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.app-shell--pet-theme .chat-topics__chip {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.app-shell--pet-theme .chat-msg--user .chat-msg__bubble,
+.app-shell--pet-theme .chat-msg--user .chat-msg__avatar,
+.app-shell--pet-theme .chat-msg__avatar--user,
+.app-shell--pet-theme .chat-input__send-btn {
+  background: var(--pet-ui-accent);
+  color: #fff;
+}
+
+.app-shell--pet-theme .chat-input__send-btn:hover {
+  background: var(--accent-hover);
+}
+
+.app-shell--pet-theme .permission-menu__trigger,
+.app-shell--pet-theme .message-files__kind,
+.app-shell--pet-theme .tool-activity__chip--running,
+.app-shell--pet-theme .process-status__icon,
+.app-shell--pet-theme .process-tool__status {
+  background: var(--pet-ui-accent-soft);
+  color: var(--pet-ui-accent);
+}
+
 /* ===== Library blurred background ===== */
 .library-bg {
   position: absolute;
@@ -1059,6 +1382,10 @@ button {
   overflow-y: auto;
   position: relative;
 }
+.app-shell--pet-theme .widgets-page {
+  color: #202733;
+}
+
 .widgets-main {
   padding: 24px 32px;
   max-width: 1200px;
@@ -1109,19 +1436,42 @@ button {
   cursor: default;
   background: var(--bg-card);
 }
+.app-shell--pet-theme .comp-card {
+  border: 1px solid var(--pet-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.74), var(--pet-bg) 18%);
+  box-shadow: var(--shadow-card);
+}
+
 .comp-card:hover {
   transform: translateY(-4px) scale(1.02);
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
 }
+.app-shell--pet-theme .comp-card:hover {
+  border-color: color-mix(in srgb, var(--pet-ui-accent), var(--pet-line) 34%);
+  box-shadow: 0 20px 52px var(--pet-theme-shadow);
+}
+
 .comp-card--nobg {
   background: transparent;
   box-shadow: none;
   border: 1px dashed rgba(255, 255, 255, 0.18);
 }
+.app-shell--pet-theme .comp-card--nobg {
+  border-color: color-mix(in srgb, var(--pet-glass-line), #ffffff 20%);
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.34), var(--pet-bg) 18%);
+  backdrop-filter: blur(12px) saturate(1.18);
+  -webkit-backdrop-filter: blur(12px) saturate(1.18);
+}
+
 .comp-card--nobg:hover {
   box-shadow: none;
   border-color: rgba(255, 255, 255, 0.35);
 }
+.app-shell--pet-theme .comp-card--nobg:hover {
+  border-color: color-mix(in srgb, var(--pet-ui-accent), var(--pet-glass-line) 34%);
+}
+
 .icon-manager-card {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -1172,6 +1522,11 @@ button {
   transition: transform 0.15s, background 0.15s;
   font-size: 14px;
 }
+.app-shell--pet-theme .comp-hover-btn {
+  background: var(--pet-ui-accent);
+  box-shadow: 0 0 0 3px var(--pet-ui-focus), 0 8px 18px var(--pet-theme-shadow);
+}
+
 .comp-hover-btn:hover {
   transform: scale(1.1);
   background: var(--accent-hover);
@@ -1634,13 +1989,18 @@ button {
   gap: 8px;
 }
 
+.pixel-pet-field--select {
+  margin-bottom: 12px;
+}
+
 .pixel-pet-field span {
   color: #65707e;
   font-size: 13px;
   line-height: 1.3;
 }
 
-.pixel-pet-field input {
+.pixel-pet-field input,
+.pixel-pet-select {
   width: 100%;
   min-height: 38px;
   border: 1px solid var(--pet-line);
@@ -1651,9 +2011,54 @@ button {
   outline: 0;
 }
 
-.pixel-pet-field input:focus {
+.pixel-pet-field input:focus,
+.pixel-pet-select:focus {
   border-color: var(--pet-ui-accent);
   box-shadow: 0 0 0 3px var(--pet-ui-focus);
+}
+
+.pixel-pet-select-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.pixel-pet-select {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #65707e 50%),
+    linear-gradient(135deg, #65707e 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 13px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.pixel-pet-field-hint {
+  color: #8893a0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pixel-pet-delete-current {
+  min-width: 58px;
+  border: 1px solid var(--pet-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.66);
+  color: #65707e;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.pixel-pet-delete-current:hover {
+  border-color: color-mix(in srgb, var(--pet-danger), transparent 38%);
+  color: var(--pet-danger);
 }
 
 .pixel-pet-list {
@@ -2007,6 +2412,13 @@ button {
   border: 1px dashed var(--border-control);
   border-radius: var(--radius-md);
 }
+.app-shell--pet-theme .widgets-empty {
+  border-color: var(--pet-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.46), var(--pet-bg) 18%);
+  color: #65707e;
+}
+
 .widget-instances {
   display: flex;
   flex-direction: column;
@@ -2025,6 +2437,17 @@ button {
 .widget-instance-card:hover {
   background: var(--bg-card-hover);
 }
+.app-shell--pet-theme .widget-instance-card {
+  border-color: var(--pet-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.72), var(--pet-bg) 18%);
+  box-shadow: var(--shadow-card);
+}
+
+.app-shell--pet-theme .widget-instance-card:hover {
+  border-color: color-mix(in srgb, var(--pet-ui-accent), var(--pet-line) 34%);
+}
+
 .widget-instance__icon {
   width: 36px;
   height: 36px;
@@ -2036,6 +2459,11 @@ button {
   color: var(--accent);
   flex-shrink: 0;
 }
+.app-shell--pet-theme .widget-instance__icon {
+  background: var(--pet-ui-accent-soft);
+  color: var(--pet-ui-accent);
+}
+
 .widget-instance__info {
   flex: 1;
   min-width: 0;

@@ -12,6 +12,11 @@ export const IPC = {
   APP_OPEN_RECYCLE_BIN: 'app:open-recycle-bin',
   APP_SHOW_DESKTOP: 'app:show-desktop',
   APP_GET_VERSION: 'app:get-version',
+  APP_GET_LOCATION_SETTINGS: 'app:get-location-settings',
+  APP_SET_PRECISE_LOCATION_ENABLED: 'app:set-precise-location-enabled',
+  APP_REQUEST_PRECISE_LOCATION_AUTHORIZATION: 'app:request-precise-location-authorization',
+  APP_VALIDATE_PRECISE_LOCATION: 'app:validate-precise-location',
+  APP_OPEN_LOCATION_SETTINGS: 'app:open-location-settings',
   WIN_MINIMIZE: 'win:minimize',
   WIN_MAXIMIZE_TOGGLE: 'win:maximize-toggle',
   WIN_CLOSE: 'win:close',
@@ -27,6 +32,8 @@ export const IPC = {
   WALLPAPER_UPDATE_SETTING: 'wallpaper:update-setting',
   // 主进程 → 壁纸窗口
   WALLPAPER_LOAD: 'wallpaper:load',
+  // 壁纸窗口 → 主进程：媒体首帧/页面已可显示
+  WALLPAPER_READY: 'wallpaper:ready',
   // 壁纸抽帧（壁纸窗口 → 主进程 → 画布窗口）
   WALLPAPER_FRAME: 'wallpaper:frame',
 

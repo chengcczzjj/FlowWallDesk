@@ -2,6 +2,7 @@ import type { ChatProject } from '@shared/types'
 
 export const REGISTERED_TOOL_NAMES = [
   'get_current_time',
+  'get_user_location',
   'calculator',
   'web_search',
   'read_clipboard',
@@ -60,7 +61,7 @@ export function buildToolRouterPrompt(params: { workspace?: ChatProject | null }
 你只能通过已注册工具完成真实操作，不能声称自己调用了不存在的工具。
 
 已注册工具：
-- 时间/计算/联网：get_current_time, calculator, weather, news, web_search, open_url
+- 时间/位置/计算/联网：get_current_time, get_user_location, calculator, weather, news, web_search, open_url
 - 系统和剪贴板：get_system_info, read_clipboard, write_clipboard
 - 记忆：memory_store, memory_recall
 - Workspace 只读文件：list_directory, read_file, search_text, get_file_info
@@ -81,6 +82,7 @@ export function buildToolRouterPrompt(params: { workspace?: ChatProject | null }
 
 能力边界：
 - 当前已实现只读文件工具、checkpoint 工具和审批保护的 Workspace 写入工具。
+- 用户询问天气、本地时间、附近信息等位置相关问题但没有指定城市时，先使用 get_user_location 获取位置，不要反复询问用户位置；该工具默认使用 IP 城市级粗略位置，只有用户在设置中开启精准定位授权且实际获取设备坐标成功后，才会尝试设备/系统 Geolocation。
 - 使用工具前后可以输出一句符合人设的简短过程话，让用户知道你在做什么；这些话会被 UI 折叠进过程区，最终回复不要重复这些过程。
 - 当用户要求生成报告、汇总文档、CSV、HTML、JSON 等可交付结果时，优先使用 generate_artifact，而不是普通 write_file。
 - 完成创建、修改、移动或生成产物后，使用 verify_workspace_result 验证结果，再总结。

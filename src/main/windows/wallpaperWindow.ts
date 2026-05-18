@@ -21,6 +21,19 @@ function getPrimaryDisplayBounds(): { x: number; y: number; width: number; heigh
   return { x, y, width, height }
 }
 
+function getAttachStagingBounds(): { x: number; y: number; width: number; height: number } {
+  const target = getPrimaryDisplayBounds()
+  const displays = screen.getAllDisplays()
+  const maxRight = Math.max(...displays.map((display) => display.bounds.x + display.bounds.width))
+  const maxBottom = Math.max(...displays.map((display) => display.bounds.y + display.bounds.height))
+  return {
+    x: maxRight + 96,
+    y: maxBottom + 96,
+    width: target.width,
+    height: target.height,
+  }
+}
+
 function syncWallpaperBoundsToPrimaryDisplay(force = false): void {
   const win = getWallpaperWindow()
   if (!win) return
@@ -52,7 +65,7 @@ function registerDisplayBoundsListener(): void {
 
 /**
  * 创建壁纸窗口：全屏无边框。
- * 时序：ready-to-show → show() → attach()。
+ * 时序：ready-to-show 后保持隐藏，等渲染进程媒体就绪 → show() → attach()。
  * 若 attach 失败 → 立即 hide()，绝不挡桌面。
  */
 export function createWallpaperWindow(): BrowserWindow {
@@ -67,7 +80,7 @@ export function createWallpaperWindow(): BrowserWindow {
     y,
     show: false,
     frame: false,
-    transparent: false,
+    transparent: true,
     skipTaskbar: true,
     resizable: false,
     movable: false,
@@ -78,7 +91,8 @@ export function createWallpaperWindow(): BrowserWindow {
     hasShadow: false,
     thickFrame: false,
     type: 'toolbar',
-    backgroundColor: '#FF00FF',
+    paintWhenInitiallyHidden: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: join(__dirname, '../preload/wallpaper.js'),
       sandbox: false,
@@ -92,22 +106,9 @@ export function createWallpaperWindow(): BrowserWindow {
   wallpaperWindow.setIgnoreMouseEvents(true, { forward: false })
   registerDisplayBoundsListener()
 
-  wallpaperWindow.on('ready-to-show', async () => {
+  wallpaperWindow.on('ready-to-show', () => {
     if (!wallpaperWindow) return
     syncWallpaperBoundsToPrimaryDisplay()
-    // 先把窗口显示出来（不显示的窗口 SetParent 后会被系统当不可见处理）
-    wallpaperWindow.showInactive()
-    const ok = await tryAttachToDesktop(wallpaperWindow)
-    if (ok) {
-      syncWallpaperBoundsToPrimaryDisplay()
-      attached = true
-      console.log(`[wallpaper] 已贴到桌面 (${attachHint})`)
-    } else {
-      attached = false
-      // 贴失败立即隐藏，不允许它浮在桌面上挡其他窗口/桌面图标
-      wallpaperWindow.hide()
-      console.warn(`[wallpaper] 贴桌面失败 (${attachHint})：壁纸窗口已隐藏，配置仍会保存`)
-    }
   })
 
   wallpaperWindow.on('closed', () => {
@@ -136,15 +137,18 @@ export async function ensureWallpaperAttached(): Promise<boolean> {
   if (attached) return true
   const win = getWallpaperWindow()
   if (!win) return false
-  syncWallpaperBoundsToPrimaryDisplay()
+  win.setBounds(getAttachStagingBounds(), false)
+  win.setOpacity(0)
   win.showInactive()
   const ok = await tryAttachToDesktop(win)
   if (ok) {
     syncWallpaperBoundsToPrimaryDisplay()
     attached = true
+    win.setOpacity(1)
     console.log(`[wallpaper] 重新贴桌面成功 (${attachHint})`)
   } else {
     win.hide()
+    win.setOpacity(1)
     console.warn(`[wallpaper] 重新贴桌面失败 (${attachHint})`)
   }
   return ok
@@ -207,7 +211,7 @@ async function tryAttachToDesktop(win: BrowserWindow): Promise<boolean> {
       if (delays[i] > 0) await wait(delays[i])
       try {
         eaw.attach(win, {
-          transparent: false,
+          transparent: true,
           forwardKeyboardInput: false,
           forwardMouseInput: false,
         })

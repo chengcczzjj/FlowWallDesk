@@ -6,6 +6,10 @@ interface ModelSettings {
   activeProfileId: string
 }
 
+interface PrivacySettings {
+  preciseLocationEnabled: boolean
+}
+
 interface Schema {
   wallpaper: WallpaperState
   widgets: WidgetInstance[]
@@ -17,6 +21,8 @@ interface Schema {
   modelSettings: ModelSettings
   /** AI 人设 */
   persona?: { name: string; prompt: string; avatar?: string }
+  /** 隐私设置 */
+  privacySettings: PrivacySettings
 }
 
 const defaults: Schema = {
@@ -34,6 +40,9 @@ const defaults: Schema = {
       },
     ],
     activeProfileId: 'default',
+  },
+  privacySettings: {
+    preciseLocationEnabled: false,
   },
 }
 

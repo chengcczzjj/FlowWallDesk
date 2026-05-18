@@ -5,6 +5,14 @@ import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockI
 const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.APP_GET_VERSION),
+    getLocationSettings: (): Promise<{ preciseLocationEnabled: boolean }> => ipcRenderer.invoke(IPC.APP_GET_LOCATION_SETTINGS),
+    setPreciseLocationEnabled: (enabled: boolean): Promise<{ ok: boolean; settings: { preciseLocationEnabled: boolean }; error?: string }> =>
+      ipcRenderer.invoke(IPC.APP_SET_PRECISE_LOCATION_ENABLED, enabled),
+    requestPreciseLocationAuthorization: (): Promise<{ ok: boolean; settings: { preciseLocationEnabled: boolean }; location?: { displayName: string; accuracyMeters?: number }; error?: string }> =>
+      ipcRenderer.invoke(IPC.APP_REQUEST_PRECISE_LOCATION_AUTHORIZATION),
+    validatePreciseLocation: (): Promise<{ ok: boolean; settings: { preciseLocationEnabled: boolean }; location?: { displayName: string; accuracyMeters?: number }; error?: string }> =>
+      ipcRenderer.invoke(IPC.APP_VALIDATE_PRECISE_LOCATION),
+    openLocationSettings: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_LOCATION_SETTINGS),
     quit: (): void => ipcRenderer.send(IPC.APP_QUIT),
     onNavigate: (cb: (target: { activity: string; subPage?: string }) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, target: { activity: string; subPage?: string }) => cb(target)

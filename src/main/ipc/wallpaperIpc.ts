@@ -1,4 +1,5 @@
 import { app, dialog, ipcMain, screen } from 'electron'
+import type { BrowserWindow } from 'electron'
 import { promises as fs } from 'fs'
 import { join, basename, extname, dirname } from 'path'
 import { execFile } from 'child_process'
@@ -27,6 +28,23 @@ function getWallpaperRoot(): string {
 
 const VIDEO_EXT = new Set(['.mp4', '.webm', '.mkv', '.mov', '.avi'])
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+
+function safeSendToWindow(
+  win: BrowserWindow | null | undefined,
+  channel: string,
+  ...args: unknown[]
+): boolean {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return false
+  try {
+    win.webContents.send(channel, ...args)
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (message.includes('Render frame was disposed')) return false
+    console.warn(`[wallpaper] IPC 发送失败: ${channel}`, err)
+    return false
+  }
+}
 
 /**
  * FlowWallDeskInfo.json 中的 Type 字段：
@@ -264,7 +282,14 @@ function startMainCapture(): void {
     if (isDesktopOccluded()) return
     const wp = getWallpaperWindow()
     const canvas = getCanvasWindow()
-    if (!wp || wp.isDestroyed() || !canvas || canvas.isDestroyed()) return
+    if (
+      !wp ||
+      wp.isDestroyed() ||
+      wp.webContents.isDestroyed() ||
+      !canvas ||
+      canvas.isDestroyed() ||
+      canvas.webContents.isDestroyed()
+    ) return
     try {
       const img = await wp.webContents.capturePage()
       const display = screen.getPrimaryDisplay()
@@ -273,7 +298,7 @@ function startMainCapture(): void {
       const resized = img.resize({ width, height, quality: 'good' })
       const b64 = resized.toJPEG(50).toString('base64')
       const dataUrl = `data:image/jpeg;base64,${b64}`
-      canvas.webContents.send(IPC.WALLPAPER_FRAME, dataUrl)
+      safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, dataUrl)
     } catch {
       // capturePage 可能在窗口销毁瞬间失败，忽略
     }
@@ -297,8 +322,17 @@ export function registerWallpaperIpc(): void {
   ipcMain.on(IPC.WALLPAPER_FRAME, (_e, data: string) => {
     if (isDesktopOccluded()) return // 全屏遮挡时丢弃帧
     const canvas = getCanvasWindow()
-    if (canvas && !canvas.isDestroyed()) {
-      canvas.webContents.send(IPC.WALLPAPER_FRAME, data)
+    safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, data)
+  })
+
+  ipcMain.on(IPC.WALLPAPER_READY, async (_e, payload?: { itemId?: string; source?: string }) => {
+    const current = store.get('wallpaper').current
+    if (!current) return
+    if (payload?.itemId && payload.itemId !== current.id) return
+    if (payload?.source && payload.source !== current.source) return
+    if (!isWallpaperAttached()) {
+      await ensureWallpaperAttached()
+      refreshCanvasZOrder()
     }
   })
 
@@ -306,14 +340,10 @@ export function registerWallpaperIpc(): void {
     // 取消旧壁纸的未完成防抖保存，避免旧组件写入新壁纸目录
     cancelPendingAutoSave()
 
-    // 若壁纸窗口还未贴合桌面，先尝试重新 attach
-    if (!isWallpaperAttached()) {
-      await ensureWallpaperAttached()
-    }
-    const win = getWallpaperWindow()
-    if (win) win.webContents.send(IPC.WALLPAPER_LOAD, item)
     const state = store.get('wallpaper')
     store.set('wallpaper', { ...state, current: item })
+    const win = getWallpaperWindow()
+    safeSendToWindow(win, IPC.WALLPAPER_LOAD, item)
     // 壁纸操作可能扰乱画布 z-order，刷新一次
     refreshCanvasZOrder()
 
@@ -346,7 +376,7 @@ export function registerWallpaperIpc(): void {
     IPC.WALLPAPER_UPDATE_SETTING,
     async (_e, key: string, value: unknown) => {
       const win = getWallpaperWindow()
-      if (win) win.webContents.send(IPC.WALLPAPER_UPDATE_SETTING, key, value)
+      safeSendToWindow(win, IPC.WALLPAPER_UPDATE_SETTING, key, value)
       return true
     }
   )
@@ -560,9 +590,9 @@ export async function restoreWallpaper(): Promise<void> {
   const win = getWallpaperWindow()
   if (!win) return
   const send = () => {
-    if (!win.isDestroyed()) {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
       console.log('[wallpaper] restore 推送:', state.current?.name)
-      win.webContents.send(IPC.WALLPAPER_LOAD, state.current)
+      safeSendToWindow(win, IPC.WALLPAPER_LOAD, state.current)
       // web 类型壁纸启动主进程帧捕获
       if (state.current?.type === 'web') {
         setTimeout(() => startMainCapture(), 2000)

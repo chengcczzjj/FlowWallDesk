@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
@@ -14,6 +14,7 @@ import { registerDataIpc } from './ipc/dataIpc'
 import { registerChatIpc } from './ipc/chatIpc'
 import { registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
 import { initMemorySystem } from './memory'
+import { isPreciseLocationPermissionAllowed } from './memory/tools/definitions/user-location'
 
 // 必须在 app.ready 之前注册
 registerAssetSchemePrivileged()
@@ -57,6 +58,21 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.lingyue.desk')
   registerAssetProtocol()
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'geolocation') {
+      const main = getMainWindow()
+      callback(Boolean(main && !main.isDestroyed() && webContents.id === main.webContents.id && isPreciseLocationPermissionAllowed()))
+      return
+    }
+    callback(false)
+  })
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    if (permission !== 'geolocation') return false
+    const main = getMainWindow()
+    return Boolean(webContents && main && !main.isDestroyed() && webContents.id === main.webContents.id && isPreciseLocationPermissionAllowed())
+  })
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

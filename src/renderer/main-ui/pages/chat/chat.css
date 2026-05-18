@@ -1661,6 +1661,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
+  overflow: hidden;
   min-height: 34px;
   padding: 7px 10px;
   border: 1px solid rgba(15, 23, 42, 0.06);
@@ -1669,6 +1670,7 @@
   background: rgba(255, 255, 255, 0.62);
   color: var(--text-secondary);
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
   list-style: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.035);
@@ -1713,11 +1715,13 @@
 .process-tool__state {
   flex-shrink: 0;
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 .process-tool__title {
   flex-shrink: 0;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 .process-tool__detail {
   min-width: 0;

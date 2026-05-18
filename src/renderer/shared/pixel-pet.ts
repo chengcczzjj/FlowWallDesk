@@ -1,6 +1,8 @@
 export const PIXEL_PET_STORAGE_KEY = 'lingyueDesk.pixelPets.v1'
 export const PIXEL_PET_SETTINGS_KEY = 'lingyueDesk.pixelPetSettings.v1'
 export const PIXEL_PET_GENERATOR_ENDPOINT = 'http://127.0.0.1:43177/api/pets/generate'
+export const PIXEL_PET_CHANGE_EVENT = 'lingyueDesk.pixelPetChanged'
+export const PIXEL_PET_THEME_EVENT = 'lingyueDesk.pixelPetThemeChanged'
 
 export const PIXEL_PET_WIDTH = 80
 export const PIXEL_PET_HEIGHT = 64
@@ -244,10 +246,10 @@ export const PIXEL_PET_THEME_KEYS = Object.keys(PIXEL_PET_THEMES) as PixelPetThe
 export function createDefaultPixelPet(): PixelPet {
   return {
     id: DEFAULT_PIXEL_PET_ID,
-    name: '默认鬣狗',
+    name: '阿鬣',
     locked: true,
     profile: {
-      description: '默认保留的鬣狗桌宠',
+      description: '戴着墨镜、坏笑又护短的鬣狗桌宠',
       palette: {},
       features: {
         avatarType: 'mascot',
@@ -381,6 +383,31 @@ export function resolvePixelPetPalette(pet: PixelPet, themeKey: PixelPetThemeKey
   return {
     ...base,
     ...pet.profile.palette,
+  }
+}
+
+export function buildPixelPetThemeVars(palette: PixelPetPalette): Record<string, string> {
+  const uiAccent = palette.accent2 || palette.accent
+  return {
+    '--pet-bg': colorMix(palette.stage, '#eaf2fb', 0.34),
+    '--pet-bg-deep': colorMix(palette.accent, '#eef5fb', 0.82),
+    '--pet-accent': palette.accent,
+    '--pet-accent-2': palette.accent2,
+    '--pet-danger': palette.danger,
+    '--pet-stage': palette.stage,
+    '--pet-stage-grid': hexToRgba(palette.inkSoft || palette.ink, 0.1),
+    '--pet-ink': palette.ink,
+    '--pet-ink-soft': palette.inkSoft,
+    '--pet-line': colorMix(palette.stage, '#dfe6ef', 0.56),
+    '--pet-glass-line': hexToRgba(palette.inkSoft || palette.ink, 0.2),
+    '--pet-focus': hexToRgba(palette.accent, 0.26),
+    '--pet-ui-accent': uiAccent,
+    '--pet-ui-accent-soft': colorMix(palette.accent, '#ffffff', 0.84),
+    '--pet-ui-focus': hexToRgba(uiAccent, 0.18),
+    '--pet-theme-shadow': hexToRgba(palette.ink || '#243447', 0.11),
+    '--pet-theme-wash-1': hexToRgba(palette.accent, 0.11),
+    '--pet-theme-wash-2': hexToRgba(palette.accent2 || palette.accent, 0.08),
+    '--pet-theme-wash-3': hexToRgba(palette.maneLight || palette.belly || palette.accent, 0.07),
   }
 }
 
@@ -2976,6 +3003,14 @@ const GLYPHS = {
   '1': ['01', '11', '01', '01', '11'],
   '0': ['111', '101', '101', '101', '111'],
 }
+
+export const PIXEL_PET_LEGACY_DRAWERS = {
+  drawGround,
+  drawMascotPet,
+  drawHumanPet,
+  drawProp,
+  drawPixelPetEffects,
+} as const
 
 function px(target: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
   target.fillStyle = color
