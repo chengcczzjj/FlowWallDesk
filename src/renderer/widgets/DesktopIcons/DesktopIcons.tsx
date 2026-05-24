@@ -178,6 +178,8 @@ function DesktopIconsWidget({
   const draftItemsRef = useRef<DesktopIconItem[] | null>(null)
   const dropDepthRef = useRef(0)
   const lastClickRef = useRef<{ id: string; at: number } | null>(null)
+  const lastActivationRef = useRef<{ id: string; at: number } | null>(null)
+  const suppressActivationRef = useRef<{ id: string; until: number } | null>(null)
   const refreshedIdsRef = useRef<Set<string>>(new Set())
   const [containerSize, setContainerSize] = useState({ width: widget.width || 360, height: widget.height || 260 })
   const [dropActive, setDropActive] = useState(false)
@@ -343,12 +345,29 @@ function DesktopIconsWidget({
         })
         window.setTimeout(() => setBouncingId(null), 980)
       } else {
+        setBouncingId(item.id)
         void window.canvasBridge.launchDesktopIcon(item).then((result) => {
           if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
         })
+        window.setTimeout(() => setBouncingId(null), 500)
       }
     },
     [editing, variant]
+  )
+
+  const requestActivateItem = useCallback(
+    (item: DesktopIconItem) => {
+      const now = Date.now()
+      const suppressed = suppressActivationRef.current
+      if (suppressed && suppressed.id === item.id && now <= suppressed.until) return
+
+      const lastActivation = lastActivationRef.current
+      if (lastActivation?.id === item.id && now - lastActivation.at < 350) return
+
+      lastActivationRef.current = { id: item.id, at: now }
+      activateItem(item)
+    },
+    [activateItem]
   )
 
   const activateDockSystemAction = useCallback(
@@ -416,7 +435,6 @@ function DesktopIconsWidget({
     (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => {
       if (editing) return
       if (event.button !== 0) return
-      event.preventDefault()
       event.stopPropagation()
       if (resizing) return
       event.currentTarget.setPointerCapture(event.pointerId)
@@ -488,7 +506,6 @@ function DesktopIconsWidget({
   const handleIconPointerUp = useCallback(
     async (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => {
       const drag = dragRef.current
-      event.preventDefault()
       event.stopPropagation()
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId)
@@ -504,13 +521,13 @@ function DesktopIconsWidget({
       if (!drag.active) {
         if (!drag.cancelled && !drag.moved) {
           if (drag.variant === 'dock') {
-            activateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
+            requestActivateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
           } else {
             const now = Date.now()
             const lastClick = lastClickRef.current
             if (lastClick?.id === item.id && now - lastClick.at <= DOUBLE_CLICK_MS) {
               lastClickRef.current = null
-              activateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
+              requestActivateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
             } else {
               lastClickRef.current = { id: item.id, at: now }
             }
@@ -521,8 +538,9 @@ function DesktopIconsWidget({
 
       if (!drag.moved) return
       await saveItems(finalDraft)
+      suppressActivationRef.current = { id: item.id, until: Date.now() + 520 }
     },
-    [activateItem, saveItems, setDraft]
+    [requestActivateItem, saveItems, setDraft]
   )
 
   const handleIconPointerCancel = useCallback(
@@ -598,6 +616,7 @@ function DesktopIconsWidget({
             onPointerUp={handleIconPointerUp}
             onPointerCancel={handleIconPointerCancel}
             onContextMenu={handleIconContextMenu}
+            onActivate={requestActivateItem}
             onSystemAction={activateDockSystemAction}
           />
         ) : (
@@ -610,6 +629,7 @@ function DesktopIconsWidget({
               layout={storageLayout ?? createStorageLayout([], variant, containerSize.width, storageContentHeight, storageMetrics)}
               metrics={storageMetrics}
               draggingId={draggingId}
+              bouncingId={bouncingId}
               interactionDisabled={editing}
               hideLabels={storageHideLabels}
               onHoverItemId={setHoveredStorageId}
@@ -619,6 +639,7 @@ function DesktopIconsWidget({
               onPointerUp={handleIconPointerUp}
               onPointerCancel={handleIconPointerCancel}
               onContextMenu={handleIconContextMenu}
+              onActivate={requestActivateItem}
             />
             {storageHideLabels && hoveredStorageId && !draggingId && storageLayout && (
               <StorageHoverLabel
@@ -643,6 +664,7 @@ function StorageSurface({
   layout,
   metrics,
   draggingId,
+  bouncingId,
   interactionDisabled,
   hideLabels,
   onHoverItemId,
@@ -652,6 +674,7 @@ function StorageSurface({
   onPointerUp,
   onPointerCancel,
   onContextMenu,
+  onActivate,
 }: {
   refEl: React.RefObject<HTMLDivElement | null>
   variant: StorageVariant
@@ -659,6 +682,7 @@ function StorageSurface({
   layout: StorageLayout
   metrics: StorageMetrics
   draggingId: string | null
+  bouncingId: string | null
   interactionDisabled: boolean
   hideLabels: boolean
   onHoverItemId: (id: string | null) => void
@@ -668,6 +692,7 @@ function StorageSurface({
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
   onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
+  onActivate: (item: DesktopIconItem) => void
 }) {
   return (
     <div
@@ -702,6 +727,7 @@ function StorageSurface({
             <motion.button
               key={item.id}
               type="button"
+              data-desktop-icon-action
               aria-label={item.name}
               onMouseEnter={() => onHoverItemId(item.id)}
               onMouseLeave={() => onHoverItemId(null)}
@@ -715,16 +741,26 @@ function StorageSurface({
                 onHoverItemId(null)
                 onPointerCancel(event)
               }}
+              onDoubleClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onActivate(item)
+              }}
               onContextMenu={(event) => onContextMenu(item, event)}
               initial={{ opacity: 0, scale: 0.82 }}
               animate={{
                 opacity: 1,
-                scale: draggingId === item.id ? 1.08 : 1,
+                scale: bouncingId === item.id ? [1, 0.82, 1.06, 1] : draggingId === item.id ? 1.08 : 1,
                 left: x,
                 top: y,
               }}
               exit={{ opacity: 0, scale: 0.82 }}
-              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+              transition={{
+                type: 'spring',
+                stiffness: 420,
+                damping: 32,
+                scale: bouncingId === item.id ? { duration: 0.38, ease: [0.28, 0, 0.42, 1] } : undefined,
+              }}
               style={{
                 ...iconButtonBase,
                 position: 'absolute',
@@ -737,6 +773,32 @@ function StorageSurface({
               {!hideLabels && <IconLabel name={item.name} fontSize={metrics.labelFontSize} marginTop={metrics.labelMarginTop} />}
             </motion.button>
           ))}
+        </AnimatePresence>
+        {/* 启动叠加放大淡出效果 */}
+        <AnimatePresence>
+          {bouncingId &&
+            layout.items.find((entry) => entry.item.id === bouncingId) &&
+            ((bounceEntry) => (
+              <motion.span
+                key={`launch-overlay-${bounceEntry.item.id}`}
+                initial={{ opacity: 0.7, scale: 1 }}
+                animate={{ opacity: 0, scale: 2.6 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.48, delay: 0.15, ease: [0.22, 0, 0.36, 1] }}
+                style={{
+                  position: 'absolute',
+                  left: bounceEntry.x + (metrics.cellWidth - metrics.iconSize) / 2,
+                  top: bounceEntry.y + (hideLabels ? (metrics.cellHeight - metrics.iconSize) / 2 : 8),
+                  width: metrics.iconSize,
+                  height: metrics.iconSize,
+                  zIndex: 20,
+                  pointerEvents: 'none',
+                  transformOrigin: 'center center',
+                }}
+              >
+                <IconImage item={bounceEntry.item} size={metrics.iconSize} fluid />
+              </motion.span>
+            ))(layout.items.find((entry) => entry.item.id === bouncingId)!)}
         </AnimatePresence>
       </div>
     </div>
@@ -837,6 +899,7 @@ function IconDockSurface({
   onPointerUp,
   onPointerCancel,
   onContextMenu,
+  onActivate,
   onSystemAction,
 }: {
   items: DesktopIconItem[]
@@ -854,6 +917,7 @@ function IconDockSurface({
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
   onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
+  onActivate: (item: DesktopIconItem) => void
   onSystemAction: (action: DockSystemActionId) => void
 }) {
   const mouseX = useMotionValue(Number.POSITIVE_INFINITY)
@@ -928,6 +992,7 @@ function IconDockSurface({
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
             onContextMenu={onContextMenu}
+            onActivate={onActivate}
           />
         ))}
       </AnimatePresence>
@@ -954,6 +1019,7 @@ function DockSystemButton({
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   const [hovered, setHovered] = useState(false)
+  const [bouncing, setBouncing] = useState(false)
   const distance = useTransform(mouseX, (value) => {
     if (!Number.isFinite(value)) return 9999
     const rect = ref.current?.getBoundingClientRect()
@@ -981,11 +1047,18 @@ function DockSystemButton({
     return `calc(50% + ${iconSize * (value - 0.5) + liftValue + 8}px)`
   })
   const slotSize = iconSize + DOCK_SLOT_EXTRA
+  const hitInsets = getDockInteractionInsets(iconSize, hoverScale)
+
+  const triggerBounce = useCallback(() => {
+    setBouncing(true)
+    window.setTimeout(() => setBouncing(false), 980)
+  }, [])
 
   return (
     <motion.button
       ref={ref}
       type="button"
+      data-desktop-icon-action
       aria-label={action.label}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -993,19 +1066,31 @@ function DockSystemButton({
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
+        triggerBounce()
         onAction(action.id)
       }}
-      whileTap={{ scale: 0.95 }}
-      transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+      animate={
+        bouncing
+          ? { y: [0, -84, 0, -36, 0, -12, 0] }
+          : {}
+      }
+      transition={{
+        y: bouncing
+          ? { duration: 0.85, times: [0, 0.035, 0.17, 0.27, 0.38, 0.46, 1], ease: ['easeOut', 'easeIn', 'easeOut', 'easeIn', 'easeOut', 'easeIn'] }
+          : {},
+      }}
       style={{
         ...iconButtonBase,
         width: slotSize,
         height: '100%',
         position: 'relative',
+        overflow: 'visible',
         justifyContent: 'center',
         zIndex: hovered ? 5 : 2,
+        transformOrigin: 'bottom center',
       }}
     >
+      <DockInteractionHitArea insets={hitInsets} flipped={flipped} />
       <AnimatePresence>
         {hovered && (
           <motion.span
@@ -1038,6 +1123,7 @@ function DockSystemButton({
           alignItems: 'center',
           justifyContent: 'center',
           position: 'relative',
+          zIndex: 1,
           transformOrigin: flipped ? 'top center' : 'bottom center',
         }}
       >
@@ -1046,6 +1132,36 @@ function DockSystemButton({
       </motion.span>
     </motion.button>
   )
+}
+
+function DockInteractionHitArea({
+  insets,
+  flipped,
+}: {
+  insets: { inline: number; liftSide: number; anchorSide: number }
+  flipped: boolean
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        position: 'absolute',
+        left: -insets.inline,
+        right: -insets.inline,
+        top: flipped ? -insets.anchorSide : -insets.liftSide,
+        bottom: flipped ? -insets.liftSide : -insets.anchorSide,
+        zIndex: 0,
+        pointerEvents: 'auto',
+      }}
+    />
+  )
+}
+
+const DOCK_SYSTEM_ICON_MAP: Record<DockSystemActionId, string> = {
+  settings: '/dock-icons/settings.svg',
+  explorer: '/dock-icons/finder.svg',
+  'recycle-bin': '/dock-icons/trash.svg',
+  desktop: '/dock-icons/desktop.svg',
 }
 
 function DockSystemIcon({ action, size, fluid = false }: { action: DockSystemActionId; size: number; fluid?: boolean }) {
@@ -1062,120 +1178,13 @@ function DockSystemIcon({ action, size, fluid = false }: { action: DockSystemAct
         pointerEvents: 'none',
       }}
     >
-      {action === 'settings' ? (
-        <WinSettingsIcon />
-      ) : action === 'explorer' ? (
-        <WinExplorerIcon />
-      ) : action === 'recycle-bin' ? (
-        <WinRecycleBinIcon />
-      ) : (
-        <WinDesktopIcon />
-      )}
+      <img
+        src={DOCK_SYSTEM_ICON_MAP[action]}
+        alt=""
+        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        draggable={false}
+      />
     </span>
-  )
-}
-
-function WinRecycleBinIcon() {
-  return (
-    <svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true">
-      <defs>
-        <linearGradient id="ly-dock-recycle-a" x1="18" y1="12" x2="48" y2="55" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#f8fafc" />
-          <stop offset="0.5" stopColor="#bae6fd" />
-          <stop offset="1" stopColor="#38bdf8" />
-        </linearGradient>
-        <linearGradient id="ly-dock-recycle-b" x1="16" y1="25" x2="50" y2="57" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="rgba(255,255,255,0.84)" />
-          <stop offset="1" stopColor="rgba(14,165,233,0.58)" />
-        </linearGradient>
-        <radialGradient id="ly-dock-recycle-c" cx="24" cy="21" r="30" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="rgba(255,255,255,0.95)" />
-          <stop offset="1" stopColor="rgba(255,255,255,0)" />
-        </radialGradient>
-      </defs>
-      <path d="M23 13.5h18l2.6 5.7h7.9c1.7 0 3 1.3 3 3s-1.3 3-3 3h-39c-1.7 0-3-1.3-3-3s1.3-3 3-3h7.9z" fill="url(#ly-dock-recycle-a)" />
-      <path d="M18.2 25.2h27.6c2.7 0 4.9 2.3 4.6 5l-2.2 20.1c-.3 3-2.9 5.2-5.9 5.2H21.7c-3 0-5.6-2.2-5.9-5.2l-2.2-20.1c-.3-2.7 1.9-5 4.6-5z" fill="url(#ly-dock-recycle-b)" stroke="rgba(255,255,255,0.58)" strokeWidth="2" />
-      <path d="M22 29h20" stroke="rgba(255,255,255,0.72)" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M24.5 36.5h15l-3.1-3.1M39.5 36.5l-3.1 3.1M38.8 45.5h-15l3.1 3.1M23.8 45.5l3.1-3.1" fill="none" stroke="rgba(14,116,144,0.72)" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M15.5 27.5h33" stroke="rgba(255,255,255,0.32)" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M17 26h30v15c-7-5.4-18.9-5.2-30 .3z" fill="url(#ly-dock-recycle-c)" opacity="0.74" />
-    </svg>
-  )
-}
-
-function WinSettingsIcon() {
-  return (
-    <svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true">
-      <defs>
-        <linearGradient id="ly-dock-settings-a" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#e0f2fe" />
-          <stop offset="0.48" stopColor="#38bdf8" />
-          <stop offset="1" stopColor="#2563eb" />
-        </linearGradient>
-        <radialGradient id="ly-dock-settings-b" cx="23" cy="18" r="35" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="rgba(255,255,255,0.9)" />
-          <stop offset="1" stopColor="rgba(255,255,255,0)" />
-        </radialGradient>
-      </defs>
-      <g transform="translate(32 32)">
-        {Array.from({ length: 8 }).map((_, index) => (
-          <rect key={index} x="-4.4" y="-30" width="8.8" height="14" rx="3.6" fill="url(#ly-dock-settings-a)" transform={`rotate(${index * 45})`} />
-        ))}
-        <circle r="21" fill="url(#ly-dock-settings-a)" />
-        <circle r="21" fill="url(#ly-dock-settings-b)" opacity="0.7" />
-        <circle r="9.6" fill="rgba(255,255,255,0.92)" />
-        <circle r="5.4" fill="#2563eb" opacity="0.86" />
-      </g>
-    </svg>
-  )
-}
-
-function WinExplorerIcon() {
-  return (
-    <svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true">
-      <defs>
-        <linearGradient id="ly-dock-folder-a" x1="10" y1="12" x2="54" y2="54" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#fff7ad" />
-          <stop offset="0.46" stopColor="#facc15" />
-          <stop offset="1" stopColor="#f59e0b" />
-        </linearGradient>
-        <linearGradient id="ly-dock-folder-b" x1="14" y1="30" x2="54" y2="56" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#fde68a" />
-          <stop offset="1" stopColor="#f59e0b" />
-        </linearGradient>
-        <linearGradient id="ly-dock-folder-c" x1="18" y1="19" x2="45" y2="40" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#bfdbfe" />
-          <stop offset="1" stopColor="#3b82f6" />
-        </linearGradient>
-      </defs>
-      <path d="M9 20.5c0-3.6 2.9-6.5 6.5-6.5h12.1c2 0 3.9.9 5.1 2.5l2.4 3.1h13.4c3.6 0 6.5 2.9 6.5 6.5v3.8H9z" fill="url(#ly-dock-folder-a)" />
-      <rect x="15" y="23" width="31" height="25" rx="5" fill="url(#ly-dock-folder-c)" opacity="0.95" />
-      <path d="M8.4 28.5h47.2l-4.2 17.7c-.8 3.4-3.8 5.8-7.3 5.8H19.9c-3.5 0-6.5-2.4-7.3-5.8z" fill="url(#ly-dock-folder-b)" />
-      <path d="M12.2 30.5h39.6" stroke="rgba(255,255,255,0.54)" strokeWidth="2.4" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function WinDesktopIcon() {
-  return (
-    <svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true">
-      <defs>
-        <linearGradient id="ly-dock-desktop-a" x1="13" y1="13" x2="52" y2="49" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#dbeafe" />
-          <stop offset="0.46" stopColor="#60a5fa" />
-          <stop offset="1" stopColor="#2563eb" />
-        </linearGradient>
-        <linearGradient id="ly-dock-desktop-b" x1="19" y1="44" x2="45" y2="57" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#bae6fd" />
-          <stop offset="1" stopColor="#0ea5e9" />
-        </linearGradient>
-      </defs>
-      <rect x="10" y="12" width="44" height="32" rx="7" fill="url(#ly-dock-desktop-a)" />
-      <path d="M17 20h13v9H17zM34 20h13v9H34zM17 32h13v6H17zM34 32h13v6H34z" fill="rgba(255,255,255,0.55)" />
-      <path d="M26 44h12l2.6 7H23.4z" fill="url(#ly-dock-desktop-b)" />
-      <rect x="19" y="51" width="26" height="4" rx="2" fill="#38bdf8" />
-      <path d="M17 17h30" stroke="rgba(255,255,255,0.58)" strokeWidth="2.3" strokeLinecap="round" />
-    </svg>
   )
 }
 
@@ -1225,6 +1234,7 @@ function DockIconButton({
   onPointerUp,
   onPointerCancel,
   onContextMenu,
+  onActivate,
 }: {
   item: DesktopIconItem
   index: number
@@ -1242,6 +1252,7 @@ function DockIconButton({
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
   onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
+  onActivate: (item: DesktopIconItem) => void
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   const distance = useTransform(mouseX, (value) => {
@@ -1271,11 +1282,13 @@ function DockIconButton({
     return `calc(50% + ${iconSize * (value - 0.5) + liftValue + 8}px)`
   })
   const slotSize = iconSize + DOCK_SLOT_EXTRA
+  const hitInsets = getDockInteractionInsets(iconSize, hoverScale)
 
   return (
     <motion.button
       ref={ref}
       type="button"
+      data-desktop-icon-action
       layout
       aria-label={item.name}
       onMouseEnter={() => onHoverIndex(index)}
@@ -1289,18 +1302,25 @@ function DockIconButton({
         mouseX.set(Number.POSITIVE_INFINITY)
         onPointerCancel(event)
       }}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onActivate(item)
+      }}
       onContextMenu={(event) => onContextMenu(item, event)}
       initial={{ opacity: 0, y: 14, scale: 0.9 }}
       animate={
         bouncing
-          ? { opacity: 1, y: [0, -22, 0, -16, 0, -9, 0], scale: dragging ? 1.08 : 1 }
+          ? { opacity: 1, y: [0, -84, 0, -36, 0, -12, 0], scale: dragging ? 1.08 : 1 }
           : { opacity: 1, y: 0, scale: dragging ? 1.08 : 1 }
       }
       exit={{ opacity: 0, y: 12, scale: 0.86 }}
       transition={{
         layout: { type: 'spring', stiffness: 520, damping: 32 },
         scale: { type: 'spring', stiffness: 420, damping: 26 },
-        y: { duration: 0.9, ease: 'easeOut' },
+        y: bouncing
+          ? { duration: 0.85, times: [0, 0.035, 0.17, 0.27, 0.38, 0.46, 1], ease: ['easeOut', 'easeIn', 'easeOut', 'easeIn', 'easeOut', 'easeIn'] }
+          : { type: 'spring', stiffness: 520, damping: 32 },
       }}
       style={{
         ...iconButtonBase,
@@ -1309,9 +1329,11 @@ function DockIconButton({
         justifyContent: 'center',
         transformOrigin: 'bottom center',
         position: 'relative',
+        overflow: 'visible',
         zIndex: bouncing || dragging || hovered ? 4 : 1,
       }}
     >
+      <DockInteractionHitArea insets={hitInsets} flipped={flipped} />
       <AnimatePresence>
         {hovered && !dragging && (
           <motion.span
@@ -1342,6 +1364,7 @@ function DockIconButton({
           display: 'flex',
           flex: '0 0 auto',
           position: 'relative',
+          zIndex: 1,
           transformOrigin: flipped ? 'top center' : 'bottom center',
         }}
       >
@@ -1892,6 +1915,18 @@ function getDockTargetIndex(clientX: number, rect: DOMRect, length: number): num
 
 function getDockIconSize(height: number): number {
   return Math.max(ICON_SIZE, Math.min(56, height - 34))
+}
+
+function getDockInteractionInsets(iconSize: number, hoverScale: number): { inline: number; liftSide: number; anchorSide: number } {
+  const inlineOverflow = Math.max(0, iconSize * hoverScale - (iconSize + DOCK_SLOT_EXTRA)) / 2
+  const verticalSlotExtra = 21
+  const verticalOverflow = Math.max(0, iconSize * hoverScale - (iconSize + verticalSlotExtra)) / 2
+  const liftOverflow = Math.max(0, hoverScale - 1) * iconSize * 0.24
+  return {
+    inline: Math.ceil(Math.max(8, inlineOverflow + 4)),
+    liftSide: Math.ceil(Math.max(14, verticalOverflow + liftOverflow + 6)),
+    anchorSide: Math.ceil(Math.max(8, verticalOverflow + 6)),
+  }
 }
 
 function getDockPreferredWidth(itemCount: number, height: number, chromeStyle: DockChromeStyle = 'glass', keepEmptyWidth = false): number {

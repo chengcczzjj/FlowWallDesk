@@ -25,7 +25,7 @@ const DEFAULT_DOCK_CONFIG: Record<string, unknown> = {
   dockOpacity: 0.18,
   dockBlur: 16,
   dockReflection: false,
-  dockHoverScale: 1.58,
+  dockHoverScale: 1.72,
 }
 
 function canAddMultipleWidgetType(type: string): boolean {

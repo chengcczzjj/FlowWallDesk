@@ -3,7 +3,7 @@ import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
 import { getMainWindow, createMainWindow } from '../windows/mainWindow'
 import type { MainWindowNavTarget } from '../windows/mainWindow'
-import { minimizeAllOtherWindows, refreshCanvasZOrder } from '../windows/canvasWindow'
+import { refreshCanvasZOrder } from '../windows/canvasWindow'
 import { getLocationPrivacySettings, requestPreciseLocationAuthorization, setPreciseLocationEnabled, validatePreciseLocationEnabled } from '../memory/tools/definitions/user-location'
 
 function showMainWindow(target?: MainWindowNavTarget): void {
@@ -63,8 +63,8 @@ export function registerAppIpc(): void {
   ipcMain.on(IPC.APP_SHOW_MAIN, () => {
     showMainWindow()
   })
-  ipcMain.handle(IPC.APP_OPEN_SETTINGS, () => {
-    showMainWindow({ activity: 'settings', subPage: 'settings-general' })
+  ipcMain.handle(IPC.APP_OPEN_SETTINGS, async () => {
+    await shell.openExternal('ms-settings:')
     return true
   })
   ipcMain.handle(IPC.APP_OPEN_EXPLORER, async () => {
@@ -86,9 +86,30 @@ export function registerAppIpc(): void {
     }
   })
   ipcMain.handle(IPC.APP_SHOW_DESKTOP, () => {
+    // 使用 Windows 原生 ToggleDesktop 实现切换：第一次返回桌面，第二次恢复窗口
+    if (process.platform === 'win32') {
+      try {
+        const child = spawn('powershell', [
+          '-NoProfile',
+          '-Command',
+          '(New-Object -ComObject "Shell.Application").ToggleDesktop()',
+        ], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        })
+        child.unref()
+      } catch { /* fall through */ }
+    }
     const main = getMainWindow()
-    if (main && !main.isDestroyed()) main.minimize()
-    minimizeAllOtherWindows()
+    if (main && !main.isDestroyed()) {
+      if (main.isMinimized()) {
+        main.restore()
+        main.focus()
+      } else {
+        main.minimize()
+      }
+    }
     refreshCanvasZOrder()
     return true
   })

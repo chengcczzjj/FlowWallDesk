@@ -516,6 +516,7 @@ function DraggableWidget({
   onDragPreview: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
 }) {
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const interactivePointerRef = useRef<number | null>(null)
   const longPressDragRef = useRef<{
     startX: number
     startY: number
@@ -702,6 +703,43 @@ function DraggableWidget({
     longPressDragRef.current = null
   }, [])
 
+  const clearInteractivePointer = useCallback(
+    (pointerId: number) => {
+      if (interactivePointerRef.current !== pointerId) return
+      interactivePointerRef.current = null
+      window.setTimeout(() => {
+        if (!editing && !dragRef.current && !resizeRef.current && !longPressDragRef.current && !elRef.current?.matches(':hover')) {
+          window.canvasBridge?.setIgnoreMouse(true)
+        }
+      }, 0)
+    },
+    [editing]
+  )
+
+  const onPointerDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (editing || !canLongPressDrag) return
+      if (!(e.target as HTMLElement).closest('[data-desktop-icon-action]')) return
+      interactivePointerRef.current = e.pointerId
+      window.canvasBridge?.setIgnoreMouse(false)
+    },
+    [editing, canLongPressDrag]
+  )
+
+  const onPointerUpCapture = useCallback(
+    (e: React.PointerEvent) => {
+      clearInteractivePointer(e.pointerId)
+    },
+    [clearInteractivePointer]
+  )
+
+  const onPointerCancelCapture = useCallback(
+    (e: React.PointerEvent) => {
+      clearInteractivePointer(e.pointerId)
+    },
+    [clearInteractivePointer]
+  )
+
   /** 计算缩放比例 */
   const scaleRatio =
     canResize && !stretchFill && naturalSizeRef.current && size.w > 0
@@ -764,6 +802,8 @@ function DraggableWidget({
         dragRef.current = { startX: e.clientX, startY: e.clientY, origX: posRef.current.x, origY: posRef.current.y }
         return
       }
+
+      if (canLongPressDrag && (e.target as HTMLElement).closest('[data-desktop-icon-action]')) return
 
       if (canLongPressDrag && (e.target as HTMLElement).closest('[data-widget-drag-handle]')) {
         e.preventDefault()
@@ -883,6 +923,7 @@ function DraggableWidget({
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (elRef.current?.hasPointerCapture(e.pointerId)) elRef.current.releasePointerCapture(e.pointerId)
+      clearInteractivePointer(e.pointerId)
       if (longPressDragRef.current && !dragRef.current) {
         clearLongPressDrag()
         return
@@ -933,6 +974,7 @@ function DraggableWidget({
   const onPointerCancel = useCallback(
     (e: React.PointerEvent) => {
       if (elRef.current?.hasPointerCapture(e.pointerId)) elRef.current.releasePointerCapture(e.pointerId)
+      clearInteractivePointer(e.pointerId)
       clearLongPressDrag()
       dragRef.current = null
       resizeRef.current = null
@@ -980,8 +1022,13 @@ function DraggableWidget({
       data-widget={widget.id}
       onMouseEnter={() => window.canvasBridge?.setIgnoreMouse(false)}
       onMouseLeave={() => {
-        if (!dragRef.current && !resizeRef.current && !longPressDragRef.current && !editing) window.canvasBridge?.setIgnoreMouse(true)
+        if (!dragRef.current && !resizeRef.current && !longPressDragRef.current && interactivePointerRef.current === null && !editing) {
+          window.canvasBridge?.setIgnoreMouse(true)
+        }
       }}
+      onPointerDownCapture={onPointerDownCapture}
+      onPointerUpCapture={onPointerUpCapture}
+      onPointerCancelCapture={onPointerCancelCapture}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

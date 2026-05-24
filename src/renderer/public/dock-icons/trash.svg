@@ -1,0 +1,56 @@
+<svg viewBox="0 0 512 512" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <filter id="appShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.2" />
+            <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.1" />
+        </filter>
+        
+        <filter id="glyphShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.25" />
+            <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000000" flood-opacity="0.15" />
+        </filter>
+
+        <linearGradient id="bgGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#FFFFFF" />
+            <stop offset="100%" stop-color="#E5E5EA" />
+        </linearGradient>
+
+        <linearGradient id="glyphGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#8E8E93" />
+            <stop offset="100%" stop-color="#3A3A3C" />
+        </linearGradient>
+
+        <linearGradient id="highlightGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.8" />
+            <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.3" />
+            <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+        </linearGradient>
+
+        <clipPath id="squircle">
+            <rect x="48" y="48" width="416" height="416" rx="94" />
+        </clipPath>
+    </defs>
+
+    <rect x="48" y="48" width="416" height="416" rx="94" fill="#000000" filter="url(#appShadow)" />
+
+    <g clip-path="url(#squircle)">
+        
+        <rect x="48" y="48" width="416" height="416" fill="url(#bgGradient)" />
+
+        <g filter="url(#glyphShadow)" fill="none" stroke="url(#glyphGradient)" stroke-linecap="round" stroke-linejoin="round">
+            
+            <path d="M 226 156 V 138 C 226 128, 232 122, 242 122 h 28 C 280 122, 286 128, 286 138 V 156" stroke-width="20" />
+            
+            <line x1="148" y1="156" x2="364" y2="156" stroke-width="24" />
+            
+            <path d="M 176 182 L 196 364 C 198 382, 212 392, 232 392 h 48 C 300 392, 314 382, 316 364 L 336 182" stroke-width="24" />
+            
+            <line x1="222" y1="230" x2="228" y2="334" stroke-width="16" />
+            <line x1="256" y1="230" x2="256" y2="334" stroke-width="16" />
+            <line x1="290" y1="230" x2="284" y2="334" stroke-width="16" />
+        </g>
+
+        <rect x="48" y="48" width="416" height="416" rx="94" fill="none" stroke="url(#highlightGradient)" stroke-width="5" />
+        <rect x="48" y="48" width="416" height="416" rx="94" fill="none" stroke="#000000" stroke-width="2" stroke-opacity="0.08" />
+    </g>
+</svg>

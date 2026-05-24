@@ -1,5 +1,23 @@
 # 灵月桌面 开发日志
 
+## [2026-05-24 00:00] 优化桌面 Dock 交互与系统图标
+
+**变更摘要**: 优化桌面 Dock 与图标收纳的点击、启动动画、命中区域和系统按钮体验，并接入外部 Dock 系统图标资源。
+
+**涉及模块**:
+
+- `src/renderer/widgets/DesktopIcons/DesktopIcons.tsx` / `src/renderer/canvas/Canvas.tsx`: 增强 Dock 单击启动、防重复触发、长按拖拽穿透处理、启动弹跳和图标收纳启动反馈。
+- `src/main/ipc/appIpc.ts` / `src/main/ipc/widgetIpc.ts`: 调整系统按钮行为，打开 Windows 设置、原生切换桌面，并提高默认 Dock 悬浮放大比例。
+- `src/renderer/public/dock-icons/`: 新增 Dock 系统按钮 SVG 图标与授权说明。
+
+**遇到的问题**:
+
+- Dock 图标放大后可点击区域不足且容易触发画布拖拽 → 为桌面图标动作标记独立命中区，并在画布捕获阶段临时关闭鼠标穿透。
+
+**Git Commit**: `8ae9b9e` — feat(widget): improve dock interaction and icons
+
+---
+
 ## [2026-05-19 00:18] 整理壁纸资源托管方案文档
 
 **变更摘要**: 新增正式文档，整理远程壁纸资源托管、容量估算、manifest 清单、本地下载目录和分阶段发布方案。
