@@ -79,15 +79,8 @@ export function AddWallpaperDialog(props: {
     if (!open) reset()
   }, [open, reset])
 
-  // 打开弹窗时若有初始文件，直接选中
-  useEffect(() => {
-    if (open && initialFile) {
-      handleFileSelected(initialFile.path, initialFile.name)
-    }
-  }, [open, initialFile])
-
   // 处理选中文件
-  const handleFileSelected = useCallback((path: string, originalName: string) => {
+  const handleFileSelected = useCallback(async (path: string, originalName: string) => {
     const ext = getExt(originalName)
     if (!ALL_EXT.has(ext)) {
       setError(`不支持的文件格式: ${ext}`)
@@ -102,11 +95,19 @@ export function AddWallpaperDialog(props: {
 
     // 设置预览 URL（图片和视频都使用 lyasset:// 协议）
     if (type === 'image' || type === 'video') {
-      setPreviewUrl(toAssetUrl(path) ?? undefined)
+      const granted = await window.lingyue.wallpaper.grantPreview(path)
+      setPreviewUrl(granted ? (toAssetUrl(path) ?? undefined) : undefined)
     } else {
       setPreviewUrl(undefined)
     }
   }, [])
+
+  // 打开弹窗时若有初始文件，直接选中
+  useEffect(() => {
+    if (open && initialFile) {
+      void handleFileSelected(initialFile.path, initialFile.name)
+    }
+  }, [handleFileSelected, initialFile, open])
 
   // 浏览文件
   const handleBrowse = async () => {

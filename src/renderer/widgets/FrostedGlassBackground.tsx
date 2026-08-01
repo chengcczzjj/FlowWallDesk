@@ -1,5 +1,6 @@
-import { useContext } from 'react'
-import { WallpaperFrameCtx, WidgetPosCtx } from '../canvas/contexts'
+import { useContext, useSyncExternalStore } from 'react'
+import { WidgetPosCtx } from '../canvas/contexts'
+import { getWallpaperFrame, subscribeWallpaperFrame } from '../canvas/wallpaperFrameStore'
 
 /**
  * 毛玻璃背景层：采样壁纸抽帧，根据组件屏幕坐标偏移对齐，CSS 模糊。
@@ -16,7 +17,7 @@ export function FrostedGlassBackground({
   overlayColor?: string
   blurPx?: number
 }) {
-  const frame = useContext(WallpaperFrameCtx)
+  const frame = useSyncExternalStore(subscribeWallpaperFrame, getWallpaperFrame, () => null)
   const pos = useContext(WidgetPosCtx)
   const screenX = window.screenX || 0
   const screenY = window.screenY || 0

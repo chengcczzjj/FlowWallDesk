@@ -143,6 +143,8 @@ export function Wallpaper() {
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const captureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const captureDemandRef = useRef(false)
+  const pausedRef = useRef(false)
 
   useEffect(() => {
     const c = document.createElement('canvas')
@@ -164,6 +166,7 @@ export function Wallpaper() {
   }, [clearPlayRetry, item?.id, item?.source])
 
   const captureFrame = useCallback(() => {
+    if (!captureDemandRef.current || pausedRef.current) return
     const c = captureCanvasRef.current
     if (!c) return
     const ctx = c.getContext('2d')
@@ -181,12 +184,11 @@ export function Wallpaper() {
   }, [objectFit, transform])
 
   // 根据壁纸类型启动/停止抽帧
-  const pausedRef = useRef(false)
-
   const startCapture = useCallback(() => {
     if (captureTimerRef.current) return
-    if (pausedRef.current) return // 全屏遮挡时不启动
-    captureTimerRef.current = setInterval(captureFrame, 83) // ~12fps
+    if (pausedRef.current || !captureDemandRef.current) return
+    captureFrame()
+    captureTimerRef.current = setInterval(captureFrame, 250) // 4fps is sufficient for blurred backgrounds
   }, [captureFrame])
 
   const stopCapture = useCallback(() => {
@@ -199,9 +201,9 @@ export function Wallpaper() {
   useEffect(() => {
     stopCapture()
     if (!item) return
-    if (item.type === 'video') {
+    if (item.type === 'video' && captureDemandRef.current) {
       startCapture()
-    } else if (item.type === 'image') {
+    } else if (item.type === 'image' && captureDemandRef.current) {
       // 静态图片：onLoad 会触发一次 captureFrame
       // 额外延迟再发一次，确保 canvas 窗口已就绪
       const t = setTimeout(captureFrame, 1500)
@@ -225,12 +227,25 @@ export function Wallpaper() {
         // 恢复视频播放和帧捕获
         if (item?.type === 'video') {
           playVideo()
-          startCapture()
+          if (captureDemandRef.current) startCapture()
         }
       }
     })
     return () => off?.()
   }, [item, playVideo, startCapture, stopCapture])
+
+  useEffect(() => {
+    const off = window.wallpaperBridge?.onCaptureDemand?.((enabled) => {
+      captureDemandRef.current = enabled
+      if (!enabled) {
+        stopCapture()
+        return
+      }
+      if (item?.type === 'video') startCapture()
+      if (item?.type === 'image') captureFrame()
+    })
+    return () => off?.()
+  }, [captureFrame, item?.type, startCapture, stopCapture])
 
   useEffect(() => {
     const off = window.wallpaperBridge?.onLoad((it) => {

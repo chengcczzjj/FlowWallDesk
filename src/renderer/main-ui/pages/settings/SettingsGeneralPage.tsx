@@ -13,8 +13,9 @@ import {
   Globe,
   ExternalLink,
   MapPin,
+  RefreshCw,
 } from 'lucide-react'
-import type { ModelProfile, ModelProvider } from '@shared/types'
+import type { AppUpdateStatus, ModelProfile, ModelProvider } from '@shared/types'
 import './settings.css'
 
 const PROVIDER_LABELS: Record<ModelProvider, string> = {
@@ -26,7 +27,12 @@ const PROVIDER_LABELS: Record<ModelProvider, string> = {
 export function SettingsGeneralPage() {
   /* ── General settings state ── */
   const [autoStart, setAutoStart] = useState(false)
+  const [autoStartBusy, setAutoStartBusy] = useState(false)
+  const [autoStartMessage, setAutoStartMessage] = useState('')
   const [animations, setAnimations] = useState(true)
+  const [appVersion, setAppVersion] = useState('')
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null)
+  const [updateActionBusy, setUpdateActionBusy] = useState(false)
   const [preciseLocationEnabled, setPreciseLocationEnabled] = useState(false)
   const [locationBusy, setLocationBusy] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
@@ -66,6 +72,37 @@ export function SettingsGeneralPage() {
   useEffect(() => {
     loadProfiles()
   }, [loadProfiles])
+
+  useEffect(() => {
+    let canceled = false
+    Promise.all([
+      window.lingyue.app.getVersion(),
+      window.lingyue.app.getLaunchAtLogin(),
+      window.lingyue.app.getUpdateStatus(),
+    ]).then(([version, launchStatus, nextUpdateStatus]) => {
+      if (canceled) return
+      setAppVersion(version)
+      setAutoStart(launchStatus.enabled)
+      setAutoStartMessage(launchStatus.message || '')
+      setUpdateStatus(nextUpdateStatus)
+    }).catch((error) => {
+      if (!canceled) setUpdateStatus({
+        phase: 'error',
+        currentVersion: '未知',
+        message: (error as Error).message || '应用设置读取失败。',
+        canCheck: true,
+        canInstall: false,
+      })
+    })
+
+    const unsubscribe = window.lingyue.app.onUpdateStateChanged((status) => {
+      if (!canceled) setUpdateStatus(status)
+    })
+    return () => {
+      canceled = true
+      unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     let canceled = false
@@ -222,6 +259,47 @@ export function SettingsGeneralPage() {
     }
   }
 
+  const handleAutoStartToggle = async (enabled: boolean) => {
+    if (autoStartBusy) return
+    setAutoStartBusy(true)
+    setAutoStartMessage('')
+    try {
+      const result = await window.lingyue.app.setLaunchAtLogin(enabled)
+      setAutoStart(result.enabled)
+      setAutoStartMessage(result.message || (result.enabled ? '已启用开机自启动' : '已关闭开机自启动'))
+    } catch (error) {
+      setAutoStartMessage((error as Error).message || '开机启动设置失败')
+    } finally {
+      setAutoStartBusy(false)
+    }
+  }
+
+  const handleUpdateAction = async () => {
+    if (!updateStatus || updateActionBusy) return
+    setUpdateActionBusy(true)
+    try {
+      if (updateStatus.phase === 'downloaded') {
+        await window.lingyue.app.installUpdate()
+      } else if (updateStatus.phase === 'available') {
+        setUpdateStatus(await window.lingyue.app.downloadUpdate())
+      } else {
+        setUpdateStatus(await window.lingyue.app.checkForUpdates())
+      }
+    } finally {
+      setUpdateActionBusy(false)
+    }
+  }
+
+  const updateButtonText = (() => {
+    if (!updateStatus) return '读取中'
+    if (updateStatus.phase === 'downloaded') return '重启并安装'
+    if (updateStatus.phase === 'downloading') return `${Math.round(updateStatus.progressPercent || 0)}%`
+    if (updateStatus.phase === 'checking') return '检查中'
+    if (updateStatus.phase === 'available') return '继续下载'
+    if (updateStatus.phase === 'unsupported') return '仅正式版可用'
+    return updateStatus.phase === 'error' ? '重试' : '检查更新'
+  })()
+
   return (
     <div className="settings-scroll">
       {/* ════════ 外观与行为 ════════ */}
@@ -234,10 +312,17 @@ export function SettingsGeneralPage() {
           <div className="settings-card__body">
             <div className="settings-card__title">开机自启动</div>
             <div className="settings-card__desc">系统启动时自动运行灵月桌面</div>
+            {autoStartMessage && <div className="settings-card__desc settings-card__desc--status">{autoStartMessage}</div>}
           </div>
           <div className="settings-card__action">
+            {autoStartBusy && <Loader2 size={14} className="spin" />}
             <label className="toggle-switch">
-              <input type="checkbox" checked={autoStart} onChange={(e) => setAutoStart(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={autoStart}
+                disabled={autoStartBusy}
+                onChange={(e) => handleAutoStartToggle(e.target.checked)}
+              />
               <div className="toggle-switch__track">
                 <div className="toggle-switch__thumb" />
               </div>
@@ -291,6 +376,38 @@ export function SettingsGeneralPage() {
               <option value="zh-CN">简体中文</option>
               <option value="en">English</option>
             </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <div className="settings-group__header">版本与更新</div>
+
+        <div className="settings-card">
+          <div className="settings-card__icon"><RefreshCw size={18} /></div>
+          <div className="settings-card__body">
+            <div className="settings-card__title">灵月桌面 {appVersion ? `v${appVersion}` : ''}</div>
+            <div className="settings-card__desc">
+              启动后自动检查并在后台下载，新版本会在退出应用时安装
+            </div>
+            {updateStatus?.message && (
+              <div className="settings-card__desc settings-card__desc--status">{updateStatus.message}</div>
+            )}
+            {updateStatus?.phase === 'downloading' && (
+              <div className="settings-update-progress" aria-label="更新下载进度">
+                <div style={{ width: `${updateStatus.progressPercent || 0}%` }} />
+              </div>
+            )}
+          </div>
+          <div className="settings-card__action">
+            <button
+              className={`settings-btn settings-btn--sm ${updateStatus?.phase === 'downloaded' ? 'settings-btn--primary' : ''}`}
+              onClick={handleUpdateAction}
+              disabled={!updateStatus || updateActionBusy || updateStatus.phase === 'checking' || updateStatus.phase === 'downloading' || !updateStatus.canCheck && !updateStatus.canInstall && updateStatus.phase !== 'available'}
+            >
+              {(updateActionBusy || updateStatus?.phase === 'checking') && <Loader2 size={13} className="spin" />}
+              {updateButtonText}
+            </button>
           </div>
         </div>
       </div>
@@ -472,7 +589,8 @@ export function SettingsGeneralPage() {
                 </label>
                 <input
                   className="form-field__input"
-                  type="text"
+                  type="password"
+                  autoComplete="new-password"
                   value={editingProfile.apiKey}
                   onChange={(e) => updateField('apiKey', e.target.value)}
                   placeholder={editingProfile.provider === 'google' ? 'AIzaSy...' : 'sk-...'}
@@ -559,12 +677,7 @@ export function SettingsGeneralPage() {
             onClick={() => window.open('https://platform.deepseek.com', '_blank')}
           >
             <div className="settings-card__icon">
-              <img
-                src="https://platform.deepseek.com/favicon.ico"
-                alt=""
-                style={{ width: 20, height: 20, borderRadius: 4 }}
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-              />
+              <Sparkles size={18} />
             </div>
             <div className="settings-card__body">
               <div className="settings-card__title">DeepSeek 开放平台</div>

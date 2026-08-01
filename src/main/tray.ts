@@ -7,8 +7,8 @@ let tray: Tray | null = null
 export function createTray(): Tray {
   // 资源在 dev 与打包后路径不同
   const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'build', 'icon.png')
-    : join(__dirname, '../../resources/build/icon.png')
+    ? join(process.resourcesPath, 'build', 'icon.ico')
+    : join(__dirname, '../../resources/build/icon.ico')
 
   const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)

@@ -97,6 +97,22 @@
   margin-top: 6px;
 }
 
+.settings-update-progress {
+  width: min(320px, 100%);
+  height: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-tertiary) 18%, transparent);
+}
+
+.settings-update-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1f9d72, #58c9a4);
+  transition: width 240ms ease;
+}
+
 .location-settings-btn {
   margin-top: 8px;
 }

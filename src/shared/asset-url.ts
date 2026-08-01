@@ -7,3 +7,9 @@ export function toAssetUrl(absPath?: string): string | undefined {
   const normalized = absPath.replace(/\\/g, '/')
   return `lyasset://local/${normalized.split('/').map(encodeURIComponent).join('/')}`
 }
+
+/** Resolve a Vite public asset in both dev HTTP and packaged file:// pages. */
+export function toRendererPublicUrl(relativePath: string): string {
+  const cleanPath = relativePath.replace(/^\/+/, '')
+  return new URL(`../${cleanPath}`, globalThis.location.href).toString()
+}

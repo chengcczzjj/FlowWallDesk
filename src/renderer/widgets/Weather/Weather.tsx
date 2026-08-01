@@ -119,37 +119,33 @@ export function WeatherWidget({ config }: WeatherWidgetProps) {
   const darkMode = (config?.darkMode as boolean) ?? false
 
   const [weatherData, setWeatherData] = useState({ temp: 22, condition: 'Sunny', city: 'Beijing' })
+  const configuredCity = typeof config?.city === 'string' ? config.city.trim() : undefined
 
   useEffect(() => {
     const fetchWeather = async () => {
       try {
-        let latitude: number, longitude: number, city: string
-        try {
-          const locRes = await fetch('https://ipwho.is/')
-          const locData = await locRes.json()
-          if (locData.success) { latitude = locData.latitude; longitude = locData.longitude; city = locData.city }
-          else throw new Error('ipwho.is failed')
-        } catch {
-          const fallbackRes = await fetch('https://get.geojs.io/v1/ip/geo.json')
-          if (!fallbackRes.ok) throw new Error('Location fetch failed')
-          const fallbackData = await fallbackRes.json()
-          latitude = parseFloat(fallbackData.latitude); longitude = parseFloat(fallbackData.longitude); city = fallbackData.city
-        }
-        const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`)
-        const wData = await weatherRes.json()
-        const code = wData.current_weather.weathercode
-        let condition = 'Sunny'
-        if (code > 3) condition = 'Cloudy'
-        if (code > 50) condition = 'Rainy'
-        if (code > 70) condition = 'Snowy'
-        if (code >= 95) condition = 'Stormy'
-        setWeatherData({ temp: Math.round(wData.current_weather.temperature), condition, city })
+        const snapshot = await window.canvasBridge?.fetchWeather({ city: configuredCity, days: 1 })
+        if (!snapshot?.ok || !snapshot.current) return
+        const condition = snapshot.current.condition === 'sunny'
+          ? 'Sunny'
+          : snapshot.current.condition === 'rainy'
+            ? 'Rainy'
+            : snapshot.current.condition === 'snowy'
+              ? 'Snowy'
+              : snapshot.current.condition === 'stormy'
+                ? 'Stormy'
+                : 'Cloudy'
+        setWeatherData({
+          temp: Math.round(snapshot.current.temperature),
+          condition,
+          city: snapshot.city || snapshot.location,
+        })
       } catch (error) {
         console.log('Weather API failed, using default', error)
       }
     }
-    fetchWeather()
-  }, [])
+    void fetchWeather()
+  }, [configuredCity])
 
   const { temp, condition, city } = weatherData
   const textColor = darkMode ? 'text-slate-900' : 'text-white'

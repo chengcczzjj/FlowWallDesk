@@ -12,7 +12,15 @@ import {
   ensureWallpaperAttached,
 } from '../windows/wallpaperWindow'
 import { refreshCanvasZOrder, getCanvasWindow, isDesktopOccluded } from '../windows/canvasWindow'
+import {
+  getUserWallpapersRoot,
+  getWallpaperSettingsOverridePath,
+  sanitizeUserDataSegment,
+  toUserWallpaperId,
+} from '../runtime/userDataPaths'
 import { cancelPendingAutoSave, loadWidgetsForWallpaper } from './widgetIpc'
+import { allowUserSelectedAsset } from '../protocols'
+import { assertTrustedIpcSender } from './ipcSecurity'
 
 /**
  * 内置壁纸根目录：
@@ -82,6 +90,24 @@ interface FlowWallDeskInfo {
   Settings?: WallpaperSettings
 }
 
+function parseWallpaperSettingsOverride(data: unknown): WallpaperSettings | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const record = data as Record<string, unknown>
+  if (record.settings && typeof record.settings === 'object') {
+    return record.settings as WallpaperSettings
+  }
+  return data as WallpaperSettings
+}
+
+async function readWallpaperSettingsOverride(wallpaperId: string): Promise<WallpaperSettings | undefined> {
+  try {
+    const txt = await fs.readFile(getWallpaperSettingsOverridePath(wallpaperId), 'utf-8')
+    return parseWallpaperSettingsOverride(JSON.parse(txt))
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * 用 ffmpeg 把视频前 3 秒生成 512x512 正方形 GIF 预览图。
  * 输出到同目录下 preview.gif。如果已存在则跳过。
@@ -134,25 +160,11 @@ function generateVideoPreviewGif(videoPath: string, outputDir: string): Promise<
   })
 }
 
-/** 保存单个壁纸的独立设置到其 FlowWallDeskInfo.json */
-async function saveWallpaperSettings(
-  folder: string,
-  settings: WallpaperSettings
-): Promise<void> {
-  const infoPath = join(folder, 'FlowWallDeskInfo.json')
-  try {
-    const txt = await fs.readFile(infoPath, 'utf-8')
-    const info = JSON.parse(txt)
-    info.Settings = settings
-    await fs.writeFile(infoPath, JSON.stringify(info, null, 2), 'utf-8')
-  } catch {
-    // 如果文件不存在，创建一个最小的
-    await fs.writeFile(
-      infoPath,
-      JSON.stringify({ Settings: settings }, null, 2),
-      'utf-8'
-    )
-  }
+/** 保存单个壁纸的独立设置到用户数据覆盖层 */
+async function saveWallpaperSettings(wallpaperId: string, settings: WallpaperSettings): Promise<void> {
+  const settingsPath = getWallpaperSettingsOverridePath(wallpaperId)
+  await fs.mkdir(dirname(settingsPath), { recursive: true })
+  await fs.writeFile(settingsPath, JSON.stringify({ settings }, null, 2), 'utf-8')
 }
 
 async function pickPreview(folder: string, info?: FlowWallDeskInfo): Promise<string | undefined> {
@@ -190,7 +202,7 @@ async function pickPreview(folder: string, info?: FlowWallDeskInfo): Promise<str
   return undefined
 }
 
-async function scanFolder(folder: string, id: string): Promise<WallpaperItem | null> {
+async function scanFolder(folder: string, id: string, options: { mutable?: boolean } = {}): Promise<WallpaperItem | null> {
   try {
     const entries = await fs.readdir(folder, { withFileTypes: true })
     const files = entries.filter((e) => e.isFile()).map((e) => e.name)
@@ -236,12 +248,14 @@ async function scanFolder(folder: string, id: string): Promise<WallpaperItem | n
     const preview = await pickPreview(folder, info)
 
     // 视频壁纸没有预览图时，异步生成 GIF 预览
-    if (type === 'video' && !preview) {
+    if (type === 'video' && !preview && options.mutable) {
       // 先不阻塞扫描，异步生成后下次加载时就有了
       generateVideoPreviewGif(source, folder).then((gif) => {
         if (gif) console.log(`[wallpaper] 视频预览 GIF 已就绪: ${id}`)
       })
     }
+
+    const settingsOverride = await readWallpaperSettingsOverride(id)
 
     return {
       id,
@@ -250,86 +264,142 @@ async function scanFolder(folder: string, id: string): Promise<WallpaperItem | n
       type,
       preview,
       meta: info as unknown as Record<string, unknown>,
-      settings: info?.Settings,
+      settings: settingsOverride ?? info?.Settings,
     }
   } catch {
     return null
   }
 }
 
-async function listBuiltinWallpapers(): Promise<WallpaperItem[]> {
-  const root = getWallpaperRoot()
+async function listWallpapersFromRoot(
+  root: string,
+  options: { idPrefix?: 'user'; label: string; mutable?: boolean }
+): Promise<WallpaperItem[]> {
   try {
     const entries = await fs.readdir(root, { withFileTypes: true })
     const items = await Promise.all(
-      entries.filter((e) => e.isDirectory()).map((e) => scanFolder(join(root, e.name), e.name))
+      entries
+        .filter((e) => e.isDirectory())
+        .map((e) => {
+          const id = options.idPrefix === 'user' ? toUserWallpaperId(e.name) : e.name
+          return scanFolder(join(root, e.name), id, { mutable: options.mutable })
+        })
     )
     return items.filter((x): x is WallpaperItem => x !== null)
   } catch (err) {
-    console.warn('[wallpaper] 扫描失败：', err)
+    const code = typeof err === 'object' && err !== null && 'code' in err ? (err as { code?: string }).code : undefined
+    if (code === 'ENOENT') return []
+    console.warn(`[wallpaper] ${options.label}扫描失败：`, err)
     return []
   }
+}
+
+async function listBuiltinWallpapers(): Promise<WallpaperItem[]> {
+  return listWallpapersFromRoot(getWallpaperRoot(), { label: '内置壁纸', mutable: false })
+}
+
+async function listUserWallpapers(): Promise<WallpaperItem[]> {
+  return listWallpapersFromRoot(getUserWallpapersRoot(), { idPrefix: 'user', label: '用户壁纸', mutable: true })
+}
+
+async function listAllWallpapers(): Promise<WallpaperItem[]> {
+  const [builtin, user] = await Promise.all([listBuiltinWallpapers(), listUserWallpapers()])
+  return [...builtin, ...user]
 }
 
 // ─── 壁纸帧捕获（用于组件毛玻璃效果）───
 // video/image 类型由壁纸渲染进程 canvas 抽帧，通过 IPC 中转
 // web 类型（iframe）无法用 canvas.drawImage，改用主进程 capturePage
 let captureTimer: ReturnType<typeof setInterval> | null = null
+let captureStartTimer: ReturnType<typeof setTimeout> | null = null
+let captureInFlight = false
+let wallpaperFrameDemanded = false
+
+async function captureWebWallpaperFrame(): Promise<void> {
+  if (captureInFlight || !wallpaperFrameDemanded || isDesktopOccluded()) return
+  const wp = getWallpaperWindow()
+  const canvas = getCanvasWindow()
+  if (
+    !wp || wp.isDestroyed() || wp.webContents.isDestroyed() ||
+    !canvas || canvas.isDestroyed() || canvas.webContents.isDestroyed()
+  ) return
+  captureInFlight = true
+  try {
+    const img = await wp.webContents.capturePage()
+    const display = screen.getPrimaryDisplay()
+    const width = 768
+    const height = Math.max(1, Math.round(width * display.bounds.height / Math.max(1, display.bounds.width)))
+    const resized = img.resize({ width, height, quality: 'good' })
+    const b64 = resized.toJPEG(48).toString('base64')
+    safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, `data:image/jpeg;base64,${b64}`)
+  } catch {
+    // capturePage can fail while a window or frame is being replaced.
+  } finally {
+    captureInFlight = false
+  }
+}
 
 function startMainCapture(): void {
-  stopMainCapture()
-  captureTimer = setInterval(async () => {
-    if (isDesktopOccluded()) return
-    const wp = getWallpaperWindow()
-    const canvas = getCanvasWindow()
-    if (
-      !wp ||
-      wp.isDestroyed() ||
-      wp.webContents.isDestroyed() ||
-      !canvas ||
-      canvas.isDestroyed() ||
-      canvas.webContents.isDestroyed()
-    ) return
-    try {
-      const img = await wp.webContents.capturePage()
-      const display = screen.getPrimaryDisplay()
-      const width = 768
-      const height = Math.max(1, Math.round(width * display.bounds.height / Math.max(1, display.bounds.width)))
-      const resized = img.resize({ width, height, quality: 'good' })
-      const b64 = resized.toJPEG(50).toString('base64')
-      const dataUrl = `data:image/jpeg;base64,${b64}`
-      safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, dataUrl)
-    } catch {
-      // capturePage 可能在窗口销毁瞬间失败，忽略
-    }
-  }, 83) // ~12fps
+  if (!wallpaperFrameDemanded || captureTimer) return
+  void captureWebWallpaperFrame()
+  captureTimer = setInterval(() => void captureWebWallpaperFrame(), 250)
 }
 
 function stopMainCapture(): void {
+  if (captureStartTimer) {
+    clearTimeout(captureStartTimer)
+    captureStartTimer = null
+  }
   if (captureTimer) {
     clearInterval(captureTimer)
     captureTimer = null
   }
 }
 
+function scheduleMainCapture(delayMs: number): void {
+  stopMainCapture()
+  if (!wallpaperFrameDemanded) return
+  captureStartTimer = setTimeout(() => {
+    captureStartTimer = null
+    if (store.get('wallpaper').current?.type === 'web') startMainCapture()
+  }, delayMs)
+}
+
 export function registerWallpaperIpc(): void {
-  ipcMain.handle(IPC.WALLPAPER_LIST, () => listBuiltinWallpapers())
-  ipcMain.handle(IPC.WALLPAPER_GET_CURRENT, () => store.get('wallpaper'))
-  ipcMain.handle(IPC.WALLPAPER_ATTACH_STATUS, () => isWallpaperAttached())
+  ipcMain.handle(IPC.WALLPAPER_LIST, (event) => { assertTrustedIpcSender(event, ['main']); return listAllWallpapers() })
+  ipcMain.handle(IPC.WALLPAPER_GET_CURRENT, (event) => { assertTrustedIpcSender(event, ['main', 'wallpaper']); return store.get('wallpaper') })
+  ipcMain.handle(IPC.WALLPAPER_ATTACH_STATUS, (event) => { assertTrustedIpcSender(event, ['main']); return isWallpaperAttached() })
 
   // 壁纸抽帧中转：壁纸窗口 → 画布窗口（用于组件毛玻璃效果）
   // video/image 类型由渲染端抽帧发送，主进程只做中转
   ipcMain.on(IPC.WALLPAPER_FRAME, (_e, data: string) => {
-    if (isDesktopOccluded()) return // 全屏遮挡时丢弃帧
+    if (_e.sender.id !== getWallpaperWindow()?.webContents.id) return
+    if (typeof data !== 'string' || data.length > 5 * 1024 * 1024 || !data.startsWith('data:image/jpeg;base64,')) return
+    if (!wallpaperFrameDemanded || isDesktopOccluded()) return
     const canvas = getCanvasWindow()
     safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, data)
   })
 
+  ipcMain.on(IPC.WALLPAPER_CAPTURE_DEMAND, (event, enabled: boolean) => {
+    if (event.sender.id !== getCanvasWindow()?.webContents.id || typeof enabled !== 'boolean') return
+    wallpaperFrameDemanded = enabled
+    safeSendToWindow(getWallpaperWindow(), IPC.WALLPAPER_CAPTURE_DEMAND, enabled)
+    if (!enabled) {
+      stopMainCapture()
+    } else if (store.get('wallpaper').current?.type === 'web') {
+      scheduleMainCapture(0)
+    }
+  })
+
   ipcMain.on(IPC.WALLPAPER_READY, async (_e, payload?: { itemId?: string; source?: string }) => {
+    if (_e.sender.id !== getWallpaperWindow()?.webContents.id) return
+    if (payload?.itemId && (typeof payload.itemId !== 'string' || payload.itemId.length > 1024)) return
+    if (payload?.source && (typeof payload.source !== 'string' || payload.source.length > 32_768)) return
     const current = store.get('wallpaper').current
     if (!current) return
     if (payload?.itemId && payload.itemId !== current.id) return
     if (payload?.source && payload.source !== current.source) return
+    safeSendToWindow(getWallpaperWindow(), IPC.WALLPAPER_CAPTURE_DEMAND, wallpaperFrameDemanded)
     if (!isWallpaperAttached()) {
       await ensureWallpaperAttached()
       refreshCanvasZOrder()
@@ -337,7 +407,8 @@ export function registerWallpaperIpc(): void {
   })
 
   ipcMain.handle(IPC.WALLPAPER_APPLY, async (_e, item: WallpaperItem) => {
-    // 取消旧壁纸的未完成防抖保存，避免旧组件写入新壁纸目录
+    assertTrustedIpcSender(_e, ['main'])
+    // 取消旧壁纸的未完成防抖保存，避免旧组件写入新壁纸覆盖层
     cancelPendingAutoSave()
 
     const state = store.get('wallpaper')
@@ -350,7 +421,7 @@ export function registerWallpaperIpc(): void {
     // web 类型壁纸无法在渲染端 canvas 抽帧（iframe 跨域），改用主进程 capturePage
     if (item.type === 'web') {
       // capturePage 需要等 iframe 加载完成，延迟启动
-      setTimeout(() => startMainCapture(), 1000)
+      scheduleMainCapture(1000)
     } else {
       stopMainCapture() // video/image 由渲染端抽帧
     }
@@ -364,9 +435,8 @@ export function registerWallpaperIpc(): void {
   ipcMain.handle(
     IPC.WALLPAPER_SAVE_SETTINGS,
     async (_e, wallpaperId: string, settings: WallpaperSettings) => {
-      const root = getWallpaperRoot()
-      const folder = join(root, wallpaperId)
-      await saveWallpaperSettings(folder, settings)
+      assertTrustedIpcSender(_e, ['main'])
+      await saveWallpaperSettings(wallpaperId, settings)
       return true
     }
   )
@@ -375,13 +445,15 @@ export function registerWallpaperIpc(): void {
   ipcMain.handle(
     IPC.WALLPAPER_UPDATE_SETTING,
     async (_e, key: string, value: unknown) => {
+      assertTrustedIpcSender(_e, ['main'])
       const win = getWallpaperWindow()
       safeSendToWindow(win, IPC.WALLPAPER_UPDATE_SETTING, key, value)
       return true
     }
   )
 
-  ipcMain.handle(IPC.WALLPAPER_PICK_FILE, async () => {
+  ipcMain.handle(IPC.WALLPAPER_PICK_FILE, async (_event) => {
+    assertTrustedIpcSender(_event, ['main'])
     const result = await dialog.showOpenDialog({
       title: '选择本地壁纸',
       properties: ['openFile'],
@@ -398,6 +470,7 @@ export function registerWallpaperIpc(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const file = result.filePaths[0]
+    await allowUserSelectedAsset(file)
     const ext = extname(file).toLowerCase()
     const type: WallpaperItem['type'] = VIDEO_EXT.has(ext)
       ? 'video'
@@ -413,7 +486,19 @@ export function registerWallpaperIpc(): void {
     return item
   })
 
-  // 导入壁纸：将文件复制到 wallpaper 文件夹，创建配置，生成预览
+  ipcMain.handle(IPC.WALLPAPER_GRANT_PREVIEW, async (_event, filePath: string) => {
+    assertTrustedIpcSender(_event, ['main'])
+    try {
+      const extension = extname(filePath).toLowerCase()
+      if (!VIDEO_EXT.has(extension) && !IMAGE_EXT.has(extension)) return false
+      await allowUserSelectedAsset(filePath)
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  // 导入壁纸：将文件复制到用户数据目录，创建配置，生成预览
   // 支持：视频、图片、HTML（复制整个文件夹）、ZIP（解压为网页壁纸）
   ipcMain.handle(
     IPC.WALLPAPER_IMPORT,
@@ -422,6 +507,7 @@ export function registerWallpaperIpc(): void {
       filePath: string,
       meta: { name: string; desc: string; author: string; contact: string }
     ): Promise<{ ok: boolean; item?: WallpaperItem; error?: string }> => {
+      assertTrustedIpcSender(_e, ['main'])
       try {
         const ext = extname(filePath).toLowerCase()
         const isZip = ext === '.zip'
@@ -432,9 +518,10 @@ export function registerWallpaperIpc(): void {
             ? 'web'
             : 'image'
 
-        // 用壁纸名字做文件夹名（去掉非法字符）
-        const safeName = meta.name.replace(/[<>:"/\\|?*]/g, '_').trim() || basename(filePath, ext)
-        const root = getWallpaperRoot()
+        // 用壁纸名字做用户数据目录下的文件夹名
+        const displayName = meta.name.trim() || basename(filePath, ext)
+        const safeName = sanitizeUserDataSegment(displayName, 'wallpaper')
+        const root = getUserWallpapersRoot()
         let folderName = safeName
         let folder = join(root, folderName)
 
@@ -474,7 +561,7 @@ export function registerWallpaperIpc(): void {
         // 创建 FlowWallDeskInfo.json
         const typeNum = type === 'web' ? 1 : type === 'video' ? 7 : 11
         const info: FlowWallDeskInfo = {
-          Title: meta.name,
+          Title: displayName,
           Desc: meta.desc || '',
           Author: meta.author || '',
           Contact: meta.contact || '',
@@ -507,8 +594,8 @@ export function registerWallpaperIpc(): void {
         }
 
         const item: WallpaperItem = {
-          id: folderName,
-          name: meta.name,
+          id: toUserWallpaperId(folderName),
+          name: displayName,
           source: destSource,
           type,
           preview,
@@ -587,6 +674,13 @@ async function findHtmlEntry(dir: string): Promise<string | null> {
 export async function restoreWallpaper(): Promise<void> {
   const state = store.get('wallpaper')
   if (!state.current) return
+  if (!/^[a-z]+:\/\//i.test(state.current.source)) {
+    try {
+      await allowUserSelectedAsset(state.current.source)
+    } catch {
+      // 内置和 userData 壁纸已由根目录授权，不需要额外授权。
+    }
+  }
   const win = getWallpaperWindow()
   if (!win) return
   const send = () => {
@@ -595,7 +689,7 @@ export async function restoreWallpaper(): Promise<void> {
       safeSendToWindow(win, IPC.WALLPAPER_LOAD, state.current)
       // web 类型壁纸启动主进程帧捕获
       if (state.current?.type === 'web') {
-        setTimeout(() => startMainCapture(), 2000)
+        scheduleMainCapture(2000)
       }
     }
   }

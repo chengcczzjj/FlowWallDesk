@@ -1,7 +1,12 @@
-import { BrowserWindow, app, shell } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { store } from '../store'
+import { secureWindowNavigation } from './navigationSecurity'
+
+const appIconPath = app.isPackaged
+  ? join(process.resourcesPath, 'build', 'icon.ico')
+  : join(__dirname, '../../resources/build/icon.ico')
 
 let mainWindow: BrowserWindow | null = null
 /** 标记本次应用会话是否已经展示过主窗口（用于导航状态恢复） */
@@ -33,10 +38,12 @@ export function createMainWindow(target?: MainWindowNavTarget): BrowserWindow {
     frame: false,
     titleBarStyle: 'hidden',
     title: '灵月 LingyueDesk',
+    icon: appIconPath,
     webPreferences: {
-      preload: join(__dirname, '../preload/main-ui.js'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: true,
       contextIsolation: true,
+      additionalArguments: ['--lingyue-window-role=main'],
     },
   })
 
@@ -57,10 +64,18 @@ export function createMainWindow(target?: MainWindowNavTarget): BrowserWindow {
     mainWindow = null
   })
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
+  secureWindowNavigation(mainWindow, true)
+
+  if (is.dev) {
+    mainWindow.webContents.on('console-message', (details) => {
+      if (details.level === 'warning' || details.level === 'error') {
+        console.error(`[main-ui] ${details.sourceId}:${details.lineNumber} ${details.message}`)
+      }
+    })
+    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
+      console.error(`[main-ui] load failed ${errorCode} ${errorDescription}: ${validatedUrl}`)
+    })
+  }
 
   // 首次启动不传 restore 参数（回到首页），后续窗口重建传 restore=1（恢复上次页面）
   const shouldRestore = hasShownMainWindow

@@ -100,6 +100,7 @@ export const approvals = sqliteTable(
     decision: text('decision'),
     createdAt: integer('created_at').notNull(),
     resolvedAt: integer('resolved_at'),
+    consumedAt: integer('consumed_at'),
   },
   (t) => [
     index('approvals_by_run').on(t.runId, t.createdAt),

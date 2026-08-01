@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import type { WallpaperState, WidgetInstance, ModelProfile } from '@shared/types'
+import type { DesktopSceneSnapshot } from '@shared/desktop-scene'
 
 interface ModelSettings {
   profiles: ModelProfile[]
@@ -10,11 +11,17 @@ interface PrivacySettings {
   preciseLocationEnabled: boolean
 }
 
+interface AppSettings {
+  launchAtLogin: boolean
+}
+
 interface Schema {
   wallpaper: WallpaperState
   widgets: WidgetInstance[]
   /** 跨壁纸保存的图标收纳与 Dock 组件 */
   globalIconWidgets?: WidgetInstance[]
+  /** AI 桌面编排应用前后的可回滚快照 */
+  desktopSceneSnapshots?: DesktopSceneSnapshot[]
   /** 主界面窗口最后位置 */
   mainWindowBounds?: { x: number; y: number; width: number; height: number }
   /** AI 模型配置 */
@@ -23,6 +30,8 @@ interface Schema {
   persona?: { name: string; prompt: string; avatar?: string }
   /** 隐私设置 */
   privacySettings: PrivacySettings
+  /** 应用生命周期设置 */
+  appSettings: AppSettings
 }
 
 const defaults: Schema = {
@@ -43,6 +52,9 @@ const defaults: Schema = {
   },
   privacySettings: {
     preciseLocationEnabled: false,
+  },
+  appSettings: {
+    launchAtLogin: true,
   },
 }
 

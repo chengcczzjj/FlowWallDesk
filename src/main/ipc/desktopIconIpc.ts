@@ -4,6 +4,7 @@ import { dirname, extname, join, normalize, parse } from 'path'
 import { randomUUID } from 'crypto'
 import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
+import { assertTrustedIpcSender } from './ipcSecurity'
 import type {
   DesktopIconImportResult,
   DesktopIconContextMenuResult,
@@ -435,6 +436,31 @@ async function hydrateDesktopIconItem(item: DesktopIconItem): Promise<DesktopIco
   }
 }
 
+function persistHydratedDesktopIconItems(hydratedItems: DesktopIconItem[]): void {
+  const hydratedById = new Map(hydratedItems.map((item) => [item.id, item]))
+  if (hydratedById.size === 0) return
+
+  let changed = false
+  const updated = store.get('widgets').map((widget) => {
+    if (!isDesktopIconWidgetType(widget.type)) return widget
+    let widgetChanged = false
+    const nextItems = getDesktopIconItems(widget).map((item) => {
+      const hydrated = hydratedById.get(item.id)
+      if (!hydrated) return item
+      widgetChanged = true
+      return { ...hydrated, order: item.order }
+    })
+    if (!widgetChanged) return widget
+    changed = true
+    const config = isRecord(widget.config) ? widget.config : {}
+    return { ...widget, config: { ...config, items: nextItems } }
+  })
+
+  if (!changed) return
+  persistWidgets(updated)
+  syncToCanvas(updated)
+}
+
 function appendItemsToWidget(widgetId: string, items: DesktopIconItem[]): boolean {
   const widgets = store.get('widgets')
   const target = widgets.find((widget) => widget.id === widgetId)
@@ -481,6 +507,16 @@ function updateDesktopIconItems(
   persistWidgets(updated)
   syncToCanvas(updated)
   return true
+}
+
+function findStoredDesktopIcon(itemId: string, widgetId?: string): DesktopIconItem | undefined {
+  const widgets = store.get('widgets')
+  const candidates = widgetId ? widgets.filter((widget) => widget.id === widgetId) : widgets
+  for (const widget of candidates) {
+    const item = getDesktopIconItems(widget).find((candidate) => candidate.id === itemId)
+    if (item) return item
+  }
+  return undefined
 }
 
 async function mapWithConcurrency<T, R>(
@@ -639,6 +675,7 @@ export async function launchDesktopIcon(item: DesktopIconItem): Promise<DesktopI
 
 export function registerDesktopIconIpc(): void {
   ipcMain.handle(IPC.DESKTOP_ICON_IMPORT, async (_event, widgetId: string, filePaths: string[]) => {
+    assertTrustedIpcSender(_event, ['canvas'])
     const result: DesktopIconImportResult = { ok: false, items: [], skipped: [] }
     if (!widgetId || !Array.isArray(filePaths) || filePaths.length === 0) {
       return { ...result, error: '没有可导入的图标' }
@@ -664,16 +701,29 @@ export function registerDesktopIconIpc(): void {
     return { ...result, ok: result.items.length > 0 }
   })
 
-  ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, (_event, item: DesktopIconItem) => launchDesktopIcon(item))
+  ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, (_event, item: DesktopIconItem) => {
+    assertTrustedIpcSender(_event, ['canvas'])
+    const stored = isDesktopIconItem(item) ? findStoredDesktopIcon(item.id) : undefined
+    return stored ? launchDesktopIcon(stored) : { ok: false, error: '桌面图标记录不存在。' }
+  })
 
   ipcMain.handle(IPC.DESKTOP_ICON_REFRESH, async (_event, items: DesktopIconItem[]) => {
+    assertTrustedIpcSender(_event, ['canvas'])
     if (!Array.isArray(items)) return []
-    return Promise.all(items.filter(isDesktopIconItem).map((item) => hydrateDesktopIconItem(item)))
+    const storedItems = items
+      .filter(isDesktopIconItem)
+      .map((item) => findStoredDesktopIcon(item.id))
+      .filter((item): item is DesktopIconItem => Boolean(item))
+    const hydratedItems = await Promise.all(storedItems.map((item) => hydrateDesktopIconItem(item)))
+    persistHydratedDesktopIconItems(hydratedItems)
+    return hydratedItems
   })
 
   ipcMain.handle(IPC.DESKTOP_ICON_CONTEXT_MENU, async (_event, widgetId: string, item: DesktopIconItem) => {
+    assertTrustedIpcSender(_event, ['canvas'])
     const win = getCanvasWindow()
-    if (!win || !isDesktopIconItem(item)) return null
+    const storedItem = isDesktopIconItem(item) ? findStoredDesktopIcon(item.id, widgetId) : undefined
+    if (!win || !storedItem) return null
 
     return new Promise<DesktopIconContextMenuResult | null>((resolve) => {
       let resolved = false
@@ -694,21 +744,21 @@ export function registerDesktopIconIpc(): void {
       const menu = Menu.buildFromTemplate([
         {
           label: '打开',
-          click: () => void runAction(async () => ({ ...(await launchDesktopIcon(item)), action: 'open' })),
+          click: () => void runAction(async () => ({ ...(await launchDesktopIcon(storedItem)), action: 'open' })),
         },
         {
           label: '打开文件所在位置',
-          click: () => void runAction(() => revealDesktopIcon(item)),
+          click: () => void runAction(() => revealDesktopIcon(storedItem)),
         },
         { type: 'separator' },
-        item.removedFromDesktop
+        storedItem.removedFromDesktop
           ? {
               label: '移回桌面',
-              click: () => void runAction(() => restoreDesktopIconFromWidget(widgetId, item)),
+              click: () => void runAction(() => restoreDesktopIconFromWidget(widgetId, storedItem)),
             }
           : {
               label: '从收纳中移除',
-              click: () => void runAction(() => removeDesktopIconReference(widgetId, item)),
+              click: () => void runAction(() => removeDesktopIconReference(widgetId, storedItem)),
             },
       ])
       menu.popup({

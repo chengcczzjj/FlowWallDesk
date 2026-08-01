@@ -21,13 +21,23 @@ import { events, summaryJobs } from '../db/schema'
 import { eq, and, asc } from 'drizzle-orm'
 import { ulid } from 'ulidx'
 import { ModelConfig } from '../models/config'
-import { generateText } from 'ai'
+import { generateText, Output } from 'ai'
+import { z } from 'zod'
 import { createModel } from '../models/chatModel'
 import { MemoryStore } from '../memories/memoryStore'
 import type { StoredEvent } from '../events/types'
 
 /** 总结任务状态 */
 let consolidationTimer: ReturnType<typeof setInterval> | null = null
+let initialConsolidationTimer: ReturnType<typeof setTimeout> | null = null
+let consolidationInFlight: Promise<{ processed: number; memoriesAdded: number }> | null = null
+
+const ExtractedMemorySchema = z.object({
+  key: z.string().trim().min(1).max(80),
+  content: z.string().trim().min(1).max(1000),
+  importance: z.enum(['high', 'medium', 'low']),
+  scope: z.enum(['user', 'companion', 'work', 'general']),
+})
 
 /** 提取记忆的 prompt 模板 */
 const EXTRACTION_PROMPT = `你是一个记忆提取助手。从以下对话记录中提取"未来对用户可能有用的信息"。
@@ -51,10 +61,10 @@ const EXTRACTION_PROMPT = `你是一个记忆提取助手。从以下对话记�
  * 从一批事件中提取记忆
  */
 async function extractMemories(eventBatch: StoredEvent[]): Promise<
-  { key: string; content: string; importance: 'high' | 'medium' | 'low'; scope: string }[]
+  { ok: boolean; memories: z.infer<typeof ExtractedMemorySchema>[]; error?: string }
 > {
   const profile = ModelConfig.getActive()
-  if (!profile) return []
+  if (!profile) return { ok: false, memories: [], error: 'model-profile-missing' }
 
   // 构建对话文本
   const dialogText = eventBatch
@@ -67,8 +77,9 @@ async function extractMemories(eventBatch: StoredEvent[]): Promise<
     })
     .filter(Boolean)
     .join('\n')
+    .slice(0, 60_000)
 
-  if (!dialogText.trim()) return []
+  if (!dialogText.trim()) return { ok: true, memories: [] }
 
   try {
     const model = createModel(profile)
@@ -81,27 +92,16 @@ async function extractMemories(eventBatch: StoredEvent[]): Promise<
       ],
       temperature: 0.3,
       maxOutputTokens: 1000,
+      output: Output.array({
+        element: ExtractedMemorySchema,
+        name: 'long_term_memories',
+        description: '值得长期保留的用户记忆；没有时返回空数组。',
+      }),
     })
 
-    // 解析 JSON 响应
-    const text = result.text.trim()
-    const jsonMatch = text.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return []
-
-    const parsed = JSON.parse(jsonMatch[0])
-    if (!Array.isArray(parsed)) return []
-
-    return parsed.filter(
-      (m: unknown) =>
-        m &&
-        typeof m === 'object' &&
-        'key' in m &&
-        'content' in m &&
-        typeof (m as { key: unknown }).key === 'string' &&
-        typeof (m as { content: unknown }).content === 'string'
-    )
-  } catch {
-    return []
+    return { ok: true, memories: result.output }
+  } catch (error) {
+    return { ok: false, memories: [], error: (error as Error).message }
   }
 }
 
@@ -116,10 +116,11 @@ async function extractMemories(eventBatch: StoredEvent[]): Promise<
  * 5. 标记事件为 'summarized'
  * 6. 记录 summaryJob
  */
-export async function runConsolidation(): Promise<{ processed: number; memoriesAdded: number }> {
+async function runConsolidationOnce(): Promise<{ processed: number; memoriesAdded: number }> {
   const db = getDb()
   let processed = 0
   let memoriesAdded = 0
+  let failedBatches = 0
 
   // 创建 job 记录
   const jobId = ulid()
@@ -152,9 +153,16 @@ export async function runConsolidation(): Promise<{ processed: number; memoriesA
       return { processed: 0, memoriesAdded: 0 }
     }
 
+    // Private events never enter the general memory database.
+    const privateEvents = pendingEvents.filter((event) => event.sensitivity === 'private')
+    for (const event of privateEvents) {
+      db.update(events).set({ summaryStatus: 'ignored' }).where(eq(events.id, event.id)).run()
+      processed += 1
+    }
+
     // 2. 按会话分组
     const byConversation = new Map<string, typeof pendingEvents>()
-    for (const ev of pendingEvents) {
+    for (const ev of pendingEvents.filter((event) => event.sensitivity !== 'private')) {
       const convId = ev.conversationId
       if (!byConversation.has(convId)) {
         byConversation.set(convId, [])
@@ -177,15 +185,21 @@ export async function runConsolidation(): Promise<{ processed: number; memoriesA
         summaryStatus: e.summaryStatus as StoredEvent['summaryStatus'],
       }))
 
-      const extracted = await extractMemories(storedEvents)
+      const extraction = await extractMemories(storedEvents)
+      if (!extraction.ok) {
+        failedBatches += 1
+        continue
+      }
 
       // 4. 写入记忆
-      for (const mem of extracted) {
+      for (const mem of extraction.memories) {
         const op = MemoryStore.upsert({
           key: mem.key,
           scope: mem.scope,
           content: mem.content,
           importance: mem.importance,
+          projectId: convEvents[0]?.projectId ?? undefined,
+          sensitivity: convEvents.some((event) => event.sensitivity === 'sensitive') ? 'sensitive' : 'normal',
           sourceEventId: convEvents[0]?.id,
         })
         if (op === 'add' || op === 'update') {
@@ -209,7 +223,7 @@ export async function runConsolidation(): Promise<{ processed: number; memoriesA
       .set({
         status: 'completed',
         completedAt: Date.now(),
-        resultSummary: `Processed ${processed} events, extracted ${memoriesAdded} memories`,
+        resultSummary: `Processed ${processed} events, extracted ${memoriesAdded} memories, retry batches ${failedBatches}`,
       })
       .where(eq(summaryJobs.id, jobId))
       .run()
@@ -227,6 +241,14 @@ export async function runConsolidation(): Promise<{ processed: number; memoriesA
   return { processed, memoriesAdded }
 }
 
+export function runConsolidation(): Promise<{ processed: number; memoriesAdded: number }> {
+  if (consolidationInFlight) return consolidationInFlight
+  consolidationInFlight = runConsolidationOnce().finally(() => {
+    consolidationInFlight = null
+  })
+  return consolidationInFlight
+}
+
 /**
  * 启动定时总结（每 12 小时执行一次）
  */
@@ -234,7 +256,8 @@ export function startConsolidationSchedule(): void {
   if (consolidationTimer) return
 
   // 延迟 5 分钟后首次执行（避免启动时阻塞）
-  setTimeout(() => {
+  initialConsolidationTimer = setTimeout(() => {
+    initialConsolidationTimer = null
     runConsolidation().catch(() => {})
   }, 5 * 60_000)
 
@@ -251,6 +274,10 @@ export function startConsolidationSchedule(): void {
  * 停止定时总结
  */
 export function stopConsolidationSchedule(): void {
+  if (initialConsolidationTimer) {
+    clearTimeout(initialConsolidationTimer)
+    initialConsolidationTimer = null
+  }
   if (consolidationTimer) {
     clearInterval(consolidationTimer)
     consolidationTimer = null
@@ -279,7 +306,13 @@ export async function immediateExtract(conversationId: string): Promise<number> 
 
   if (recentEvents.length === 0) return 0
 
-  const storedEvents: StoredEvent[] = recentEvents.map((e) => ({
+  const eligibleEvents = recentEvents.filter((event) => event.sensitivity !== 'private')
+  for (const event of recentEvents.filter((item) => item.sensitivity === 'private')) {
+    db.update(events).set({ summaryStatus: 'ignored' }).where(eq(events.id, event.id)).run()
+  }
+  if (eligibleEvents.length === 0) return 0
+
+  const storedEvents: StoredEvent[] = eligibleEvents.map((e) => ({
     id: e.id,
     conversationId: e.conversationId,
     projectId: e.projectId,
@@ -291,22 +324,25 @@ export async function immediateExtract(conversationId: string): Promise<number> 
     summaryStatus: e.summaryStatus as StoredEvent['summaryStatus'],
   }))
 
-  const extracted = await extractMemories(storedEvents)
+  const extraction = await extractMemories(storedEvents)
+  if (!extraction.ok) return 0
   let added = 0
 
-  for (const mem of extracted) {
+  for (const mem of extraction.memories) {
     const op = MemoryStore.upsert({
       key: mem.key,
       scope: mem.scope,
       content: mem.content,
       importance: mem.importance,
-      sourceEventId: recentEvents[0]?.id,
+      projectId: eligibleEvents[0]?.projectId ?? undefined,
+      sensitivity: eligibleEvents.some((event) => event.sensitivity === 'sensitive') ? 'sensitive' : 'normal',
+      sourceEventId: eligibleEvents[0]?.id,
     })
     if (op === 'add' || op === 'update') added++
   }
 
   // 标记已总结
-  for (const ev of recentEvents) {
+  for (const ev of eligibleEvents) {
     db.update(events)
       .set({ summaryStatus: 'summarized' })
       .where(eq(events.id, ev.id))

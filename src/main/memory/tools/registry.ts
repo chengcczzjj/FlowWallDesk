@@ -17,6 +17,14 @@ import { systemInfoTool } from './definitions/system-info'
 import { memoryStoreTool, memoryRecallTool } from './definitions/memory-tools'
 import { weatherTool } from './definitions/weather'
 import { newsTool } from './definitions/news'
+import { addWidgetTool, createGeneratedWidgetTool, listWidgetsTool, removeWidgetTool, updateWidgetConfigTool } from './definitions/widgets'
+import {
+  desktopSceneApplyTool,
+  desktopSceneGetTool,
+  desktopScenePreviewTool,
+  desktopSceneRollbackTool,
+  widgetCapabilityListTool,
+} from './definitions/desktop-scene'
 import { createWorkspaceFileTools, type WorkspaceToolContext } from './definitions/workspace-files'
 import { createCheckpointTools } from './definitions/checkpoints'
 import { createWorkspaceWriteTools } from './definitions/workspace-writes'
@@ -24,6 +32,7 @@ import { createArtifactTools } from './definitions/artifacts'
 import { createVerificationTools } from './definitions/verification'
 import { createCommandTools } from './definitions/commands'
 import { createDocumentTools } from './definitions/documents'
+import type { RegisteredToolName } from '@shared/tool-manifest'
 
 /** Tool 调用事件（用于 UI 反馈） */
 export interface ToolCallEvent {
@@ -40,8 +49,8 @@ export interface ToolCallEvent {
  * 获取完整工具集
  * 所有工具都使用 AI SDK tool() 定义，可直接传入 streamText/generateText
  */
-export function getToolSet(context: WorkspaceToolContext = {}) {
-  return {
+export function getToolSet(context: WorkspaceToolContext = {}, selectedToolNames?: readonly string[]) {
+  const allTools = {
     get_current_time: currentTimeTool,
     get_user_location: userLocationTool,
     calculator: calculatorTool,
@@ -54,6 +63,16 @@ export function getToolSet(context: WorkspaceToolContext = {}) {
     memory_recall: memoryRecallTool,
     weather: weatherTool,
     news: newsTool,
+    list_widgets: listWidgetsTool,
+    add_widget: addWidgetTool,
+    update_widget_config: updateWidgetConfigTool,
+    remove_widget: removeWidgetTool,
+    create_generated_widget: createGeneratedWidgetTool,
+    widget_capability_list: widgetCapabilityListTool,
+    desktop_scene_get: desktopSceneGetTool,
+    desktop_scene_preview: desktopScenePreviewTool,
+    desktop_scene_apply: desktopSceneApplyTool,
+    desktop_scene_rollback: desktopSceneRollbackTool,
     ...createWorkspaceFileTools(context),
     ...createCheckpointTools(context),
     ...createWorkspaceWriteTools(context),
@@ -61,5 +80,12 @@ export function getToolSet(context: WorkspaceToolContext = {}) {
     ...createVerificationTools(context),
     ...createCommandTools(context),
     ...createDocumentTools(context),
-  }
+  } satisfies Record<RegisteredToolName, unknown>
+
+  if (!selectedToolNames) return allTools
+
+  const selected = new Set(selectedToolNames)
+  return Object.fromEntries(
+    Object.entries(allTools).filter(([name]) => selected.has(name))
+  ) as typeof allTools
 }

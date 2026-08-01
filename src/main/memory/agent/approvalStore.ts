@@ -1,9 +1,10 @@
 import { ulid } from 'ulidx'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { getDb } from '../db/client'
 import { approvals } from '../db/schema'
 import { AgentRunStore } from './agentRunStore'
 import type { AgentApproval, AgentApprovalDecision, AgentApprovalRiskLevel, AgentApprovalStatus, AgentRun } from '@shared/types'
+import { approvalMatchesRequest } from '@shared/approval-scope'
 
 interface ApprovalRow {
   id: string
@@ -22,6 +23,7 @@ interface ApprovalRow {
   decision: AgentApprovalDecision | string | null
   createdAt: number
   resolvedAt: number | null
+  consumedAt: number | null
 }
 
 function parseJson<T>(value: string | null, fallback: T): T {
@@ -92,6 +94,7 @@ export const ApprovalStore = {
       decision: null,
       createdAt: now,
       resolvedAt: null,
+      consumedAt: null,
     }
     db.insert(approvals).values(row).run()
     const approval = toApproval(row)
@@ -135,13 +138,14 @@ export const ApprovalStore = {
   hasApprovedAccess(params: { approvalId?: string; workspaceId?: string | null; toolName: string; action: string; affectedPaths?: string[]; command?: string }): boolean {
     if (params.approvalId) {
       const approval = this.get(params.approvalId)
-      if (
-        approval?.status === 'approved' &&
-        (!params.workspaceId || approval.workspaceId === params.workspaceId) &&
-        (approval.toolName === params.toolName || approval.action === params.action) &&
-        (!params.command || approval.command === params.command) &&
-        (!params.affectedPaths?.length || params.affectedPaths.every((item) => approval.affectedPaths.includes(item)))
-      ) return true
+      if (approval?.status === 'approved' && approvalMatchesRequest(approval, params)) {
+        if (approval.decision !== 'allow-once') return true
+        const consumed = getDb().update(approvals)
+          .set({ consumedAt: Date.now() })
+          .where(and(eq(approvals.id, approval.id), isNull(approvals.consumedAt)))
+          .run()
+        return consumed.changes === 1
+      }
     }
     if (!params.workspaceId) return false
     const db = getDb()
@@ -151,7 +155,7 @@ export const ApprovalStore = {
       .some((approval) =>
         approval.status === 'approved' &&
         approval.decision === 'allow-workspace' &&
-        (approval.toolName === params.toolName || approval.action === params.action)
+        approvalMatchesRequest(approval, params)
       )
   },
 }

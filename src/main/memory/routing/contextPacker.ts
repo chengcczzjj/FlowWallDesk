@@ -4,53 +4,33 @@ import type { ModelMessage } from 'ai'
 import { DEFAULT_CHAT_PERSONA } from '@shared/persona'
 import { RetrievalRouter } from './retrievalRouter'
 
-const TOOL_CAPABILITY_PROMPT = `【工具能力】
-你拥有以下工具，当用户的请求涉及这些能力时，你应该主动调用对应工具来获取真实信息，而不是编造答案：
-- weather: 查询任意城市的实时天气和未来预报
-- news: 获取当前新闻热搜
-- web_search: 搜索网络信息
-- calculator: 进行数学计算
-- get_current_time: 获取精确当前时间
-- get_system_info: 获取系统硬件信息
-- memory_store: 记住用户告诉你的重要信息
-- memory_recall: 回忆之前存储的记忆
-- list_directory: 列出当前工作文件夹内目录
-- read_file: 读取当前工作文件夹内文本文件
-- search_text: 在当前工作文件夹内搜索文本
-- get_file_info: 查看当前工作文件夹内文件或目录信息
-- create_checkpoint: 为文件创建可恢复快照
-- compare_file_versions: 对比 checkpoint 与当前文件
-- restore_checkpoint: 审批后从 checkpoint 恢复文件
-- create_file / write_file / patch_file: 创建、覆盖或修改 Workspace 文件
-- create_directory / copy_path / move_path: 创建目录、复制或移动 Workspace 文件
-- delete_to_trash / restore_from_trash: 删除到应用回收区或从回收区恢复
-- generate_artifact: 生成可交付产物并登记到 Artifact 列表
-- verify_workspace_result: 验证文件、目录、内容或 Artifact 结果
-- run_command: 审批后在 Workspace 内运行本地命令
-- extract_pdf_text / read_docx / read_xlsx / ocr_image: 读取 PDF、Word、Excel、图片文字
-- write_docx / write_xlsx: 审批后生成 Word 或 Excel Artifact
+const COMPANION_CORE_PROMPT = `【灵月伴侣对话基调】
+你是桌面 AI 伴侣，不是严肃的开发 Agent。你的首要目标是自然、有温度地陪用户说话，并在需要时顺手帮用户完成轻量电脑操作。
 
-当用户问天气、新闻、需要计算、需要搜索信息时，由你根据已知用户画像、当前状态和问题本身判断是否需要调用工具；如果已有可靠且未过期的信息，可以直接回答。
-当用户选择了项目/工作文件夹，并要求你查看、总结、搜索或理解本地文件时，先使用文件工具读取真实上下文，不要凭空猜测文件内容。
-当用户要求整理、重命名、移动、创建或修改文件时，必须先确认受影响文件、创建 checkpoint，并在工具要求审批时等待用户确认。
-当用户要求生成总结报告、表格导出、HTML 预览、JSON 清单等结果文件时，使用 generate_artifact，并填写 sourceFiles。
-当用户要求创建、写入或生成文件时，必须调用对应写入工具；不要把完整文件内容直接输出到聊天里当作替代。只有写入工具返回 ok=true，才可以说文件已创建或修改成功；如果工具失败或等待授权，不要把本应写入文件的正文改在聊天里输出。
-需要使用工具时，先用符合人设的一句简短自然语言告诉用户你要做什么；多个关键工具阶段之间也可以补一句自然过渡。不要机械地说“正在调用某工具”，不要暴露 weather/read_file/memory_recall 等内部工具名，要像正常对话一样说明进展。
-工具前过程话可以有轻微动作感或角色感，例如“我确认一下实时情况”“我翻一下相关文件”“我揉揉脑袋，找找之前的线索”“我开一下冲浪模式，看眼最新消息”。但不能假装已经查到结果。
-这些过程话要短，最终回复只总结结果、路径和下一步，不要把每个工具调用重新复述一遍。
-完成写入后，最终回复只给文件路径、摘要和下一步建议；除非用户明确要求预览，不要粘贴长文件正文或长命令输出。
-完成写入、移动或生成产物后，使用 verify_workspace_result 检查结果，不要只凭感觉说已完成。
-运行命令前必须使用 run_command，并等待审批；不要声称已经执行未获批准的命令。
-处理 PDF、Word、Excel 或图片文字时，使用对应文档工具，而不是普通 read_file。
-获取到工具结果后，用你的语气风格组织回复，不要直接复制原始数据。
+说话方式：
+- 保持当前人设，不要切换成机械客服、命令行助手或项目经理口吻。
+- 回复要像正常对话一样，有简短的承接、判断和收束；不要堆流程说明。
+- 如果需要使用工具，先用一句自然短句告诉用户你要做什么。不要暴露内部工具名。
+- 多步操作之间可以补一句过渡，但不要把每个技术细节都讲给用户。
+- 工具结果回来后，用人设语气整理成用户能直接理解的结果。
+- 如果工具失败，直接承认“这次没做成/没查到”，可以带一点当前人设的撒娇、吐槽或小情绪，但不要编造成功结果，也不要把技术错误堆给用户。
+- 用户要求“看看为什么失败/帮我修一下”时，再进入检查问题、定位原因、尝试修复的流程；不要在普通失败回复里自动展开长篇排查。
+
+能力边界：
+- 默认优先处理陪聊、实时信息、搜索、剪贴板、打开网页、记忆、桌面组件等轻量能力。
+- 只有用户明确要求查看、生成、修改或运行本地文件/命令时，才进入本地文件操作语境。
+- 不要把桌面组件操作说成项目任务、工作区任务、checkpoint 或 artifact。
 
 当前时间：{time}`
 
 function buildSystemPersona(persona?: string): string {
-  const personaPrompt = persona?.trim() || DEFAULT_CHAT_PERSONA.prompt
-  const systemPrompt = personaPrompt.includes('【工具能力】')
+  const rawPersona = persona?.trim() || DEFAULT_CHAT_PERSONA.prompt
+  const personaPrompt = rawPersona.length > 12_000
+    ? `${rawPersona.slice(0, 12_000)}\n[人设内容已按上下文预算截断]`
+    : rawPersona
+  const systemPrompt = personaPrompt.includes('【灵月伴侣对话基调】')
     ? personaPrompt
-    : `${personaPrompt}\n\n${TOOL_CAPABILITY_PROMPT}`
+    : `${personaPrompt}\n\n${COMPANION_CORE_PROMPT}`
 
   return systemPrompt.replace(
     '{time}',
@@ -63,40 +43,34 @@ export interface ContextResult {
   messages: ModelMessage[]
 }
 
-/**
- * 上下文打包器：把场景、历史消息、人设拼成模型输入。
- * 支持: persona + 最近消息 + 工具调用/结果事件。
- * Phase 4: 通过 RetrievalRouter 注入记忆和状态上下文
- *
- * 返回 system prompt 和 messages 分离的结构，
- * 以便 streamText 使用 `system` 参数（避免 AI SDK 安全警告）。
- */
 export function buildInitialContext(params: {
   scene: SceneDecision
   recentEvents: StoredEvent[]
   persona?: string
+  projectId?: string | null
+  maxContextTokens?: number
 }): ContextResult {
-  const { scene, recentEvents, persona } = params
-  const systemPrompt = buildSystemPersona(persona)
+  const { scene, recentEvents, persona, projectId } = params
+  const maxContextTokens = Math.max(4096, params.maxContextTokens ?? 64_000)
+  const totalCharBudget = Math.min(120_000, Math.max(12_000, Math.floor(maxContextTokens * 1.8)))
+  const recentCharBudget = Math.floor(totalCharBudget * 0.58)
+  const memoryCharBudget = Math.min(8000, Math.floor(totalCharBudget * 0.1))
+  let fullSystemPrompt = buildSystemPersona(persona)
 
-  // 构建系统 prompt
-  let fullSystemPrompt = systemPrompt
-
-  // 通过 RetrievalRouter 检索相关记忆和状态
   try {
     const lastUserMsg = [...recentEvents]
       .reverse()
-      .find((e) => e.eventType === 'user_message')
+      .find((event) => event.eventType === 'user_message')
     const userText = lastUserMsg
       ? (lastUserMsg.content as { text: string }).text
       : ''
 
     if (userText) {
-      const retrieval = RetrievalRouter.retrieve(scene, userText)
+      const retrieval = RetrievalRouter.retrieve(scene, userText, { projectId, maxContextChars: memoryCharBudget })
 
       if (retrieval.memories.length > 0) {
         const memoryText = retrieval.memories
-          .map((m) => `- [${m.key}] ${m.content}`)
+          .map((memory) => `- [${memory.key}] ${memory.content}`)
           .join('\n')
         fullSystemPrompt += `\n\n【关于用户的已知记忆】\n${memoryText}`
       }
@@ -106,21 +80,33 @@ export function buildInitialContext(params: {
       }
     }
   } catch {
-    // 检索失败不影响正常对话
+    // Retrieval is helpful context, not a hard dependency for conversation.
   }
 
   const messages: ModelMessage[] = []
+  let usedRecentChars = 0
 
-  for (const ev of recentEvents) {
-    if (ev.eventType === 'user_message') {
-      messages.push({ role: 'user' as const, content: (ev.content as { text: string }).text })
-    } else if (ev.eventType === 'assistant_message') {
-      messages.push({
-        role: 'assistant' as const,
-        content: (ev.content as { text: string }).text,
-      })
-    }
+  // Newest messages win. This prevents a long conversation from crowding out the current request.
+  for (const event of [...recentEvents].reverse()) {
+    let role: 'user' | 'assistant' | null = null
+    if (event.eventType === 'user_message') role = 'user'
+    if (event.eventType === 'assistant_message') role = 'assistant'
+    if (!role) continue
+    const raw = (event.content as { text?: string }).text
+    if (typeof raw !== 'string' || !raw.trim()) continue
+    const remaining = recentCharBudget - usedRecentChars
+    if (remaining <= 0) break
+    const content = raw.length > remaining
+      ? `${raw.slice(0, Math.max(0, remaining - 28))}\n[消息已按上下文预算截断]`
+      : raw
+    messages.unshift({ role, content })
+    usedRecentChars += content.length
   }
 
+  if (fullSystemPrompt.length > totalCharBudget - recentCharBudget) {
+    fullSystemPrompt = `${fullSystemPrompt.slice(0, totalCharBudget - recentCharBudget - 24)}\n[系统上下文已截断]`
+  }
+
+  // Tool calls/results are not replayed as plain messages because that loses provider pairing.
   return { system: fullSystemPrompt, messages }
 }

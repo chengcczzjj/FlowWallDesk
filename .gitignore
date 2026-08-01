@@ -1,9 +1,11 @@
 node_modules
 dist
 out
+.venv/
 release
 .DS_Store
 *.log*
 temp
 .env
 .env.local
+*.tsbuildinfo

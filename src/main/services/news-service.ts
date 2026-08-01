@@ -22,12 +22,14 @@ export const NEWS_SOURCES: Record<string, { name: string }> = {
 
 interface CachedResult {
   data: NewsItem[]
-  source: string
   timestamp: number
 }
 
-let cache: CachedResult | null = null
+const cache = new Map<string, CachedResult>()
+const inFlight = new Map<string, Promise<NewsItem[]>>()
 const CACHE_TTL = 60_000 // 缓存 1 分钟
+const REQUEST_TIMEOUT_MS = 10_000
+const UPSTREAM_ITEM_LIMIT = 30
 
 /** 调用统计 */
 export const newsUsage = { fetchCount: 0, lastFetchTime: null as number | null, errorCount: 0 }
@@ -39,6 +41,7 @@ async function fetchWeibo(maxItems: number): Promise<NewsItem[]> {
   const res = await net.fetch('https://weibo.com/ajax/side/hotSearch', {
     method: 'GET',
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const json = (await res.json()) as {
@@ -59,7 +62,7 @@ async function fetchWeibo(maxItems: number): Promise<NewsItem[]> {
  */
 async function fetchCodelife(source: string, maxItems: number): Promise<NewsItem[]> {
   const url = `https://api.codelife.cc/api/top/list?lang=cn&id=${source}`
-  const res = await net.fetch(url, { method: 'GET' })
+  const res = await net.fetch(url, { method: 'GET', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const json = (await res.json()) as {
     code?: number
@@ -80,31 +83,37 @@ async function fetchCodelife(source: string, maxItems: number): Promise<NewsItem
  * @param maxItems 返回条数上限
  */
 export async function fetchNews(source: string, maxItems: number): Promise<NewsItem[]> {
+  const limit = Math.max(1, Math.min(UPSTREAM_ITEM_LIMIT, Math.round(maxItems || 5)))
+  if (!NEWS_SOURCES[source]) return []
+  const cached = cache.get(source)
   // 命中缓存
-  if (cache && cache.source === source && Date.now() - cache.timestamp < CACHE_TTL) {
-    return cache.data.slice(0, maxItems)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data.slice(0, limit)
   }
 
-  if (!NEWS_SOURCES[source]) return []
+  const pending = inFlight.get(source)
+  if (pending) return (await pending).slice(0, limit)
 
-  try {
+  const request = (async () => {
     let items: NewsItem[]
 
     if (source === 'weibo') {
-      items = await fetchWeibo(maxItems)
+      items = await fetchWeibo(UPSTREAM_ITEM_LIMIT)
     } else {
-      items = await fetchCodelife(source, maxItems)
+      items = await fetchCodelife(source, UPSTREAM_ITEM_LIMIT)
     }
 
-    cache = { data: items, source, timestamp: Date.now() }
+    cache.set(source, { data: items, timestamp: Date.now() })
     newsUsage.fetchCount++
     newsUsage.lastFetchTime = Date.now()
-    return items.slice(0, maxItems)
-  } catch (err) {
+    return items
+  })().catch((err) => {
     newsUsage.errorCount++
     console.error('[NewsService] fetch failed:', err)
-    // 返回过期缓存兜底
-    if (cache?.source === source) return cache.data.slice(0, maxItems)
+    if (cached) return cached.data
     return []
-  }
+  }).finally(() => inFlight.delete(source))
+
+  inFlight.set(source, request)
+  return (await request).slice(0, limit)
 }

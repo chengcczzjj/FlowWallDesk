@@ -1,97 +1,159 @@
 import type { ChatProject } from '@shared/types'
+import {
+  TOOL_MANIFEST,
+  getToolNamesByCategory,
+  type RegisteredToolName,
+} from '@shared/tool-manifest'
 
-export const REGISTERED_TOOL_NAMES = [
-  'get_current_time',
-  'get_user_location',
-  'calculator',
-  'web_search',
-  'read_clipboard',
-  'write_clipboard',
-  'open_url',
-  'get_system_info',
-  'memory_store',
-  'memory_recall',
-  'weather',
-  'news',
-  'list_directory',
-  'read_file',
-  'search_text',
-  'get_file_info',
-  'create_checkpoint',
-  'restore_checkpoint',
-  'compare_file_versions',
-  'create_file',
-  'patch_file',
-  'write_file',
-  'create_directory',
-  'copy_path',
-  'move_path',
-  'delete_to_trash',
-  'restore_from_trash',
-  'generate_artifact',
-  'verify_workspace_result',
-  'run_command',
-  'extract_pdf_text',
-  'read_docx',
-  'write_docx',
-  'read_xlsx',
-  'write_xlsx',
-  'ocr_image',
-] as const
+export const REGISTERED_TOOL_NAMES = TOOL_MANIFEST.map((entry) => entry.name)
+export type { RegisteredToolName } from '@shared/tool-manifest'
 
-export type RegisteredToolName = typeof REGISTERED_TOOL_NAMES[number]
+const BASE_COMPANION_TOOL_NAMES = [
+  ...getToolNamesByCategory('companion'),
+  ...getToolNamesByCategory('memory'),
+] satisfies readonly RegisteredToolName[]
+
+const WIDGET_TOOL_NAMES = getToolNamesByCategory('widget')
+
+const DESKTOP_SCENE_TOOL_NAMES = getToolNamesByCategory('desktop-scene')
+
+const WORKSPACE_READ_TOOL_NAMES = getToolNamesByCategory('workspace-read')
+
+const WORKSPACE_WRITE_TOOL_NAMES = getToolNamesByCategory('workspace-write')
+
+const DOCUMENT_TOOL_NAMES = getToolNamesByCategory('document')
+
+const COMMAND_TOOL_NAMES = getToolNamesByCategory('command')
+
+export const AGENT_RUN_TOOL_NAMES = TOOL_MANIFEST
+  .filter((entry) => entry.tracksAgentRun)
+  .map((entry) => entry.name)
+
+export interface ToolRouteDecision {
+  toolNames: RegisteredToolName[]
+  usesWidgets: boolean
+  usesDesktopScene: boolean
+  usesWorkspaceRead: boolean
+  usesWorkspaceWrite: boolean
+  usesDocuments: boolean
+  usesCommand: boolean
+}
 
 export function isRegisteredToolName(name: string): name is RegisteredToolName {
   return (REGISTERED_TOOL_NAMES as readonly string[]).includes(name)
 }
 
-export function buildToolRouterPrompt(params: { workspace?: ChatProject | null }): string {
+function includesAny(text: string, pattern: RegExp): boolean {
+  pattern.lastIndex = 0
+  return pattern.test(text)
+}
+
+function isWidgetIntent(text: string): boolean {
+  return includesAny(text, /组件|小组件|挂件|桌面组件|桌面文字|便签|贴纸|天气卡片|天气组件|日历组件|时钟组件|白噪音|快捷工具|桌宠|萌宠|清单|倒计时|进度卡|目标卡|信息卡|仪表盘|放到桌面|加到桌面|摆到桌面|调整.*桌面|改.*组件/i)
+}
+
+function isDesktopSceneIntent(text: string): boolean {
+  return includesAny(text, /布置桌面|整理桌面|美化桌面|桌面编排|桌面方案|桌面布局|场景模式|专注模式|极简模式|音乐氛围|音乐模式|夜间模式|休息模式|工作模式|资讯模式|看盘模式|桌面.*好看|壁纸.*组件|不要挡住|不挡壁纸|应用.*草案|应用.*方案|确认应用|就按这个|就这样|回滚.*桌面|撤回.*桌面|恢复.*布局|还原.*桌面/i)
+}
+
+function isDocumentIntent(text: string): boolean {
+  return includesAny(text, /pdf|docx|xlsx|excel|word|表格|文档|OCR|图片文字|识别图片/i)
+}
+
+function isCommandIntent(text: string): boolean {
+  return includesAny(text, /运行|执行|命令|脚本|测试|构建|启动|npm|pnpm|yarn|python|node|typecheck|lint|build/i)
+}
+
+function isProblemInspectionIntent(text: string): boolean {
+  return includesAny(text, /(检查|定位|排查|看看|查一下).*(工具|问题|失败|报错|错误|bug|为什么)|为什么.*(失败|报错|错误)|调试|修复|修一下|改一下/i)
+}
+
+function isWorkspaceWriteIntent(text: string): boolean {
+  if (isWidgetIntent(text)) return false
+  return includesAny(text, /创建文件|新建文件|写入|写到|保存到|存成|导出|输出到|修改文件|改写|替换|删除|移动|重命名|整理文件|归类文件|生成报告|生成文档|生成表格|生成HTML|生成JSON|修复|修一下|改一下/i)
+}
+
+function isWorkspaceReadIntent(text: string): boolean {
+  if (isWidgetIntent(text)) return false
+  return includesAny(text, /文件|文件夹|目录|项目|代码|工具|读取|查看|查找|搜索|分析|总结|检查|定位|排查|失败|报错|错误|bug|pdf|docx|xlsx|excel|word/i)
+}
+
+function addTools(target: Set<RegisteredToolName>, names: readonly RegisteredToolName[]): void {
+  for (const name of names) target.add(name)
+}
+
+export function decideToolRoute(params: { text: string; workspace?: ChatProject | null }): ToolRouteDecision {
+  const text = params.text ?? ''
   const hasWorkspace = Boolean(params.workspace?.rootPath ?? params.workspace?.path)
-  const workspaceName = params.workspace?.displayName ?? params.workspace?.name ?? '未选择'
-  const permissionProfile = params.workspace?.permissionProfile ?? 'ask-before-editing'
-  const permissionText = permissionProfile === 'workspace-write'
-    ? '工作区写入：普通创建、修改、移动和产物生成可直接执行；删除和命令仍可能需要确认。'
-    : permissionProfile === 'full-access'
-      ? '完整访问：多数文件操作可直接执行；命令仍可能需要确认。'
-      : permissionProfile === 'read-only'
-        ? '只读：不要尝试写入文件。'
-        : '自动审查：写入或高风险操作可能需要确认。'
+  const usesDesktopScene = isDesktopSceneIntent(text)
+  const usesWidgets = isWidgetIntent(text) || usesDesktopScene
+  const usesDocuments = isDocumentIntent(text)
+  const usesProblemInspection = isProblemInspectionIntent(text)
+  const usesCommand = isCommandIntent(text) && hasWorkspace
+  const usesWorkspaceWrite = (isWorkspaceWriteIntent(text) || /修复|修一下|改一下|调试/.test(text)) && hasWorkspace
+  const usesWorkspaceRead = (isWorkspaceReadIntent(text) || usesProblemInspection || usesWorkspaceWrite || usesCommand || usesDocuments) && hasWorkspace
 
-  return `【Tool Router 规则】
-你只能通过已注册工具完成真实操作，不能声称自己调用了不存在的工具。
+  const selected = new Set<RegisteredToolName>()
+  addTools(selected, BASE_COMPANION_TOOL_NAMES)
 
-已注册工具：
-- 时间/位置/计算/联网：get_current_time, get_user_location, calculator, weather, news, web_search, open_url
-- 系统和剪贴板：get_system_info, read_clipboard, write_clipboard
-- 记忆：memory_store, memory_recall
-- Workspace 只读文件：list_directory, read_file, search_text, get_file_info
-- Checkpoint：create_checkpoint, restore_checkpoint, compare_file_versions
-- Workspace 写入变更：create_file, patch_file, write_file, create_directory, copy_path, move_path, delete_to_trash, restore_from_trash
-- Artifact：generate_artifact
-- Verification：verify_workspace_result
-- Command：run_command
-- 文档表格图片：extract_pdf_text, read_docx, write_docx, read_xlsx, write_xlsx, ocr_image
+  if (usesWidgets) addTools(selected, WIDGET_TOOL_NAMES)
+  if (usesDesktopScene) addTools(selected, DESKTOP_SCENE_TOOL_NAMES)
+  if (usesWorkspaceRead) addTools(selected, WORKSPACE_READ_TOOL_NAMES)
+  if (usesWorkspaceWrite) addTools(selected, WORKSPACE_WRITE_TOOL_NAMES)
+  if (usesDocuments) addTools(selected, DOCUMENT_TOOL_NAMES)
+  if (usesCommand) addTools(selected, COMMAND_TOOL_NAMES)
 
-路径规则：
-- 当前 Workspace：${workspaceName}
-- Workspace 状态：${hasWorkspace ? '已选择，可以使用只读文件工具' : '未选择，不能读取本地项目文件'}
-- 当前权限：${permissionText}
-- 文件工具只接受 Workspace 相对路径；不要传入外部绝对路径。
-- 读取文件前优先用 list_directory 或 search_text 定位候选文件。
-- 读取敏感文件、Workspace 外路径或符号链接跳出路径会被 Permission Engine 阻止。
+  return {
+    toolNames: [...selected],
+    usesWidgets,
+    usesDesktopScene,
+    usesWorkspaceRead,
+    usesWorkspaceWrite,
+    usesDocuments,
+    usesCommand,
+  }
+}
 
-能力边界：
-- 当前已实现只读文件工具、checkpoint 工具和审批保护的 Workspace 写入工具。
-- 用户询问天气、本地时间、附近信息等位置相关问题但没有指定城市时，先使用 get_user_location 获取位置，不要反复询问用户位置；该工具默认使用 IP 城市级粗略位置，只有用户在设置中开启精准定位授权且实际获取设备坐标成功后，才会尝试设备/系统 Geolocation。
-- 使用工具前后可以输出一句符合人设的简短过程话，让用户知道你在做什么；这些话会被 UI 折叠进过程区，最终回复不要重复这些过程。
-- 当用户要求生成报告、汇总文档、CSV、HTML、JSON 等可交付结果时，优先使用 generate_artifact，而不是普通 write_file。
-- 完成创建、修改、移动或生成产物后，使用 verify_workspace_result 验证结果，再总结。
-- 用户要求创建、写入或生成文件时，必须调用 create_file、write_file、write_docx、write_xlsx 或 generate_artifact；不要把完整文件内容直接输出到聊天里当作替代。
-- 写入型工具返回 ok=true 才代表文件真的创建或修改成功；如果 ok=false、approvalRequired 或没有工具结果，不要声称文件已经创建，也不要把本应写入文件的正文改在聊天里输出。
-- 最终回复只给文件路径、摘要和下一步建议；除非用户明确要求预览，不要粘贴长文件正文或长命令输出。
-- 写入、移动、删除文件前必须先使用 create_checkpoint 保护受影响文件。
-- 写入、删除、移动等工具只有在返回 approvalRequired 时才等待用户批准；如果工具直接返回 ok=true，就继续完成任务。
-- 删除只能使用 delete_to_trash，不能永久删除。
-- run_command 只能在当前 Workspace 内运行直接命令和参数；如果返回 approvalRequired，必须等待用户批准。不要使用 shell 管道、重定向或内联脚本。
-- 处理 PDF/DOCX/XLSX/图片文字时使用对应文档工具；写 DOCX/XLSX 会登记 Artifact 并需要审批。`
+function toolList(names: readonly string[]): string {
+  return names.map((name) => `- ${name}`).join('\n')
+}
+
+export function buildToolRouterPrompt(params: { workspace?: ChatProject | null; route: ToolRouteDecision }): string {
+  const { workspace, route } = params
+  const rootPath = workspace?.rootPath ?? workspace?.path
+  const workspaceName = workspace?.displayName ?? workspace?.name ?? '未选择'
+  const blocks: string[] = [
+    `【本轮可用能力】\n你可以在需要真实信息或真实操作时使用工具。不要暴露内部工具名；对用户只说自然的进展，比如“我看一下”“我帮你放上去”“我翻一下相关文件”。\n\n当前启用的工具：\n${toolList(route.toolNames)}`,
+    `【轻量电脑操作】\n天气、新闻、搜索、时间、计算、位置、剪贴板、打开网页、系统信息和记忆属于日常辅助能力。能直接回答就直接回答；涉及实时信息或真实系统状态时再使用工具。工具前后尽量用一句短的、符合人设的话过渡。`,
+  ]
+
+  if (route.usesWidgets) {
+    blocks.push(`【桌面组件操作】\n用户要求添加、查看、调整或移除桌面组件时，优先使用组件工具完成真实操作。组件操作是轻量桌面陪伴能力，不要把它说成文件任务、项目任务或工作区任务。\n内置组件类型包括：clock、elegantclock、pixelclock、graphicdatetime、audio、weather、whitenoise、text、stocks、news、calendar、quicktools、pet、sysmonitor、desktop-icons-box、desktop-icons-horizontal、desktop-icons-adaptive、desktop-icons-dock。\n如果用户描述的是便签、天气、日历等现成能力，优先使用内置组件；如果用户希望制作个性化清单、进度、倒计时、组合信息卡或明确说“帮我生成一个组件”，调用 create_generated_widget，直接生成安全声明式组件并放到桌面。`)
+  }
+
+  if (route.usesDesktopScene) {
+    blocks.push(`【AI 桌面编排】\n用户要求“布置桌面、极简模式、夜间专注、音乐氛围、桌面更好看、不挡壁纸”等整桌调整时，先读取当前桌面和组件能力，再用只读预览生成确定性布局和美学检查结果，然后给出场景草案。桌面编排的第一原则是美观和克制：保留 Dock，不清空图标，不默认删除组件，不默认铺满新闻/股票/系统监控；默认最多一个主视觉组件和两三个轻组件。只有在用户明确确认“应用/就按这个/确认应用”后，才调用桌面编排应用工具；应用前会自动创建快照，用户不喜欢时用回滚工具恢复。用户只是要单个轻组件时，可用普通组件工具完成。`)
+  }
+
+  if (route.usesWorkspaceRead || route.usesWorkspaceWrite || route.usesDocuments || route.usesCommand) {
+    blocks.push(`【当前本地文件夹】\n名称：${workspaceName}\n路径：${rootPath ?? '未选择'}\n只有用户明确要求你查看、分析、整理、生成或修改本地文件时，才使用本地文件相关工具。文件工具只能接收当前文件夹内的相对路径。`)
+  }
+
+  if (route.usesWorkspaceRead) {
+    blocks.push(`【读取本地文件】\n查看、总结、搜索、理解本地文件，或用户要求检查工具失败/报错原因时，先用 list_directory、search_text、read_file 或 get_file_info 获取真实上下文，不要凭空猜测文件内容。`)
+  }
+
+  if (route.usesWorkspaceWrite) {
+    blocks.push(`【修改本地文件】\n创建、修改、移动、删除、生成本地文件，或用户明确要求修复问题时，必须通过写入工具完成；工具返回 ok=true 才能说已经完成。涉及已有文件变更时，按工具要求创建 checkpoint 和等待确认。完成后用 verify_workspace_result 检查结果。`)
+  }
+
+  if (route.usesDocuments) {
+    blocks.push(`【文档/表格/图片文字】\n处理 PDF、Word、Excel 或图片文字时，使用对应文档工具。生成 DOCX/XLSX 时只在用户明确要文件结果时使用。`)
+  }
+
+  if (route.usesCommand) {
+    blocks.push(`【运行命令】\n只有用户明确要求运行命令、脚本、测试或构建时才使用 run_command。不要声称已经执行未获批准或未返回结果的命令。`)
+  }
+
+  return blocks.join('\n\n')
 }

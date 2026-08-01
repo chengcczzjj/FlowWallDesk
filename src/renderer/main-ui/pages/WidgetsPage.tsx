@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { WidgetInstance, StockSymbol } from '@shared/types'
+import { isGeneratedWidgetDefinition } from '@shared/generated-widget'
 import {
   Clock as ClockIcon,
   Calendar,
@@ -26,6 +27,7 @@ import {
   Archive,
   PanelBottom,
   Trash2,
+  Sparkles,
 } from 'lucide-react'
 import { getStylesForType } from '../../widgets/shared/constants'
 
@@ -204,6 +206,13 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
     refresh()
   }
 
+  const removeInstanceFromDesktop = async (id: string) => {
+    await window.lingyue.widget.remove(id)
+    refresh()
+  }
+
+  const generatedWidgets = instances.filter((instance) => instance.type === 'generated-widget')
+
   /** 从已有桌面实例加载配置到设置状态 */
   const loadConfigFromInstance = (type: string) => {
     const inst = instances.find((i) => i.type === type)
@@ -236,7 +245,7 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
   }
 
   /** 拉取新闻预览数据 */
-  const refreshNewsPreview = async () => {
+  const refreshNewsPreview = useCallback(async () => {
     setNewsLoading(true)
     try {
       const data = await window.lingyue.data.fetchNews(newsSource, newsMaxItems)
@@ -245,10 +254,10 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
       /* ignore */
     }
     setNewsLoading(false)
-  }
+  }, [newsMaxItems, newsSource])
 
   /** 拉取股票预览数据 */
-  const refreshStocksPreview = async () => {
+  const refreshStocksPreview = useCallback(async () => {
     setStocksLoading(true)
     try {
       const data = await window.lingyue.data.fetchStocks(stockSymbols)
@@ -257,15 +266,15 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
       /* ignore */
     }
     setStocksLoading(false)
-  }
+  }, [stockSymbols])
 
   // 初始加载预览数据
   useEffect(() => {
-    refreshNewsPreview()
-  }, [])
+    void refreshNewsPreview()
+  }, [refreshNewsPreview])
   useEffect(() => {
-    refreshStocksPreview()
-  }, [])
+    void refreshStocksPreview()
+  }, [refreshStocksPreview])
 
   return (
     <div className="widgets-page">
@@ -283,6 +292,69 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
                 />
               ))}
             </div>
+            <section style={{ marginTop: 28 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <Sparkles size={17} />
+                <strong style={{ fontSize: 14 }}>AI 生成的小组件</strong>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  在聊天中描述清单、倒计时、指标卡或组合信息即可直接生成
+                </span>
+              </div>
+              {generatedWidgets.length === 0 ? (
+                <div
+                  style={{
+                    padding: '20px 22px',
+                    border: '1px dashed var(--border-card)',
+                    borderRadius: 16,
+                    color: 'var(--text-secondary)',
+                    fontSize: 13,
+                  }}
+                >
+                  还没有 AI 小组件。试着在聊天里说“帮我做一个 30 天阅读计划组件并放到桌面”。
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+                  {generatedWidgets.map((instance) => {
+                    const definition = isGeneratedWidgetDefinition(instance.config?.definition)
+                      ? instance.config.definition
+                      : undefined
+                    return (
+                      <div
+                        key={instance.id}
+                        style={{
+                          minWidth: 0,
+                          padding: 16,
+                          border: '1px solid var(--border-card)',
+                          borderRadius: 16,
+                          background: 'rgba(255,255,255,0.42)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {definition?.title || 'AI 小组件'}
+                          </div>
+                          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {definition?.theme || 'glass'} · {definition?.blocks?.length ?? 0} 个内容块 · {instance.width}×{instance.height}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          title="从桌面移除"
+                          onClick={() => removeInstanceFromDesktop(instance.id)}
+                          style={iconManagerRemoveButtonStyle}
+                        >
+                          <Trash2 size={12} />
+                          <span>移除</span>
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
           </>
         )}
 

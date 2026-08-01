@@ -18,6 +18,7 @@
 import type { SceneDecision } from './sceneRouter'
 import { StateStore } from '../state/stateStore'
 import { MemoryStore, type MemoryRecord, type MemoryQueryOptions } from '../memories/memoryStore'
+import { filterScopes } from '../security/privacyGate'
 
 /** 检索计划 */
 export interface RetrievalPlan {
@@ -83,13 +84,13 @@ export const RetrievalRouter = {
   /**
    * 根据场景和用户输入规划检索策略
    */
-  plan(scene: SceneDecision, userText: string): RetrievalPlan {
+  plan(scene: SceneDecision, userText: string, options?: { projectId?: string | null; maxContextChars?: number }): RetrievalPlan {
     const keywords = extractKeywords(userText)
     const detectedDomains = detectDomains(userText)
 
     // 根据场景深度决定检索范围
     const deep = scene.depth === 'deep'
-    const maxContextChars = deep ? 3000 : 1500
+    const maxContextChars = Math.max(500, Math.min(options?.maxContextChars ?? (deep ? 3000 : 1500), 8000))
 
     const recallMemory = shouldRecallLongTermMemory(userText, scene)
 
@@ -99,8 +100,10 @@ export const RetrievalRouter = {
 
     // 构建记忆检索参数
     const memoryQuery: MemoryQueryOptions = {
-      scopes: scene.allowed,
+      scopes: filterScopes(scene.allowed, scene.scene),
       keywords: keywords.length > 0 ? keywords : undefined,
+      queryText: userText,
+      projectId: options?.projectId ?? null,
       limit: deep ? 8 : 4,
     }
 
@@ -135,6 +138,7 @@ export const RetrievalRouter = {
     }
 
     // 1. 状态检索
+    const stateBudget = Math.floor(plan.maxContextChars * 0.35)
     if (plan.sources.includes('state') && plan.stateDomains) {
       const stateEntries: string[] = []
       for (const domain of plan.stateDomains) {
@@ -142,7 +146,7 @@ export const RetrievalRouter = {
         for (const s of states.slice(0, 3)) {
           const val = typeof s.value === 'string' ? s.value : JSON.stringify(s.value)
           const entry = `[${s.key}] ${val}`
-          if (totalChars + entry.length < plan.maxContextChars) {
+          if (stateEntries.join('\n').length + entry.length < stateBudget) {
             stateEntries.push(entry)
             totalChars += entry.length
           }
@@ -176,8 +180,8 @@ export const RetrievalRouter = {
   /**
    * 一步到位：规划 + 执行
    */
-  retrieve(scene: SceneDecision, userText: string): RetrievalResult {
-    const plan = this.plan(scene, userText)
+  retrieve(scene: SceneDecision, userText: string, options?: { projectId?: string | null; maxContextChars?: number }): RetrievalResult {
+    const plan = this.plan(scene, userText, options)
     return this.execute(plan)
   },
 }

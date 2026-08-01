@@ -5,19 +5,20 @@ import {
 } from 'lucide-react'
 import React, { useEffect, useRef, useState } from 'react'
 import { COLOR_THEMES } from '../shared/constants'
+import { toRendererPublicUrl } from '@shared/asset-url'
 
 const SOUNDS = [
-  { id: 'rain', icon: <CloudRain size={16} />, label: 'Rain', url: 'audio/Water.WAV' },
-  { id: 'ocean', icon: <Waves size={16} />, label: 'Ocean Waves', url: 'audio/Wave.WAV' },
-  { id: 'waterfall', icon: <Waves size={16} className="rotate-90" />, label: 'Waterfall', url: 'audio/Waterfall.WAV' },
-  { id: 'forest', icon: <Trees size={16} />, label: 'Forest Birds', url: 'audio/Birdsong.WAV' },
-  { id: 'fire', icon: <Flame size={16} />, label: 'Fireplace', url: 'audio/Fireplace.WAV' },
-  { id: 'wind', icon: <Wind size={16} />, label: 'Wind', url: 'audio/Wind.WAV' },
-  { id: 'coffee', icon: <Coffee size={16} />, label: 'Coffee Shop', url: 'audio/CoffeeShop.WAV' },
-  { id: 'street', icon: <Car size={16} />, label: 'City Street', url: 'audio/Street.WAV' },
-  { id: 'fan', icon: <Fan size={16} />, label: 'Fan', url: 'audio/Fan.WAV' },
-  { id: 'white_noise', icon: <Activity size={16} />, label: 'White Noise', url: 'audio/WhiteNoise.WAV' },
-  { id: 'brown_noise', icon: <Disc size={16} />, label: 'Brown Noise', url: 'audio/BrownNoise.WAV' },
+  { id: 'rain', icon: <CloudRain size={16} />, label: 'Rain', url: toRendererPublicUrl('audio/Water.WAV') },
+  { id: 'ocean', icon: <Waves size={16} />, label: 'Ocean Waves', url: toRendererPublicUrl('audio/Wave.WAV') },
+  { id: 'waterfall', icon: <Waves size={16} className="rotate-90" />, label: 'Waterfall', url: toRendererPublicUrl('audio/Waterfall.WAV') },
+  { id: 'forest', icon: <Trees size={16} />, label: 'Forest Birds', url: toRendererPublicUrl('audio/Birdsong.WAV') },
+  { id: 'fire', icon: <Flame size={16} />, label: 'Fireplace', url: toRendererPublicUrl('audio/Fireplace.WAV') },
+  { id: 'wind', icon: <Wind size={16} />, label: 'Wind', url: toRendererPublicUrl('audio/Wind.WAV') },
+  { id: 'coffee', icon: <Coffee size={16} />, label: 'Coffee Shop', url: toRendererPublicUrl('audio/CoffeeShop.WAV') },
+  { id: 'street', icon: <Car size={16} />, label: 'City Street', url: toRendererPublicUrl('audio/Street.WAV') },
+  { id: 'fan', icon: <Fan size={16} />, label: 'Fan', url: toRendererPublicUrl('audio/Fan.WAV') },
+  { id: 'white_noise', icon: <Activity size={16} />, label: 'White Noise', url: toRendererPublicUrl('audio/WhiteNoise.WAV') },
+  { id: 'brown_noise', icon: <Disc size={16} />, label: 'Brown Noise', url: toRendererPublicUrl('audio/BrownNoise.WAV') },
 ]
 
 const VOLUMES = [0, 0.3, 0.6, 1]
@@ -45,7 +46,7 @@ export function WhiteNoiseWidget({ config }: WhiteNoiseWidgetProps) {
 
   useEffect(() => {
     if (volumeProp !== undefined && volumeProp !== volumeLevel) setVolumeLevel(volumeProp)
-  }, [volumeProp])
+  }, [volumeLevel, volumeProp])
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -56,7 +57,7 @@ export function WhiteNoiseWidget({ config }: WhiteNoiseWidgetProps) {
     const audio = audioRef.current
     if (!audio) return
     const sound = SOUNDS.find((s) => s.id === activeSound)
-    if (sound && audio.src !== globalThis.location.origin + '/' + sound.url) {
+    if (sound && audio.src !== sound.url) {
       const wasPlaying = !audio.paused
       audio.src = sound.url
       if (wasPlaying || isPlaying) audio.play().catch(() => {})

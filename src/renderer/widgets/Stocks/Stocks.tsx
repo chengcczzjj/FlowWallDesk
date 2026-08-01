@@ -37,7 +37,7 @@ export function StocksWidget({ config }: { config?: Record<string, unknown> }) {
       cancelled = true
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [JSON.stringify(symbols), refreshSec])
+  }, [symbols, refreshSec])
 
   const displayItems = items.slice(0, MAX_DISPLAY)
 

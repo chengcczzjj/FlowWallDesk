@@ -3,6 +3,7 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
+import { secureWindowNavigation } from './navigationSecurity'
 
 
 let koffi: any
@@ -168,6 +169,29 @@ function disableShowDesktopMinimize(win: BrowserWindow): void {
 let canvasWindow: BrowserWindow | null = null
 let isEditing = false
 let zOrderTimer: ReturnType<typeof setInterval> | null = null
+let boundsListenerRegistered = false
+
+function syncCanvasBoundsToPrimaryDisplay(): void {
+  const win = getCanvasWindow()
+  if (!win) return
+  const bounds = screen.getPrimaryDisplay().bounds
+  const current = win.getBounds()
+  if (
+    current.x === bounds.x && current.y === bounds.y &&
+    current.width === bounds.width && current.height === bounds.height
+  ) return
+  win.setBounds(bounds, false)
+  if (!isEditing) sendToBottom(win)
+}
+
+function registerCanvasDisplayListener(): void {
+  if (boundsListenerRegistered) return
+  boundsListenerRegistered = true
+  const sync = () => syncCanvasBoundsToPrimaryDisplay()
+  screen.on('display-metrics-changed', sync)
+  screen.on('display-added', sync)
+  screen.on('display-removed', sync)
+}
 
 /**
  * 组件画布窗口：全屏透明无边框。所有桌面组件在此一个窗口内渲染。
@@ -196,21 +220,29 @@ export function createCanvasWindow(): BrowserWindow {
     hasShadow: false,
     focusable: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/canvas.js'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: true,
       contextIsolation: true,
+      additionalArguments: ['--lingyue-window-role=canvas'],
       backgroundThrottling: false,
     },
   })
 
   canvasWindow.setMenu(null)
+  secureWindowNavigation(canvasWindow)
   canvasWindow.setIgnoreMouseEvents(true, { forward: true })
+  registerCanvasDisplayListener()
 
   // 允许画布窗口捕获系统音频（无需用户弹窗选择）
   canvasWindow.webContents.session.setDisplayMediaRequestHandler(
-    async (_request, callback) => {
+    async (request, callback) => {
+      if (!canvasWindow || request.frame !== canvasWindow.webContents.mainFrame) {
+        callback({})
+        return
+      }
       const sources = await desktopCapturer.getSources({ types: ['screen'] })
-      callback({ video: sources[0], audio: 'loopback' })
+      const source = sources[0]
+      callback(source ? { video: source, audio: 'loopback' } : {})
     }
   )
 

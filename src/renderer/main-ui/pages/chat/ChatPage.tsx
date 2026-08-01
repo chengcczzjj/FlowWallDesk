@@ -39,6 +39,7 @@ import {
   Maximize2,
 } from 'lucide-react'
 import type { AgentApproval, AgentApprovalDecision, AgentArtifact, AgentAutomation, AgentAutomationResult, AgentFileChange, AgentRun, ChatConversation, ChatMemory, ChatProject, WorkspacePermissionProfile } from '@shared/types'
+import { TOOL_MANIFEST, getToolManifest } from '@shared/tool-manifest'
 import { PixelPetCanvas } from '@renderer/shared/PixelPetCanvas'
 import {
   PIXEL_PET_CHANGE_EVENT,
@@ -291,6 +292,11 @@ function booleanValue(record: Record<string, unknown> | null, key: string): bool
   return typeof value === 'boolean' ? value : null
 }
 
+function numberValue(record: Record<string, unknown> | null, key: string): number | null {
+  const value = record?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 function stringArrayValue(record: Record<string, unknown> | null, key: string): string[] {
   const value = record?.[key]
   if (!Array.isArray(value)) return []
@@ -528,12 +534,22 @@ function toolPathFromCall(tc: ToolCallDisplay): string | null {
     ?? null
 }
 
+function toolErrorDetail(toolName: string, rawError?: string | null, message?: string | null): string {
+  if (toolName === 'weather') return message || '天气服务暂时没响应'
+  if (toolName === 'web_search' || toolName === 'news') return message || '联网信息暂时没拿到'
+  if (toolName === 'get_user_location') return message || '位置暂时没确认'
+  if (toolName.includes('widget') || toolName.includes('desktop_scene')) return message || '桌面编排没完成'
+  return message || (rawError ? '这一步没顺利完成' : '工具调用')
+}
+
 function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string; meta?: string; log?: string; path?: string; ok?: boolean | null } {
   const input = asRecord(tc.input)
   const output = asRecord(tc.output)
   const ok = booleanValue(output, 'ok')
   const pathValue = toolPathFromCall(tc)
-  const error = tc.error ?? stringValue(output, 'error')
+  const rawError = tc.error ?? stringValue(output, 'debugError') ?? stringValue(output, 'error')
+  const userMessage = stringValue(output, 'userMessage') ?? stringValue(output, 'message')
+  const error = rawError ?? userMessage
   const label = TOOL_NAME_LABELS[tc.toolName] || tc.toolName
   const content = stringValue(input, 'content')
   const hiddenContentMeta = content ? `内容 ${content.length} 字，已隐藏` : undefined
@@ -552,6 +568,22 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
       title: ok === false || tc.status === 'error' ? '定位没完成' : tc.status === 'running' ? '获取位置' : '已获取位置',
       detail: tc.status === 'running' ? '正在获取当前位置' : displayName ? `当前位置：${displayName}` : (error ?? '当前位置'),
       meta: error ?? (meta || undefined),
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'weather') {
+    const current = asRecord(output?.current)
+    const location = stringValue(output, 'location')
+    const temperature = stringValue(current, 'temperature')
+    const weather = stringValue(current, 'weather')
+    const failed = ok === false || tc.status === 'error'
+    return {
+      title: failed ? '天气没查到' : tc.status === 'running' ? '查询天气' : '天气已查到',
+      detail: failed
+        ? toolErrorDetail(tc.toolName, rawError, userMessage)
+        : [location, weather, temperature].filter(Boolean).join(' · ') || '实时天气',
+      meta: failed ? rawError ?? undefined : undefined,
       ok,
     }
   }
@@ -635,11 +667,93 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
     return { title: label, detail: pathValue ?? '读取工作区上下文', path: pathValue ?? undefined, ok }
   }
 
+  if (tc.toolName === 'widget_capability_list') {
+    const count = numberValue(output, 'count')
+    const detail = typeof count === 'number' ? `已读取 ${count} 类组件能力` : '读取组件能力和美学边界'
+    return {
+      title: ok === false || tc.status === 'error' ? '组件能力没读到' : tc.status === 'running' ? '读取组件能力' : '组件能力已读取',
+      detail,
+      meta: error ?? undefined,
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'desktop_scene_get') {
+    const summary = asRecord(output?.aestheticSummary)
+    const visibleCount = numberValue(summary, 'visibleWidgetCount')
+    return {
+      title: ok === false || tc.status === 'error' ? '桌面上下文没读到' : tc.status === 'running' ? '读取桌面上下文' : '桌面上下文已读取',
+      detail: typeof visibleCount === 'number' ? `当前可见组件 ${visibleCount} 个` : '读取壁纸、组件和场景模板',
+      meta: error ?? undefined,
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'desktop_scene_preview') {
+    const plan = asRecord(output?.plan)
+    const check = asRecord(plan?.aestheticCheck)
+    const sceneName = stringValue(plan, 'sceneName') ?? stringValue(plan, 'sceneId') ?? '桌面草案'
+    const score = numberValue(check, 'score')
+    const hiddenCount = stringArrayValue(plan, 'hiddenWidgetIds').length
+    const scoreText = typeof score === 'number' ? `美学评分 ${score}` : '美学检查'
+    const hiddenText = hiddenCount > 0 ? `，弱化 ${hiddenCount} 个组件` : ''
+    return {
+      title: ok === false || tc.status === 'error' ? '桌面草案没生成' : tc.status === 'running' ? '生成桌面草案' : '桌面草案已生成',
+      detail: `${sceneName} · ${scoreText}${hiddenText}`,
+      meta: error ?? stringValue(output, 'guidance') ?? undefined,
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'desktop_scene_apply') {
+    const snapshot = asRecord(output?.snapshot)
+    const sceneName = stringValue(output, 'sceneName') ?? stringValue(output, 'sceneId') ?? '桌面草案'
+    const snapshotId = stringValue(snapshot, 'id')
+    const skipped = Array.isArray(output?.skippedPatches) ? output.skippedPatches.length : 0
+    return {
+      title: ok === false || tc.status === 'error' ? '桌面草案没应用' : tc.status === 'running' ? '应用桌面草案' : '桌面草案已应用',
+      detail: snapshotId ? `${sceneName} · 已创建回滚快照` : sceneName,
+      meta: error ?? (skipped > 0 ? `跳过 ${skipped} 个受保护或不可用操作` : stringValue(output, 'guidance') ?? undefined),
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'desktop_scene_rollback') {
+    const snapshot = asRecord(output?.snapshot)
+    const reason = stringValue(snapshot, 'reason')
+    return {
+      title: ok === false || tc.status === 'error' ? '桌面回滚没完成' : tc.status === 'running' ? '回滚桌面布局' : '桌面布局已回滚',
+      detail: reason ? `恢复：${reason}` : '恢复到上一次桌面编排前',
+      meta: error ?? stringValue(output, 'guidance') ?? undefined,
+      ok,
+    }
+  }
+
+  if (tc.toolName === 'list_widgets' || tc.toolName === 'add_widget' || tc.toolName === 'create_generated_widget' || tc.toolName === 'update_widget_config' || tc.toolName === 'remove_widget') {
+    const widget = asRecord(output?.widget)
+    const type = stringValue(input, 'type') ?? stringValue(widget, 'type')
+    const id = stringValue(input, 'id') ?? stringValue(widget, 'id')
+    const detail = [type, id].filter(Boolean).join(' · ') || '桌面组件'
+    const runningTitle = tc.toolName === 'list_widgets'
+      ? '查看桌面组件'
+      : tc.toolName === 'add_widget'
+        ? '添加桌面组件'
+        : tc.toolName === 'update_widget_config'
+          ? '调整桌面组件'
+          : '移除桌面组件'
+    return {
+      title: ok === false || tc.status === 'error' ? `${runningTitle}没完成` : tc.status === 'running' ? runningTitle : `${runningTitle}完成`,
+      detail,
+      meta: error ?? undefined,
+      ok,
+    }
+  }
+
   if (tc.toolName === 'verify_workspace_result') {
     return { title: '验证结果', detail: ok === false ? (error ?? '验证未通过') : '检查文件和产物状态', ok }
   }
 
-  return { title: label, detail: pathValue ?? (error ? error : '工具调用'), path: pathValue ?? undefined, ok }
+  return { title: label, detail: pathValue ?? toolErrorDetail(tc.toolName, rawError, userMessage), meta: rawError ?? undefined, path: pathValue ?? undefined, ok }
 }
 
 function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus, elapsedSeconds = 0): string {
@@ -659,6 +773,16 @@ function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus,
     if (latest.toolName === 'web_search') return `正在搜索网页${target}。`
     if (latest.toolName === 'news') return `我去看眼最新信息${target}。`
     if (latest.toolName === 'weather') return `我确认一下实时天气${target}。`
+    if (latest.toolName === 'widget_capability_list') return `我先看一下哪些桌面组件适合参与编排${target}。`
+    if (latest.toolName === 'desktop_scene_get') return `我先读一下当前桌面、壁纸和组件状态${target}。`
+    if (latest.toolName === 'desktop_scene_preview') return `我在生成一个只读桌面草案，并投到桌面上预览${target}。`
+    if (latest.toolName === 'desktop_scene_apply') return `我在应用这个桌面草案，先留好可回滚快照${target}。`
+    if (latest.toolName === 'desktop_scene_rollback') return `我在把桌面恢复到刚才应用前的样子${target}。`
+    if (latest.toolName === 'list_widgets') return `我看一下桌面上现在放了哪些组件${target}。`
+    if (latest.toolName === 'add_widget') return `我把这个小组件放到桌面上${target}。`
+    if (latest.toolName === 'create_generated_widget') return `我把这个专属小组件做好并放到桌面上${target}。`
+    if (latest.toolName === 'update_widget_config') return `我调整一下这个小组件${target}。`
+    if (latest.toolName === 'remove_widget') return `我把这个小组件从桌面上拿掉${target}。`
     if (latest.toolName === 'read_file' || latest.toolName === 'list_directory' || latest.toolName === 'get_file_info') return `我先翻一下相关文件${target}。`
     if (latest.toolName === 'create_checkpoint') return `我先留一个可恢复的保护点${target}。`
     if (latest.toolName === 'create_file' || latest.toolName === 'write_file' || latest.toolName === 'patch_file') return `我把改动落到文件里${target}。`
@@ -820,6 +944,7 @@ export function ChatPage() {
   const selectedProjectIdRef = useRef<string | null>(null)
   const currentTaskRunIdRef = useRef<string | null>(null)
   const streamingTextRef = useRef('')
+  const streamRenderFrameRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(0)
   const chatStatusRef = useRef<ChatStatus>('idle')
@@ -978,11 +1103,18 @@ export function ChatPage() {
       if (streamId === streamIdRef.current) {
         if (chatStatusRef.current !== 'streaming') setChatStatus('streaming')
         streamingTextRef.current += delta
-        setStreamingText(streamingTextRef.current)
+        if (streamRenderFrameRef.current == null) {
+          streamRenderFrameRef.current = requestAnimationFrame(() => {
+            streamRenderFrameRef.current = null
+            setStreamingText(streamingTextRef.current)
+          })
+        }
       }
     })
     const offEnd = window.lingyue.chat.onStreamEnd(({ streamId, full, conversationId }) => {
       if (streamId === streamIdRef.current) {
+        if (streamRenderFrameRef.current != null) cancelAnimationFrame(streamRenderFrameRef.current)
+        streamRenderFrameRef.current = null
         setChatStatus('idle')
         stopTimer()
         setStreamingText('')
@@ -1037,21 +1169,31 @@ export function ChatPage() {
     })
     const offError = window.lingyue.chat.onStreamError(({ streamId, error: err }) => {
       if (streamId === streamIdRef.current) {
-        setChatStatus('error')
+        if (streamRenderFrameRef.current != null) cancelAnimationFrame(streamRenderFrameRef.current)
+        streamRenderFrameRef.current = null
+        setChatStatus('idle')
         stopTimer()
+        const partial = streamingTextRef.current.trim()
+        const toolCalls = activeToolCallsRef.current
         setStreamingText('')
         streamingTextRef.current = ''
         updateActiveToolCalls(() => [])
         streamIdRef.current = null
         setConnected(false)
-        setError(err)
+        setError(null)
         showTransientPetState('error', 2400)
-        setMessages((prev) => {
-          const copy = [...prev]
-          const last = copy[copy.length - 1]
-          if (last?.role === 'user') last.status = 'error'
-          return copy
-        })
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: 'assistant',
+            text: partial || '我这边刚刚卡住了一下，但不是你的问题。你再叫我试一次，我换个方式来。',
+            status: 'done',
+            timestamp: Date.now(),
+            toolCalls: toolCalls.length > 0 ? [...toolCalls] : undefined,
+          },
+        ])
+        console.warn('[chat] stream failed:', err)
         focusComposer()
       }
     })
@@ -1078,7 +1220,10 @@ export function ChatPage() {
       currentTaskRunIdRef.current = run.id
       setCurrentTaskRunId(run.id)
     })
-    return () => { offChunk(); offEnd(); offError(); offToolCall(); offRunEvent() }
+    return () => {
+      if (streamRenderFrameRef.current != null) cancelAnimationFrame(streamRenderFrameRef.current)
+      offChunk(); offEnd(); offError(); offToolCall(); offRunEvent()
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateActiveToolCalls])
 
@@ -2028,44 +2173,9 @@ function PetStatRow({
 }
 
 // ─── Tool Call Display ─────────────────────────────────────
-const TOOL_NAME_LABELS: Record<string, string> = {
-  get_current_time: '获取时间',
-  get_user_location: '获取位置',
-  calculator: '计算器',
-  web_search: '网络搜索',
-  read_clipboard: '读取剪贴板',
-  write_clipboard: '写入剪贴板',
-  open_url: '打开链接',
-  get_system_info: '系统信息',
-  memory_store: '存储记忆',
-  memory_recall: '回忆',
-  weather: '天气查询',
-  news: '新闻热搜',
-  list_directory: '列目录',
-  read_file: '读取文件',
-  search_text: '搜索文本',
-  get_file_info: '文件信息',
-  create_checkpoint: '创建快照',
-  restore_checkpoint: '恢复快照',
-  compare_file_versions: '版本对比',
-  create_file: '创建文件',
-  patch_file: '修改文件',
-  write_file: '写入文件',
-  create_directory: '创建目录',
-  copy_path: '复制文件',
-  move_path: '移动文件',
-  delete_to_trash: '移入回收区',
-  restore_from_trash: '回收区恢复',
-  generate_artifact: '生成产物',
-  verify_workspace_result: '验证结果',
-  run_command: '运行命令',
-  extract_pdf_text: '读取PDF',
-  read_docx: '读取Word',
-  write_docx: '生成Word',
-  read_xlsx: '读取Excel',
-  write_xlsx: '生成Excel',
-  ocr_image: '图片识别',
-}
+const TOOL_NAME_LABELS: Record<string, string> = Object.fromEntries(
+  TOOL_MANIFEST.map((entry) => [entry.name, entry.label]),
+)
 
 type ProcessFeedItem =
   | { type: 'text'; id: string; text: string }
@@ -2187,23 +2297,143 @@ function ProcessStatusItem({ text, live }: { text: string; live?: boolean }) {
 }
 
 function compactToolTitle(toolName: string): string {
-  if (toolName === 'memory_recall') return '回忆'
-  if (toolName === 'memory_store' || toolName === 'memory_update' || toolName === 'memory_delete') return '记忆'
-  if (toolName === 'create_checkpoint') return '快照'
-  if (toolName === 'generate_artifact') return '产物'
-  if (toolName === 'verify_workspace_result') return '验证'
-  if (toolName === 'create_file' || toolName === 'write_file' || toolName === 'patch_file') return '文件'
-  if (toolName === 'run_command') return '命令'
-  if (toolName === 'search_text') return '搜索'
-  if (toolName === 'web_search') return '网页搜索'
-  if (toolName === 'news') return '资讯'
-  if (toolName === 'weather') return '天气'
-  if (toolName === 'get_user_location') return '位置'
-  if (toolName === 'calculator') return '计算'
-  if (toolName === 'get_current_time') return '时间'
-  if (toolName === 'get_system_info') return '系统'
-  if (toolName === 'read_file') return '读取'
-  return TOOL_NAME_LABELS[toolName] || '步骤'
+  if (toolName === 'memory_update' || toolName === 'memory_delete') return '记忆'
+  return getToolManifest(toolName)?.compactLabel || '步骤'
+}
+
+function recordArrayValue(record: Record<string, unknown> | null, key: string): Record<string, unknown>[] {
+  const value = record?.[key]
+  if (!Array.isArray(value)) return []
+  return value.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item))
+}
+
+function desktopSceneSourceLabel(source: string | null): string {
+  if (source === 'new') return '新增'
+  if (source === 'existing') return '调整'
+  if (source === 'persistent') return '保留'
+  return '规划'
+}
+
+function desktopSceneLayerLabel(layer: string | null): string {
+  if (layer === 'ambient') return '氛围'
+  if (layer === 'information') return '信息'
+  if (layer === 'persistent') return '常驻'
+  if (layer === 'companion') return '陪伴'
+  return '组件'
+}
+
+function DesktopSceneDraftCard({ output }: { output: unknown }) {
+  const root = asRecord(output)
+  const plan = asRecord(root?.plan)
+  if (!plan) return null
+
+  const widgets = recordArrayValue(plan, 'widgets')
+  const patches = recordArrayValue(plan, 'widgetPatches')
+  const hiddenWidgetIds = stringArrayValue(plan, 'hiddenWidgetIds')
+  const check = asRecord(plan.aestheticCheck)
+  const issues = recordArrayValue(check, 'issues')
+  const score = numberValue(check, 'score')
+  const ok = booleanValue(check, 'ok') !== false
+  const sceneName = stringValue(plan, 'sceneName') ?? stringValue(plan, 'sceneId') ?? '桌面草案'
+  const summary = stringValue(check, 'summary') ?? (ok ? '布局克制，主视觉清晰。' : '草案还需要微调。')
+  const guidance = stringValue(root, 'guidance')
+  const creates = patches.filter((item) => stringValue(item, 'op') === 'create').length
+  const updates = patches.filter((item) => String(stringValue(item, 'op') ?? '').startsWith('update')).length
+  const visibleWidgets = widgets.filter((item) => stringValue(item, 'source') !== 'persistent')
+  const stats = [
+    creates > 0 ? `新增 ${creates}` : null,
+    updates > 0 ? `调整 ${updates}` : null,
+    hiddenWidgetIds.length > 0 ? `弱化 ${hiddenWidgetIds.length}` : null,
+  ].filter(Boolean).join(' · ') || '只读预览'
+
+  return (
+    <div className={`desktop-scene-card ${ok ? 'desktop-scene-card--ok' : 'desktop-scene-card--warn'}`}>
+      <div className="desktop-scene-card__header">
+        <div>
+          <div className="desktop-scene-card__eyebrow">桌面编排草案</div>
+          <div className="desktop-scene-card__title">{sceneName}</div>
+        </div>
+        <div className="desktop-scene-card__score">
+          <span>{typeof score === 'number' ? score : '--'}</span>
+          <small>美学分</small>
+        </div>
+      </div>
+      <div className="desktop-scene-card__summary">{summary}</div>
+      <div className="desktop-scene-card__stats">{stats}</div>
+      {visibleWidgets.length > 0 && (
+        <div className="desktop-scene-card__widgets">
+          {visibleWidgets.slice(0, 5).map((widget, index) => {
+            const type = stringValue(widget, 'type') ?? 'widget'
+            const source = stringValue(widget, 'source')
+            const layer = stringValue(widget, 'layer')
+            const visualWeight = stringValue(widget, 'visualWeight')
+            return (
+              <div key={`${type}-${source}-${index}`} className="desktop-scene-card__widget">
+                <span>{desktopSceneSourceLabel(source)}</span>
+                <strong>{type}</strong>
+                <small>{desktopSceneLayerLabel(layer)}{visualWeight === 'hero' ? ' · 主视觉' : ''}</small>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {issues.length > 0 && (
+        <div className="desktop-scene-card__issues">
+          {issues.slice(0, 2).map((issue, index) => (
+            <span key={`${stringValue(issue, 'id') ?? index}`}>
+              {stringValue(issue, 'label') ?? '需要微调'}
+            </span>
+          ))}
+        </div>
+      )}
+      {guidance && <div className="desktop-scene-card__guidance">{guidance}</div>}
+      <div className="desktop-scene-card__actions" aria-label="桌面草案操作">
+        <button type="button" disabled>应用草案</button>
+        <button type="button" disabled>再改一版</button>
+        <button type="button" disabled>取消预览</button>
+        <span>对我说“应用这个草案”即可写入</span>
+      </div>
+    </div>
+  )
+}
+
+function DesktopSceneResultCard({ toolName, output }: { toolName: string; output: unknown }) {
+  const root = asRecord(output)
+  if (!root) return null
+
+  const snapshot = asRecord(root.snapshot)
+  const snapshotId = stringValue(snapshot, 'id')
+  const reason = stringValue(snapshot, 'reason')
+  const sceneName = stringValue(root, 'sceneName') ?? stringValue(root, 'sceneId') ?? '桌面编排'
+  const count = numberValue(root, 'count')
+  const applied = Array.isArray(root.appliedPatches) ? root.appliedPatches.length : 0
+  const skipped = Array.isArray(root.skippedPatches) ? root.skippedPatches.length : 0
+  const guidance = stringValue(root, 'guidance')
+  const isRollback = toolName === 'desktop_scene_rollback'
+
+  return (
+    <div className={`desktop-scene-card desktop-scene-card--result ${isRollback ? 'desktop-scene-card--rollback' : ''}`}>
+      <div className="desktop-scene-card__header">
+        <div>
+          <div className="desktop-scene-card__eyebrow">{isRollback ? '桌面布局回滚' : '桌面草案应用'}</div>
+          <div className="desktop-scene-card__title">{isRollback ? '已恢复之前布局' : sceneName}</div>
+        </div>
+        {typeof count === 'number' && (
+          <div className="desktop-scene-card__score">
+            <span>{count}</span>
+            <small>组件</small>
+          </div>
+        )}
+      </div>
+      <div className="desktop-scene-card__summary">
+        {isRollback
+          ? (reason ? `已恢复到“${reason}”应用前。` : '已恢复到上一次桌面编排应用前。')
+          : `已写入 ${applied} 个布局操作${skipped > 0 ? `，跳过 ${skipped} 个受保护操作` : ''}。`}
+      </div>
+      {snapshotId && <div className="desktop-scene-card__stats">快照：{snapshotId}</div>}
+      {guidance && <div className="desktop-scene-card__guidance">{guidance}</div>}
+    </div>
+  )
 }
 
 function ToolProcessItem({ tc, count = 1 }: { tc: ToolCallDisplay; count?: number }) {
@@ -2219,6 +2449,12 @@ function ToolProcessItem({ tc, count = 1 }: { tc: ToolCallDisplay; count?: numbe
   }
   const inputText = formatToolPayload(tc.input)
   const outputText = tc.error ? tc.error : formatToolPayload(tc.output)
+  const sceneDraftCard = tc.toolName === 'desktop_scene_preview' && tc.status !== 'running'
+    ? <DesktopSceneDraftCard output={tc.output} />
+    : null
+  const sceneResultCard = (tc.toolName === 'desktop_scene_apply' || tc.toolName === 'desktop_scene_rollback') && tc.status !== 'running'
+    ? <DesktopSceneResultCard toolName={tc.toolName} output={tc.output} />
+    : null
   const title = compactToolTitle(tc.toolName)
   return (
     <details className={`process-tool process-tool--${tc.status} ${failed ? 'process-tool--error' : ''} ${needsApproval ? 'process-tool--approval' : ''}`}>
@@ -2234,13 +2470,15 @@ function ToolProcessItem({ tc, count = 1 }: { tc: ToolCallDisplay; count?: numbe
       </summary>
       <div className="process-tool__details">
         {info.meta && <div className="process-tool__meta">{info.meta}</div>}
+        {sceneDraftCard}
+        {sceneResultCard}
         {inputText && (
           <div className="process-tool__block">
             <span>输入</span>
             <pre>{inputText}</pre>
           </div>
         )}
-        {outputText && (
+        {outputText && !sceneDraftCard && !sceneResultCard && (
           <div className="process-tool__block">
             <span>{tc.status === 'error' ? '错误' : '输出'}</span>
             <pre>{outputText}</pre>

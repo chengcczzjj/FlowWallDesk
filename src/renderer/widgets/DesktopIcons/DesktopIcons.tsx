@@ -6,6 +6,7 @@ import { AppWindow, File as FileGlyph, Folder, Plus } from 'lucide-react'
 import type { DesktopIconItem, WidgetInstance } from '@shared/types'
 import { WidgetPosCtx } from '../../canvas/contexts'
 import { FrostedGlassBackground } from '../FrostedGlassBackground'
+import { toRendererPublicUrl } from '@shared/asset-url'
 
 type DesktopIconVariant = 'vertical' | 'horizontal' | 'adaptive' | 'dock'
 type StorageVariant = Exclude<DesktopIconVariant, 'dock'>
@@ -324,16 +325,15 @@ function DesktopIconsWidget({
 
     for (const item of staleItems) refreshedIdsRef.current.add(item.id)
     let cancelled = false
-    window.canvasBridge.refreshDesktopIcons(staleItems).then((refreshedItems) => {
-      if (cancelled || refreshedItems.length === 0) return
-      const refreshedById = new Map(refreshedItems.map((item) => [item.id, item]))
-      void saveItems(orderedItems.map((item) => refreshedById.get(item.id) ?? item))
+    void window.canvasBridge.refreshDesktopIcons(staleItems).catch((error) => {
+      if (cancelled) return
+      console.warn('[desktop-icons] refresh failed:', error instanceof Error ? error.message : String(error))
     })
 
     return () => {
       cancelled = true
     }
-  }, [orderedItems, saveItems])
+  }, [orderedItems])
 
   const activateItem = useCallback(
     (item: DesktopIconItem) => {
@@ -1158,10 +1158,10 @@ function DockInteractionHitArea({
 }
 
 const DOCK_SYSTEM_ICON_MAP: Record<DockSystemActionId, string> = {
-  settings: '/dock-icons/settings.svg',
-  explorer: '/dock-icons/finder.svg',
-  'recycle-bin': '/dock-icons/trash.svg',
-  desktop: '/dock-icons/desktop.svg',
+  settings: toRendererPublicUrl('dock-icons/settings.svg'),
+  explorer: toRendererPublicUrl('dock-icons/finder.svg'),
+  'recycle-bin': toRendererPublicUrl('dock-icons/trash.svg'),
+  desktop: toRendererPublicUrl('dock-icons/desktop.svg'),
 }
 
 function DockSystemIcon({ action, size, fluid = false }: { action: DockSystemActionId; size: number; fluid?: boolean }) {

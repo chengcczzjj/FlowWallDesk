@@ -7,10 +7,12 @@ import { ProjectStore } from '../projects/projectStore'
 import { classifyBasic } from '../routing/sceneRouter'
 import { buildInitialContext } from '../routing/contextPacker'
 import { ModelConfig } from '../models/config'
-import { streamChat } from '../models/chatModel'
-import { getToolSet, REGISTERED_TOOL_NAMES, type ToolCallEvent } from '../tools'
-import { buildToolRouterPrompt } from '../tools/toolRouter'
+import { getModelCapabilities, streamChat } from '../models/chatModel'
+import { buildToolRouterPrompt, decideToolRoute, getToolSet, type ToolCallEvent } from '../tools'
 import { store } from '../../store'
+import { DEFAULT_CHAT_PERSONA } from '@shared/persona'
+import { getToolManifest } from '@shared/tool-manifest'
+import type { ChatTerminalStatus } from '@shared/agent-runtime'
 import type { ConversationMode } from '../events/types'
 import type { ConversationRecord } from '../conversations/conversationStore'
 import type { AgentApproval, AgentRunEvent, AgentRunStatus } from '@shared/types'
@@ -67,29 +69,25 @@ function getSavedPersonaPrompt(): string | undefined {
   return name ? `${prompt}\n\n【当前人设名称】${name}` : prompt
 }
 
+export interface ChatSendResult {
+  status: ChatTerminalStatus
+  conversationId: string
+  runId: string | null
+  text: string
+  error?: string
+}
+
+function getActivePersonaSnapshot(): { name: string; prompt: string } {
+  const persona = store.get('persona')
+  return {
+    name: persona?.name?.trim() || DEFAULT_CHAT_PERSONA.name,
+    prompt: persona?.prompt?.trim() || DEFAULT_CHAT_PERSONA.prompt,
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 }
-
-const CACHED_READ_TOOL_NAMES = new Set([
-  'get_current_time',
-  'get_user_location',
-  'calculator',
-  'web_search',
-  'get_system_info',
-  'memory_recall',
-  'weather',
-  'news',
-  'list_directory',
-  'read_file',
-  'search_text',
-  'get_file_info',
-  'compare_file_versions',
-  'extract_pdf_text',
-  'read_docx',
-  'read_xlsx',
-  'ocr_image',
-])
 
 type ExecutableTool = { execute?: (...args: unknown[]) => unknown }
 
@@ -122,7 +120,63 @@ function toolCacheKey(toolName: string, input: unknown): string {
 }
 
 function shouldCacheToolCall(toolName: string): boolean {
-  return CACHED_READ_TOOL_NAMES.has(toolName)
+  return getToolManifest(toolName)?.cacheable === true
+}
+
+function compactToolOutput(value: unknown, maxChars: number): unknown {
+  const budget = { remaining: maxChars, truncated: false }
+  const visit = (input: unknown, depth: number): unknown => {
+    if (budget.remaining <= 0) {
+      budget.truncated = true
+      return '[已按工具上下文预算截断]'
+    }
+    if (typeof input === 'string') {
+      if (input.length <= budget.remaining) {
+        budget.remaining -= input.length
+        return input
+      }
+      const result = `${input.slice(0, Math.max(0, budget.remaining - 18))}\n[内容已截断]`
+      budget.remaining = 0
+      budget.truncated = true
+      return result
+    }
+    if (input == null || typeof input === 'number' || typeof input === 'boolean') {
+      budget.remaining -= 8
+      return input
+    }
+    if (depth >= 8) {
+      budget.truncated = true
+      return '[嵌套内容已截断]'
+    }
+    if (Array.isArray(input)) {
+      const result: unknown[] = []
+      for (const item of input.slice(0, 100)) {
+        if (budget.remaining <= 0) break
+        result.push(visit(item, depth + 1))
+      }
+      if (result.length < input.length) {
+        budget.truncated = true
+        result.push({ truncatedItems: input.length - result.length })
+      }
+      return result
+    }
+    if (typeof input === 'object') {
+      const result: Record<string, unknown> = {}
+      const entries = Object.entries(input as Record<string, unknown>)
+      for (const [key, item] of entries.slice(0, 100)) {
+        if (budget.remaining <= 0) break
+        budget.remaining -= key.length
+        result[key] = visit(item, depth + 1)
+      }
+      if (Object.keys(result).length < entries.length) {
+        budget.truncated = true
+        result._truncatedFields = entries.length - Object.keys(result).length
+      }
+      return result
+    }
+    return String(input)
+  }
+  return visit(value, 0)
 }
 
 function createCachedToolSet(tools: ToolSet): ToolSet {
@@ -131,18 +185,27 @@ function createCachedToolSet(tools: ToolSet): ToolSet {
 
   for (const [toolName, toolDef] of Object.entries(tools)) {
     const executable = toolDef as ExecutableTool
-    if (!shouldCacheToolCall(toolName) || typeof executable.execute !== 'function') {
+    if (typeof executable.execute !== 'function') {
       wrapped[toolName] = toolDef
       continue
+    }
+
+    const executeWithBudget = async (...args: unknown[]) => {
+      const output = await executable.execute!(...args)
+      const maxChars = toolName === 'read_file' || toolName === 'extract_pdf_text' || toolName === 'read_docx'
+        ? 60_000
+        : 24_000
+      return compactToolOutput(output, maxChars)
     }
 
     wrapped[toolName] = {
       ...toolDef,
       execute: (...args: unknown[]) => {
+        if (!shouldCacheToolCall(toolName)) return executeWithBudget(...args)
         const key = toolCacheKey(toolName, args[0])
         const existing = cache.get(key)
         if (existing) return existing
-        const promise = Promise.resolve(executable.execute!(...args))
+        const promise = executeWithBudget(...args)
         cache.set(key, promise)
         return promise
       },
@@ -172,12 +235,58 @@ function isFailedToolOutput(output: unknown, error?: unknown): boolean {
   return booleanValue(record, 'ok') === false && !isApprovalToolOutput(output)
 }
 
-function summarizeToolFailure(toolName: string, output: unknown, error?: unknown): string {
-  if (error) return `${toolName}: ${String(error)}`
+interface ToolFailureSummary {
+  toolName: string
+  message: string
+  technical: string
+}
+
+function friendlyToolFailureMessage(toolName: string, message?: string | null): string {
+  if (toolName === 'weather') return message || '天气服务暂时没有响应，实时天气没有拿到。'
+  if (toolName === 'web_search' || toolName === 'news') return message || '联网信息暂时没有拿稳。'
+  if (toolName === 'get_user_location') return message || '当前位置暂时没有确认到。'
+  if (toolName.includes('widget')) return message || '这个桌面组件操作刚刚没有完成。'
+  return message || '这一步工具没有顺利完成。'
+}
+
+function summarizeToolFailure(toolName: string, output: unknown, error?: unknown): ToolFailureSummary {
   const record = asRecord(output)
-  const message = stringValue(record, 'error') ?? stringValue(record, 'message') ?? '工具返回 ok=false。'
+  const userMessage = stringValue(record, 'userMessage') ?? stringValue(record, 'message')
+  const technical = error
+    ? String(error)
+    : stringValue(record, 'debugError') ?? stringValue(record, 'error') ?? stringValue(record, 'message') ?? 'tool returned ok=false'
   const path = stringValue(record, 'path')
-  return path ? `${toolName}(${path}): ${message}` : `${toolName}: ${message}`
+  return {
+    toolName,
+    message: friendlyToolFailureMessage(toolName, userMessage),
+    technical: path ? `${toolName}(${path}): ${technical}` : `${toolName}: ${technical}`,
+  }
+}
+
+function personaFailureTone(): 'girl' | 'playful' | 'warm' {
+  const persona = getActivePersonaSnapshot()
+  const value = `${persona.name}\n${persona.prompt}`
+  if (/女|少女|女孩|姐姐|妹妹|晴蓝|猫娘|温柔|可爱|撒娇/.test(value)) return 'girl'
+  if (/阿鬣|坏笑|嘴很欠|毒舌|调侃|吐槽/.test(value)) return 'playful'
+  return 'warm'
+}
+
+function buildToolFailureReply(failures: ToolFailureSummary[]): string {
+  const first = failures[0]
+  const tone = personaFailureTone()
+  if (!first) {
+    if (tone === 'girl') return '呜，这一下我没做成。你要我继续查原因的话，我可以接着看。'
+    if (tone === 'playful') return '啧，这一下没跑通。你要我查原因的话，我继续追。'
+    return '这一步没有做成。你要我继续查原因的话，我可以接着看。'
+  }
+  if (failures.every((failure) => failure.toolName === 'weather')) {
+    if (tone === 'girl') return `呜，${first.message}这次没查到。你给我一个具体城市嘛，我再试一次。`
+    if (tone === 'playful') return `啧，${first.message}这次没查到。给我个城市名，我再冲一次。`
+    return `${first.message}这次没查到。你给我一个具体城市，我再试一次。`
+  }
+  if (tone === 'girl') return `呜，${first.message}我这一步没做成。你要我查查哪里卡住了，我就继续看。`
+  if (tone === 'playful') return `啧，${first.message}这一步没成。你要我查原因的话，我继续追。`
+  return `${first.message}这一步没有做成。你要我继续检查原因的话，我可以接着看。`
 }
 
 const DELIVERY_TOOL_NAMES = new Set([
@@ -209,8 +318,6 @@ function summarizeSuccessfulDelivery(toolName: string, output: unknown): string 
   return `${toolName}: 已完成`
 }
 
-const AGENT_RUN_TOOL_NAMES = new Set<string>(REGISTERED_TOOL_NAMES)
-
 const WRITE_TOOL_NAMES = new Set([
   'create_file',
   'patch_file',
@@ -241,7 +348,7 @@ const READ_TOOL_NAMES = new Set([
 ])
 
 function shouldAttachAgentRunForTool(toolName: string): boolean {
-  return AGENT_RUN_TOOL_NAMES.has(toolName)
+  return getToolManifest(toolName)?.tracksAgentRun === true
 }
 
 function getToolPlanHint(toolName: string): string {
@@ -270,7 +377,7 @@ function summarizeCompletedTool(toolName: string, output: unknown): string {
 
 export const ChatService = {
   /** 发送消息并流式返回回复（支持 tool calling 多步推理） */
-  async sendMessage(params: SendMessageParams, callbacks: ChatStreamCallbacks): Promise<void> {
+  async sendMessage(params: SendMessageParams, callbacks: ChatStreamCallbacks): Promise<ChatSendResult> {
     const { text, mode = 'daily' } = params
 
     // 1. 获取/创建会话
@@ -310,7 +417,7 @@ export const ChatService = {
     }
     if (shouldTrackRun) ensureAgentRun()
     let hasPendingApproval = false
-    const toolFailures: string[] = []
+    const toolFailures: ToolFailureSummary[] = []
     const successfulDeliveries: string[] = []
     const completedToolSummaries: string[] = []
     let full = ''
@@ -345,25 +452,59 @@ export const ChatService = {
 
     // 4. 获取最近消息构建上下文
     const recent = EventStore.listRecent(conv.id, 30)
-    const { system, messages } = buildInitialContext({ scene, recentEvents: recent, persona: getSavedPersonaPrompt() })
-    if (params.internal) messages.push({ role: 'user', content: text })
-    const toolRouterSystem = buildToolRouterPrompt({ workspace })
-    const workspaceRoot = workspace?.rootPath ?? workspace?.path
-    const workspaceName = workspace?.displayName ?? workspace?.name ?? '当前工作区'
-    const workspaceSystem = workspaceRoot
-      ? `${system}\n\n${toolRouterSystem}\n\n【当前工作文件夹】\n名称：${workspaceName}\n路径：${workspaceRoot}`
-      : `${system}\n\n${toolRouterSystem}`
+    const toolRoute = decideToolRoute({ text, workspace })
 
     // 5. 获取 model profile
     const profile = ModelConfig.getActive()
     if (!profile) {
+      const message = '我现在还没连上可用的模型配置。你先去设置里加一个模型，我就能继续陪你聊了。'
+      EventStore.append({
+        conversationId: conv.id,
+        eventType: 'assistant_message',
+        mode: conv.mode as ConversationMode,
+        content: { text: message },
+      })
+      ConversationStore.touch(conv.id)
       emitRunStatus('failed', '未配置模型。请在设置中添加模型 Profile。')
-      callbacks.onError('未配置模型。请在设置中添加模型 Profile。')
-      return
+      callbacks.onDone(message, conv.id)
+      return {
+        status: 'failed',
+        conversationId: conv.id,
+        runId: registeredRunId,
+        text: message,
+        error: 'model-profile-missing',
+      }
     }
 
+    const modelCapabilities = getModelCapabilities(profile)
+    const { system, messages } = buildInitialContext({
+      scene,
+      recentEvents: recent,
+      persona: getSavedPersonaPrompt(),
+      projectId: workspaceId,
+      maxContextTokens: Math.max(4096, modelCapabilities.maxContextTokens - modelCapabilities.maxOutputTokens),
+    })
+    if (params.internal) messages.push({ role: 'user', content: text })
+    const effectiveToolRoute = modelCapabilities.toolCalling
+      ? toolRoute
+      : {
+          ...toolRoute,
+          toolNames: [],
+          usesWidgets: false,
+          usesDesktopScene: false,
+          usesWorkspaceRead: false,
+          usesWorkspaceWrite: false,
+          usesDocuments: false,
+          usesCommand: false,
+        }
+    const toolRouterSystem = buildToolRouterPrompt({ workspace, route: effectiveToolRoute })
+    const capabilitySystem = modelCapabilities.toolCalling
+      ? ''
+      : '\n\n【当前模型能力限制】当前模型配置已禁用工具调用。不要声称读取了实时信息、修改了文件或操作了桌面；如任务依赖工具，请明确建议用户切换支持工具的模型。'
+    const workspaceSystem = `${system}\n\n${toolRouterSystem}${capabilitySystem}`
+
     // 6. 获取工具集
-    const rawTools = getToolSet(toolContext)
+    const rawTools = getToolSet(toolContext, effectiveToolRoute.toolNames)
     const tools = createCachedToolSet(rawTools)
     const visibleToolOffsets = new Map<string, number>()
     const hiddenDuplicateToolCallIds = new Set<string>()
@@ -375,7 +516,7 @@ export const ChatService = {
       const result = await streamChat(profile, messages, {
         system: workspaceSystem,
         tools,
-        maxSteps: 8,
+        maxSteps: modelCapabilities.reasoning ? 12 : 8,
         abortSignal: params.abortSignal,
         toolCallbacks: {
           onTextDelta(delta) {
@@ -531,13 +672,9 @@ export const ChatService = {
       const failedSummary = toolFailures.slice(0, 3)
       const assistantText = hasPendingApproval
         ? [full.trim(), '需要授权后继续。'].filter(Boolean).join('\n\n')
-        : failedSummary.length > 0 && successfulDeliveries.length === 0
-          ? [
-              '工具执行未完成，未生成最终交付结果。',
-              ...failedSummary.map((item) => `- ${item}`),
-              '请调整权限、路径或工具参数后重试。',
-            ].join('\n')
-          : full.trim() || (successfulDeliveries.length > 0
+        : full.trim() || (failedSummary.length > 0
+          ? buildToolFailureReply(failedSummary)
+          : successfulDeliveries.length > 0
               ? ['已完成本轮任务。', ...successfulDeliveries.slice(0, 3).map((item) => `- ${item}`)].join('\n')
               : completedToolSummaries.length > 0
                 ? ['工具已执行完成，但模型没有继续生成总结。', ...completedToolSummaries.slice(0, 3).map((item) => `- ${item}`)].join('\n')
@@ -573,6 +710,13 @@ export const ChatService = {
         hasPendingApproval ? '等待用户确认后继续' : assistantText.slice(0, 200),
       )
       callbacks.onDone(assistantText, conv.id)
+      return {
+        status: hasPendingApproval ? 'waiting-approval' : failedSummary.length > 0 ? 'failed' : 'completed',
+        conversationId: conv.id,
+        runId: registeredRunId,
+        text: assistantText,
+        ...(failedSummary.length > 0 ? { error: failedSummary.map((item) => item.technical).join('; ') } : {}),
+      }
     } catch (e) {
       if (params.abortSignal?.aborted || isAbortError(e)) {
         const partial = full.trim()
@@ -586,10 +730,30 @@ export const ChatService = {
         ConversationStore.touch(conv.id)
         emitRunStatus('cancelled', partial ? '用户已停止，已保留部分输出。' : '用户已停止任务。')
         callbacks.onDone(message, conv.id)
-        return
+        return {
+          status: 'cancelled',
+          conversationId: conv.id,
+          runId: registeredRunId,
+          text: message,
+        }
       }
+      const fallback = full.trim() || buildToolFailureReply(toolFailures)
+      EventStore.append({
+        conversationId: conv.id,
+        eventType: 'assistant_message',
+        mode: conv.mode as ConversationMode,
+        content: { text: fallback },
+      })
+      ConversationStore.touch(conv.id)
       emitRunStatus('failed', (e as Error).message)
-      callbacks.onError((e as Error).message)
+      callbacks.onDone(fallback, conv.id)
+      return {
+        status: 'failed',
+        conversationId: conv.id,
+        runId: registeredRunId,
+        text: fallback,
+        error: (e as Error).message,
+      }
     } finally {
       if (registeredRunId) RunCancellation.unregister(registeredRunId)
     }

@@ -21,12 +21,13 @@ export const POPULAR_STOCKS = [
 
 interface CachedResult {
   data: StockItem[]
-  secids: string
   timestamp: number
 }
 
-let cache: CachedResult | null = null
+const cache = new Map<string, CachedResult>()
+const inFlight = new Map<string, Promise<StockItem[]>>()
 const CACHE_TTL = 10_000 // 缓存 10 秒（股票需要较实时）
+const REQUEST_TIMEOUT_MS = 10_000
 
 /** 调用统计 */
 export const stocksUsage = { fetchCount: 0, lastFetchTime: null as number | null, errorCount: 0 }
@@ -51,18 +52,22 @@ export async function fetchStocks(
   if (symbols.length === 0) return []
 
   const secids = symbols.map((s) => `${s.market}.${s.code}`).join(',')
+  const cached = cache.get(secids)
 
   // 命中缓存
-  if (cache && cache.secids === secids && Date.now() - cache.timestamp < CACHE_TTL) {
-    return cache.data
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data
   }
+
+  const pending = inFlight.get(secids)
+  if (pending) return pending
 
   const url =
     `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2` +
     `&fields=f2,f3,f4,f12,f14&secids=${secids}`
 
-  try {
-    const res = await net.fetch(url, { method: 'GET' })
+  const request = (async () => {
+    const res = await net.fetch(url, { method: 'GET', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
     const json = (await res.json()) as {
@@ -84,14 +89,18 @@ export async function fetchStocks(
       changePercent: d.f3,
     }))
 
-    cache = { data: items, secids, timestamp: Date.now() }
+    cache.set(secids, { data: items, timestamp: Date.now() })
+    if (cache.size > 50) cache.delete(cache.keys().next().value!)
     stocksUsage.fetchCount++
     stocksUsage.lastFetchTime = Date.now()
     return items
-  } catch (err) {
+  })().catch((err) => {
     stocksUsage.errorCount++
     console.error('[StocksService] fetch failed:', err)
-    if (cache?.secids === secids) return cache.data
+    if (cached) return cached.data
     return []
-  }
+  }).finally(() => inFlight.delete(secids))
+
+  inFlight.set(secids, request)
+  return request
 }

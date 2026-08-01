@@ -3,7 +3,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { streamText, generateText, stepCountIs } from 'ai'
 import { streamDeepSeekToolChat, type DeepSeekToolChatResult } from './deepseekToolChat'
 import type { FinishReason, ModelMessage, ToolSet } from 'ai'
-import type { ModelProfile } from './config'
+import type { ModelCapabilities, ModelProfile } from './config'
 
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 
@@ -22,8 +22,26 @@ function validateProfileApiKey(profile: ModelProfile): string | null {
   return null
 }
 
-export function supportsToolCalling(_profile: Pick<ModelProfile, 'provider' | 'model'>): boolean {
-  return true
+export interface ResolvedModelCapabilities {
+  toolCalling: boolean
+  reasoning: boolean
+  maxContextTokens: number
+  maxOutputTokens: number
+}
+
+export function getModelCapabilities(profile: Pick<ModelProfile, 'provider' | 'model' | 'capabilities'>): ResolvedModelCapabilities {
+  const configured: ModelCapabilities = profile.capabilities ?? {}
+  const reasoningModel = /(^|[-_.])(reasoner|reasoning|r1|o1|o3|o4)([-_.]|$)/i.test(profile.model)
+  return {
+    toolCalling: configured.toolCalling !== 'disabled',
+    reasoning: configured.reasoning ?? reasoningModel,
+    maxContextTokens: Math.max(4_096, configured.maxContextTokens ?? (profile.provider === 'google' ? 1_000_000 : 64_000)),
+    maxOutputTokens: Math.max(256, configured.maxOutputTokens ?? 16_384),
+  }
+}
+
+export function supportsToolCalling(profile: Pick<ModelProfile, 'provider' | 'model' | 'capabilities'>): boolean {
+  return getModelCapabilities(profile).toolCalling
 }
 
 export interface StreamChatResult {
@@ -81,14 +99,16 @@ export async function streamChat(
   }
 ): Promise<StreamChatResult | DeepSeekToolChatResult> {
   const { system, tools, maxSteps = 8, abortSignal, toolCallbacks } = options ?? {}
+  const capabilities = getModelCapabilities(profile)
+  const availableTools = capabilities.toolCalling ? tools : undefined
 
-  if (profile.provider === 'deepseek' && tools) {
+  if (profile.provider === 'deepseek' && availableTools) {
     return streamDeepSeekToolChat({
       profile,
       baseURL: getOpenAICompatibleBaseURL(profile),
       system,
       messages,
-      tools,
+      tools: availableTools,
       maxSteps,
       abortSignal,
       toolCallbacks,
@@ -102,10 +122,10 @@ export async function streamChat(
     system,
     messages,
     temperature: profile.temperature,
-    maxOutputTokens: profile.maxTokens,
+    maxOutputTokens: Math.min(profile.maxTokens ?? capabilities.maxOutputTokens, capabilities.maxOutputTokens),
     abortSignal,
     // Tool calling 配置
-    ...(tools ? { tools, stopWhen: stepCountIs(maxSteps) } : {}),
+    ...(availableTools ? { tools: availableTools, stopWhen: stepCountIs(maxSteps) } : {}),
     // 生命周期回调
     ...(toolCallbacks?.onToolCallStart
       ? {

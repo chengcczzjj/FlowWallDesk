@@ -26,10 +26,9 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
+        // Sandboxed preloads cannot require local Rollup chunks, so all window bridges share one role-gated bundle.
         input: {
-          'main-ui': resolve(__dirname, 'src/preload/main-ui.ts'),
-          wallpaper: resolve(__dirname, 'src/preload/wallpaper.ts'),
-          canvas: resolve(__dirname, 'src/preload/canvas.ts'),
+          index: resolve(__dirname, 'src/preload/index.ts'),
         },
         output: {
           format: 'cjs',

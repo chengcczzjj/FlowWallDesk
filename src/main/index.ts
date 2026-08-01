@@ -12,9 +12,12 @@ import { registerWidgetIpc, restoreWidgets } from './ipc/widgetIpc'
 import { registerDesktopIconIpc } from './ipc/desktopIconIpc'
 import { registerDataIpc } from './ipc/dataIpc'
 import { registerChatIpc } from './ipc/chatIpc'
-import { registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
+import { allowAssetRoot, registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
+import { getUserWallpapersRoot } from './runtime/userDataPaths'
 import { initMemorySystem } from './memory'
 import { isPreciseLocationPermissionAllowed } from './memory/tools/definitions/user-location'
+import { applyLaunchAtLoginPreference } from './services/launch-at-login-service'
+import { initializeAutoUpdate } from './services/update-service'
 
 // 必须在 app.ready 之前注册
 registerAssetSchemePrivileged()
@@ -47,16 +50,18 @@ if (!gotTheLock) {
 }
 
 app.on('second-instance', () => {
-  const main = getMainWindow()
-  if (main) {
-    if (main.isMinimized()) main.restore()
-    main.show()
-    main.focus()
-  }
+  const main = getMainWindow() ?? createMainWindow()
+  if (main.isMinimized()) main.restore()
+  main.show()
+  main.focus()
 })
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.lingyue.desk')
+  await allowAssetRoot(app.isPackaged
+    ? join(process.resourcesPath, 'assets', 'wallpaper')
+    : join(__dirname, '../../assets/wallpaper'))
+  await allowAssetRoot(getUserWallpapersRoot())
   registerAssetProtocol()
 
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -93,6 +98,8 @@ app.whenReady().then(async () => {
   createWallpaperWindow()
   createCanvasWindow()
   createTray()
+  applyLaunchAtLoginPreference()
+  initializeAutoUpdate()
   // mainWindow 延迟创建：用户点击托盘时才创建，节省一个渲染进程（~50-80MB）
 
   // 恢复上次状态

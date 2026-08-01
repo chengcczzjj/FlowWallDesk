@@ -10,6 +10,7 @@ export default [
       'dist/**',
       'out/**',
       'release/**',
+      'TempFile/**',
       '.vscode/**',
       'demo/**',
       'assets/**',

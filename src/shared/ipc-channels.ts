@@ -12,6 +12,13 @@ export const IPC = {
   APP_OPEN_RECYCLE_BIN: 'app:open-recycle-bin',
   APP_SHOW_DESKTOP: 'app:show-desktop',
   APP_GET_VERSION: 'app:get-version',
+  APP_GET_LAUNCH_AT_LOGIN: 'app:get-launch-at-login',
+  APP_SET_LAUNCH_AT_LOGIN: 'app:set-launch-at-login',
+  APP_UPDATE_GET_STATUS: 'app:update-get-status',
+  APP_UPDATE_CHECK: 'app:update-check',
+  APP_UPDATE_DOWNLOAD: 'app:update-download',
+  APP_UPDATE_INSTALL: 'app:update-install',
+  APP_UPDATE_STATE_CHANGED: 'app:update-state-changed',
   APP_GET_LOCATION_SETTINGS: 'app:get-location-settings',
   APP_SET_PRECISE_LOCATION_ENABLED: 'app:set-precise-location-enabled',
   APP_REQUEST_PRECISE_LOCATION_AUTHORIZATION: 'app:request-precise-location-authorization',
@@ -26,6 +33,7 @@ export const IPC = {
   WALLPAPER_APPLY: 'wallpaper:apply',
   WALLPAPER_GET_CURRENT: 'wallpaper:get-current',
   WALLPAPER_PICK_FILE: 'wallpaper:pick-file',
+  WALLPAPER_GRANT_PREVIEW: 'wallpaper:grant-preview',
   WALLPAPER_IMPORT: 'wallpaper:import',
   WALLPAPER_ATTACH_STATUS: 'wallpaper:attach-status',
   WALLPAPER_SAVE_SETTINGS: 'wallpaper:save-settings',
@@ -36,6 +44,8 @@ export const IPC = {
   WALLPAPER_READY: 'wallpaper:ready',
   // 壁纸抽帧（壁纸窗口 → 主进程 → 画布窗口）
   WALLPAPER_FRAME: 'wallpaper:frame',
+  // 画布根据当前组件声明是否需要实时壁纸帧
+  WALLPAPER_CAPTURE_DEMAND: 'wallpaper:capture-demand',
 
   // 桌面组件
   WIDGET_LIST: 'widget:list',
@@ -51,6 +61,8 @@ export const IPC = {
   DESKTOP_ICON_CONTEXT_MENU: 'desktop-icon:context-menu',
   // 主进程 → 画布
   WIDGET_SYNC: 'widget:sync',
+  DESKTOP_SCENE_PREVIEW_SHOW: 'desktop-scene:preview-show',
+  DESKTOP_SCENE_PREVIEW_CLEAR: 'desktop-scene:preview-clear',
   // 画布 → 主进程：鼠标穿透切换
   CANVAS_SET_IGNORE_MOUSE: 'canvas:set-ignore-mouse',
   // 画布 → 主进程：原生右键菜单
@@ -63,6 +75,7 @@ export const IPC = {
   // 数据服务
   DATA_FETCH_NEWS: 'data:fetch-news',
   DATA_FETCH_STOCKS: 'data:fetch-stocks',
+  DATA_FETCH_WEATHER: 'data:fetch-weather',
   DATA_GET_API_REGISTRY: 'data:get-api-registry',
 
   // AI 聊天

@@ -33,6 +33,7 @@ import {
   resolvePixelPetPalette,
   type PixelPet,
 } from '@renderer/shared/pixel-pet'
+import appIcon from './assets/app-icon.png'
 import './styles.css'
 
 type ActivityKey = 'memory' | 'library' | 'widgets' | 'pet' | 'settings'
@@ -188,6 +189,7 @@ export function App() {
       style={activity === 'library' ? undefined : appThemeStyle}
     >
       <header className="title-bar">
+        <img className="title-bar__icon" src={appIcon} alt="" />
         <span className="title-bar__text">灵月 · LingyueDesk</span>
         <div className="title-bar__spacer" />
         {activity === 'library' && (

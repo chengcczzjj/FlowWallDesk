@@ -272,8 +272,13 @@ export function createWorkspaceWriteTools(context: WorkspaceToolContext) {
           const rootPath = getWorkspaceRoot(context)
           const { runId } = ensureRunContext(context)
           const trashRoot = path.resolve(AGENT_TRASH_DIR)
-          const source = path.resolve(trashPath)
-          if (!source.startsWith(trashRoot) || !fs.existsSync(source)) return { ok: false, error: '回收区文件不存在或路径非法。', contextFiles: [] }
+          const requestedSource = path.resolve(trashPath)
+          if (!fs.existsSync(requestedSource)) return { ok: false, error: '回收区文件不存在或路径非法。', contextFiles: [] }
+          const source = fs.realpathSync.native(requestedSource)
+          const relativeSource = path.relative(fs.realpathSync.native(trashRoot), source)
+          if (relativeSource.startsWith('..') || path.isAbsolute(relativeSource)) {
+            return { ok: false, error: '回收区文件不存在或路径非法。', contextFiles: [] }
+          }
           const target = resolvePath(rootPath, targetPath, 'write_file')
           const approval = requireApproval(context, { action: '从应用回收区恢复文件', toolName: 'restore_from_trash', reason: '恢复文件会写入 Workspace，需要确认。', affectedPaths: [target.relativePath], approvalId })
           if (approval) return createApprovalResponse(approval, [target.relativePath])

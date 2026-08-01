@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { attachWindowAsWallpaperNative } from './attachWallpaperNative'
+import { secureWindowNavigation } from './navigationSecurity'
 
 let wallpaperWindow: BrowserWindow | null = null
 let attached = false
@@ -94,14 +95,16 @@ export function createWallpaperWindow(): BrowserWindow {
     paintWhenInitiallyHidden: true,
     backgroundColor: '#00000000',
     webPreferences: {
-      preload: join(__dirname, '../preload/wallpaper.js'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: true,
       contextIsolation: true,
+      additionalArguments: ['--lingyue-window-role=wallpaper'],
       backgroundThrottling: false,
     },
   })
 
   wallpaperWindow.setMenu(null)
+  secureWindowNavigation(wallpaperWindow)
   wallpaperWindow.setAlwaysOnTop(false)
   wallpaperWindow.setIgnoreMouseEvents(true, { forward: false })
   registerDisplayBoundsListener()

@@ -1,6 +1,14 @@
 import { store } from '../../store'
+import { safeStorage } from 'electron'
 
 export type ModelProvider = 'openai-compatible' | 'google' | 'deepseek'
+
+export interface ModelCapabilities {
+  toolCalling?: 'auto' | 'native' | 'disabled'
+  reasoning?: boolean
+  maxContextTokens?: number
+  maxOutputTokens?: number
+}
 
 export interface ModelProfile {
   id: string
@@ -13,6 +21,7 @@ export interface ModelProfile {
   temperature?: number
   maxTokens?: number
   headers?: Record<string, string>
+  capabilities?: ModelCapabilities
 }
 
 export interface ModelSettings {
@@ -21,6 +30,21 @@ export interface ModelSettings {
 }
 
 const STORE_KEY = 'modelSettings'
+const ENCRYPTED_PREFIX = 'safe:v1:'
+
+function encryptApiKey(apiKey: string): string {
+  if (!apiKey || apiKey.startsWith(ENCRYPTED_PREFIX) || !safeStorage.isEncryptionAvailable()) return apiKey
+  return `${ENCRYPTED_PREFIX}${safeStorage.encryptString(apiKey).toString('base64')}`
+}
+
+function decryptApiKey(apiKey: string): string {
+  if (!apiKey.startsWith(ENCRYPTED_PREFIX)) return apiKey
+  try {
+    return safeStorage.decryptString(Buffer.from(apiKey.slice(ENCRYPTED_PREFIX.length), 'base64'))
+  } catch {
+    return ''
+  }
+}
 
 function getSettings(): ModelSettings {
   const raw = store.get(STORE_KEY) as ModelSettings
@@ -30,11 +54,17 @@ function getSettings(): ModelSettings {
       if (!p.provider) p.provider = 'openai-compatible'
     }
   }
-  return raw
+  return {
+    ...raw,
+    profiles: raw.profiles.map((profile) => ({ ...profile, apiKey: decryptApiKey(profile.apiKey) })),
+  }
 }
 
 function saveSettings(settings: ModelSettings): void {
-  store.set(STORE_KEY, settings)
+  store.set(STORE_KEY, {
+    ...settings,
+    profiles: settings.profiles.map((profile) => ({ ...profile, apiKey: encryptApiKey(profile.apiKey) })),
+  })
 }
 
 export const ModelConfig = {

@@ -1,6 +1,6 @@
 import { protocol, net } from 'electron'
 import { promises as fs } from 'fs'
-import { extname } from 'path'
+import { extname, dirname, isAbsolute, relative, resolve } from 'path'
 import { pathToFileURL } from 'url'
 
 /**
@@ -55,6 +55,60 @@ const MIME: Record<string, string> = {
   '.wav': 'audio/wav',
 }
 
+const allowedRoots = new Set<string>()
+const allowedFiles = new Set<string>()
+
+function isInside(rootPath: string, targetPath: string): boolean {
+  const rel = relative(rootPath, targetPath)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+async function realPathOrResolved(filePath: string): Promise<string> {
+  try {
+    return await fs.realpath(filePath)
+  } catch {
+    return resolve(filePath)
+  }
+}
+
+/** 注册应用拥有的资源根目录。协议处理器只会读取这些目录内的文件。 */
+export async function allowAssetRoot(rootPath: string): Promise<void> {
+  allowedRoots.add(await realPathOrResolved(rootPath))
+}
+
+/**
+ * 临时授权用户明确选择的单个媒体文件；HTML 会授权其所在目录以加载相对资源。
+ * 目录授权仍会经过 realpath 边界检查，不能通过 ../ 或 junction 跳出。
+ */
+export async function allowUserSelectedAsset(filePath: string): Promise<void> {
+  const realPath = await fs.realpath(filePath)
+  const extension = extname(realPath).toLowerCase()
+  if (extension === '.html' || extension === '.htm') {
+    allowedRoots.add(await fs.realpath(dirname(realPath)))
+    return
+  }
+  const mime = MIME[extension]
+  if (!mime || (!mime.startsWith('image/') && !mime.startsWith('video/'))) {
+    throw new Error('只允许临时授权图片、视频或 HTML 壁纸资源。')
+  }
+  allowedFiles.add(realPath)
+}
+
+async function resolveAllowedAssetPath(inputPath: string): Promise<string | null> {
+  if (!isAbsolute(inputPath)) return null
+  let realPath: string
+  try {
+    realPath = await fs.realpath(inputPath)
+  } catch {
+    return null
+  }
+  if (allowedFiles.has(realPath)) return realPath
+  for (const rootPath of allowedRoots) {
+    if (isInside(rootPath, realPath)) return realPath
+  }
+  return null
+}
+
 function parseAbsPath(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl)
@@ -72,9 +126,14 @@ function parseAbsPath(rawUrl: string): string | null {
 
 export function registerAssetProtocol(): void {
   protocol.handle('lyasset', async (request) => {
-    const absPath = parseAbsPath(request.url)
+    const requestedPath = parseAbsPath(request.url)
+    if (!requestedPath) {
+      return new Response('Bad Request', { status: 400, headers: { 'Cache-Control': 'no-store' } })
+    }
+    const absPath = await resolveAllowedAssetPath(requestedPath)
     if (!absPath) {
-      return new Response('Bad Request', { status: 400 })
+      console.warn('[lyasset] 拒绝越界资源请求', requestedPath)
+      return new Response('Forbidden', { status: 403, headers: { 'Cache-Control': 'no-store' } })
     }
     try {
       const stat = await fs.stat(absPath)

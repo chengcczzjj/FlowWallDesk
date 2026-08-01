@@ -14,6 +14,7 @@ import { ElegantClock } from './ElegantClock/ElegantClock'
 import { PixelClock } from './PixelClock/PixelClock'
 import { GraphicDateTime } from './GraphicDateTime/GraphicDateTime'
 import { DesktopIconAdaptive, DesktopIconBox, DesktopIconDock, DesktopIconHorizontal } from './DesktopIcons/DesktopIcons'
+import { GeneratedWidget } from './GeneratedWidget/GeneratedWidget'
 
 /** 组件类型 → 组件实现 的注册表 */
 export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; resizing?: boolean }) {
@@ -26,6 +27,8 @@ export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; r
       return <PixelClock config={w.config} />
     case 'graphicdatetime':
       return <GraphicDateTime config={w.config} />
+    case 'generated-widget':
+      return <GeneratedWidget widget={w} />
     case 'desktop-icons-box':
       return <DesktopIconBox widget={w} editing={Boolean(options?.editing)} resizing={Boolean(options?.resizing)} />
     case 'desktop-icons-horizontal':
@@ -73,6 +76,7 @@ export function hasFloatingToolbar(type: string): boolean {
     'desktop-icons-horizontal',
     'desktop-icons-adaptive',
     'desktop-icons-dock',
+    'generated-widget',
   ].includes(type)
 }
 
@@ -91,6 +95,7 @@ export function isFloatingType(type: string): boolean {
     'desktop-icons-horizontal',
     'desktop-icons-adaptive',
     'desktop-icons-dock',
+    'generated-widget',
   ].includes(type)
 }
 
@@ -98,6 +103,7 @@ export function isFloatingType(type: string): boolean {
 export function isStretchFillType(type: string): boolean {
   return (
     type === 'audio' ||
+    type === 'generated-widget' ||
     type === 'desktop-icons-box' ||
     type === 'desktop-icons-horizontal' ||
     type === 'desktop-icons-adaptive' ||

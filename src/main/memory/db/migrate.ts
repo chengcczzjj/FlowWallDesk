@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS approvals (
   status TEXT NOT NULL DEFAULT 'pending',
   decision TEXT,
   created_at INTEGER NOT NULL,
-  resolved_at INTEGER
+  resolved_at INTEGER,
+  consumed_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS approvals_by_run ON approvals(run_id, created_at);
 CREATE INDEX IF NOT EXISTS approvals_by_status ON approvals(status, created_at);
@@ -225,184 +226,47 @@ CREATE TABLE IF NOT EXISTS private_memories (
 );
 `
 
+const MAIN_SCHEMA_VERSION = 4
+const PRIVATE_SCHEMA_VERSION = 1
+
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  return rows.some((row) => row.name === column)
+}
+
+function ensureColumn(db: Database.Database, table: string, column: string, declaration: string): void {
+  if (hasColumn(db, table, column)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
+}
+
 export function runMigrations(db: Database.Database, scope: 'main' | 'private'): void {
-  const sql = scope === 'main' ? MAIN_TABLES : PRIVATE_TABLES
-  db.exec(sql)
+  db.exec(scope === 'main' ? MAIN_TABLES : PRIVATE_TABLES)
 
-  // 增量迁移：为旧数据库添加 key 列
-  if (scope === 'main') {
-    try {
-      db.exec(`ALTER TABLE memories ADD COLUMN key TEXT NOT NULL DEFAULT ''`)
-    } catch {
-      // 列已存在 — 忽略
-    }
-    try {
-      db.exec(`CREATE INDEX IF NOT EXISTS memories_by_key ON memories(key)`)
-    } catch {
-      // 索引已存在 — 忽略
-    }
-
-    // 增量迁移：projects 表（v2 新增）
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        path TEXT,
-        root_path TEXT,
-        display_name TEXT,
-        permission_profile TEXT NOT NULL DEFAULT 'ask-before-editing',
-        index_status TEXT NOT NULL DEFAULT 'not-indexed',
-        file_stats_json TEXT,
-        ignore_rules_json TEXT,
-        instructions TEXT,
-        last_opened_at INTEGER,
-        icon TEXT,
-        color TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'active'
-      )`)
-    } catch {
-      // 表已存在 — 忽略
-    }
-
-    const projectColumns = [
-      `ALTER TABLE projects ADD COLUMN root_path TEXT`,
-      `ALTER TABLE projects ADD COLUMN display_name TEXT`,
-      `ALTER TABLE projects ADD COLUMN permission_profile TEXT NOT NULL DEFAULT 'ask-before-editing'`,
-      `ALTER TABLE projects ADD COLUMN index_status TEXT NOT NULL DEFAULT 'not-indexed'`,
-      `ALTER TABLE projects ADD COLUMN file_stats_json TEXT`,
-      `ALTER TABLE projects ADD COLUMN ignore_rules_json TEXT`,
-      `ALTER TABLE projects ADD COLUMN instructions TEXT`,
-      `ALTER TABLE projects ADD COLUMN last_opened_at INTEGER`,
-    ]
-    for (const sql of projectColumns) {
-      try {
-        db.exec(sql)
-      } catch {
-        // 列已存在 — 忽略
-      }
-    }
-    try {
-      db.exec(`UPDATE projects SET root_path = COALESCE(root_path, path), display_name = COALESCE(display_name, name), last_opened_at = COALESCE(last_opened_at, updated_at)`)
-    } catch {
-      // 兼容旧表 — 忽略
-    }
-
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS approvals (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        thread_id TEXT NOT NULL,
-        workspace_id TEXT,
-        action TEXT NOT NULL,
-        tool_name TEXT,
-        risk_level TEXT NOT NULL,
-        reason TEXT NOT NULL,
-        affected_paths_json TEXT NOT NULL DEFAULT '[]',
-        command TEXT,
-        checkpoint_required INTEGER NOT NULL DEFAULT 0,
-        checkpoint_id TEXT,
-        status TEXT NOT NULL DEFAULT 'pending',
-        decision TEXT,
-        created_at INTEGER NOT NULL,
-        resolved_at INTEGER
-      )`)
-      db.exec(`CREATE INDEX IF NOT EXISTS approvals_by_run ON approvals(run_id, created_at)`)
-      db.exec(`CREATE INDEX IF NOT EXISTS approvals_by_status ON approvals(status, created_at)`)
-    } catch {
-      // 表或索引已存在 — 忽略
-    }
-
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS checkpoints (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT,
-        run_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        file_backups_json TEXT NOT NULL DEFAULT '[]',
-        manifest_json TEXT NOT NULL DEFAULT '{}',
-        created_at INTEGER NOT NULL
-      )`)
-      db.exec(`CREATE INDEX IF NOT EXISTS checkpoints_by_run ON checkpoints(run_id, created_at)`)
-      db.exec(`CREATE INDEX IF NOT EXISTS checkpoints_by_workspace ON checkpoints(workspace_id, created_at)`)
-    } catch {
-      // 表或索引已存在 — 忽略
-    }
-
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS file_changes (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        path TEXT NOT NULL,
-        old_path TEXT,
-        backup_path TEXT,
-        diff TEXT,
-        reason TEXT NOT NULL,
-        tool_call_id TEXT,
-        checkpoint_id TEXT,
-        review_state TEXT NOT NULL DEFAULT 'pending',
-        created_at INTEGER NOT NULL
-      )`)
-      db.exec(`CREATE INDEX IF NOT EXISTS file_changes_by_run ON file_changes(run_id, created_at)`)
-      db.exec(`CREATE INDEX IF NOT EXISTS file_changes_by_path ON file_changes(path, created_at)`)
-    } catch {
-      // 表或索引已存在 — 忽略
-    }
-
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS artifacts (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        workspace_id TEXT,
-        name TEXT NOT NULL,
-        path TEXT NOT NULL,
-        type TEXT NOT NULL,
-        preview_type TEXT NOT NULL,
-        source_files_json TEXT NOT NULL DEFAULT '[]',
-        size INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL
-      )`)
-      db.exec(`CREATE INDEX IF NOT EXISTS artifacts_by_run ON artifacts(run_id, created_at)`)
-      db.exec(`CREATE INDEX IF NOT EXISTS artifacts_by_workspace ON artifacts(workspace_id, created_at)`)
-    } catch {
-      // 表或索引已存在 — 忽略
-    }
-
-    try {
-      db.exec(`CREATE TABLE IF NOT EXISTS automations (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        workspace_id TEXT,
-        conversation_id TEXT,
-        schedule_type TEXT NOT NULL DEFAULT 'manual',
-        interval_minutes INTEGER,
-        time_of_day TEXT,
-        next_run_at INTEGER,
-        last_run_at INTEGER,
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )`)
-      db.exec(`CREATE INDEX IF NOT EXISTS automations_by_status ON automations(status, next_run_at)`)
-      db.exec(`CREATE INDEX IF NOT EXISTS automations_by_workspace ON automations(workspace_id, updated_at)`)
-      db.exec(`CREATE TABLE IF NOT EXISTS automation_runs (
-        id TEXT PRIMARY KEY,
-        automation_id TEXT NOT NULL,
-        run_id TEXT,
-        status TEXT NOT NULL DEFAULT 'pending',
-        summary TEXT,
-        error TEXT,
-        started_at INTEGER NOT NULL,
-        finished_at INTEGER
-      )`)
-      db.exec(`CREATE INDEX IF NOT EXISTS automation_runs_by_automation ON automation_runs(automation_id, started_at)`)
-      db.exec(`CREATE INDEX IF NOT EXISTS automation_runs_by_status ON automation_runs(status, started_at)`)
-    } catch {
-      // 表或索引已存在 — 忽略
-    }
+  if (scope === 'private') {
+    db.pragma(`user_version = ${PRIVATE_SCHEMA_VERSION}`)
+    return
   }
+
+  // These guards migrate databases created by early development builds without swallowing real SQL errors.
+  ensureColumn(db, 'memories', 'key', `TEXT NOT NULL DEFAULT ''`)
+  ensureColumn(db, 'projects', 'root_path', 'TEXT')
+  ensureColumn(db, 'projects', 'display_name', 'TEXT')
+  ensureColumn(db, 'projects', 'permission_profile', `TEXT NOT NULL DEFAULT 'ask-before-editing'`)
+  ensureColumn(db, 'projects', 'index_status', `TEXT NOT NULL DEFAULT 'not-indexed'`)
+  ensureColumn(db, 'projects', 'file_stats_json', 'TEXT')
+  ensureColumn(db, 'projects', 'ignore_rules_json', 'TEXT')
+  ensureColumn(db, 'projects', 'instructions', 'TEXT')
+  ensureColumn(db, 'projects', 'last_opened_at', 'INTEGER')
+  ensureColumn(db, 'approvals', 'consumed_at', 'INTEGER')
+  ensureColumn(db, 'file_changes', 'checkpoint_id', 'TEXT')
+  ensureColumn(db, 'file_changes', 'review_state', `TEXT NOT NULL DEFAULT 'pending'`)
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS memories_by_key ON memories(key);
+    UPDATE projects
+      SET root_path = COALESCE(root_path, path),
+          display_name = COALESCE(display_name, name),
+          last_opened_at = COALESCE(last_opened_at, updated_at);
+  `)
+  db.pragma(`user_version = ${MAIN_SCHEMA_VERSION}`)
 }

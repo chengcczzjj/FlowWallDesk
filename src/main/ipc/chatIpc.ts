@@ -1,5 +1,8 @@
 import path from 'node:path'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { ipcMain, dialog, clipboard, shell } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
+import { z } from 'zod'
 import { IPC } from '@shared/ipc-channels'
 import { DEFAULT_CHAT_PERSONA } from '@shared/persona'
 import { ChatService } from '../memory/chat/chatService'
@@ -18,9 +21,98 @@ import { store } from '../store'
 import type { ConversationMode } from '../memory/events/types'
 import type { ModelProfile } from '../memory/models/config'
 import type { AgentApprovalDecision, AgentFileChangeReviewState, ChatMemory, WorkspacePermissionProfile } from '@shared/types'
+import { assertTrustedIpcSender, isTrustedIpcSender } from './ipcSecurity'
 
 /** 当前正在进行的流式任务，用于 stop */
 const activeStreams = new Map<string, AbortController>()
+const grantedProjectRoots = new Set<string>()
+
+const idSchema = z.string().min(1).max(128)
+const nullableIdSchema = idSchema.nullable()
+const conversationModeSchema = z.enum(['daily', 'work', 'private', 'tool'])
+const modelProfileSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1).max(80),
+  provider: z.enum(['openai-compatible', 'google', 'deepseek']),
+  baseURL: z.string().trim().max(2048).refine((value) => !value || /^https?:\/\//i.test(value), 'Base URL 仅支持 HTTP/HTTPS。'),
+  apiKey: z.string().max(8192),
+  model: z.string().trim().min(1).max(240),
+  availableModels: z.array(z.string().max(240)).max(500).optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().min(1).max(1_000_000).optional(),
+  headers: z.record(z.string().max(128), z.string().max(4096)).refine((value) => Object.keys(value).length <= 32).optional(),
+  capabilities: z.object({
+    toolCalling: z.enum(['auto', 'native', 'disabled']).optional(),
+    reasoning: z.boolean().optional(),
+    maxContextTokens: z.number().int().min(4096).max(10_000_000).optional(),
+    maxOutputTokens: z.number().int().min(256).max(1_000_000).optional(),
+  }).optional(),
+})
+const chatSendRequestSchema = z.object({
+  streamId: z.string().uuid(),
+  payload: z.object({
+    conversationId: idSchema.optional(),
+    projectId: nullableIdSchema.optional(),
+    mode: conversationModeSchema.optional(),
+    text: z.string().trim().min(1).max(100_000),
+    internal: z.boolean().optional(),
+    forceAgentRun: z.boolean().optional(),
+  }),
+})
+const automationCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  prompt: z.string().trim().min(1).max(20_000),
+  workspaceId: nullableIdSchema.optional(),
+  conversationId: nullableIdSchema.optional(),
+  scheduleType: z.enum(['manual', 'interval', 'daily']).optional(),
+  intervalMinutes: z.number().int().min(1).max(525_600).nullable().optional(),
+  timeOfDay: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/).nullable().optional(),
+})
+const automationUpdateSchema = automationCreateSchema.partial().extend({
+  status: z.enum(['active', 'paused', 'deleted']).optional(),
+})
+const projectCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  path: z.string().max(32_768).optional(),
+  icon: z.string().max(256).optional(),
+  color: z.string().max(64).optional(),
+})
+const projectUpdateSchema = projectCreateSchema.partial().extend({
+  permissionProfile: z.enum(['read-only', 'ask-before-editing', 'workspace-write', 'full-access']).optional(),
+})
+
+function normalizeProjectRoot(value: string): string {
+  if (!path.isAbsolute(value) || !existsSync(value) || !statSync(value).isDirectory()) {
+    throw new Error('Workspace 必须是已选择的本地文件夹。')
+  }
+  return realpathSync(value)
+}
+
+function requireGrantedProjectRoot(value: string, currentRoot?: string | null): string {
+  const normalized = normalizeProjectRoot(value)
+  let current: string | null = null
+  if (currentRoot) {
+    try {
+      current = normalizeProjectRoot(currentRoot)
+    } catch {
+      current = null
+    }
+  }
+  if (normalized !== current && !grantedProjectRoots.has(normalized)) {
+    throw new Error('请先通过文件夹选择器授权这个 Workspace。')
+  }
+  return normalized
+}
+
+function handleMain(
+  channel: string,
+  listener: (event: IpcMainInvokeEvent, ...args: any[]) => any,
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedIpcSender(event, ['main'])
+    return listener(event, ...args)
+  })
+}
 
 function isInside(rootPath: string, targetPath: string): boolean {
   const relative = path.relative(rootPath, targetPath)
@@ -88,18 +180,28 @@ function prepareProfileForSave(profile: ModelProfile): ModelProfile {
   return resolveProfileApiKey(profile)
 }
 
+function maskApiKey(apiKey: string): string {
+  if (!apiKey) return ''
+  if (apiKey.length <= 8) return `${apiKey.slice(0, 2)}...`
+  return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`
+}
+
+function profileForRenderer(profile: ModelProfile): ModelProfile {
+  return { ...profile, apiKey: maskApiKey(profile.apiKey) }
+}
+
 export function registerChatIpc(): void {
   // ─── 聊天 ────────────────────────────────────────────────
   ipcMain.on(
     IPC.CHAT_SEND_MESSAGE,
-    (event, payload: { conversationId?: string; projectId?: string | null; mode?: ConversationMode; text: string; internal?: boolean; forceAgentRun?: boolean }) => {
+    (event, request: unknown) => {
+      if (!isTrustedIpcSender(event, ['main'])) return
+      const parsed = chatSendRequestSchema.safeParse(request)
+      if (!parsed.success) return
+      const { streamId, payload } = parsed.data
       const sender = event.sender
-      const streamId = `${Date.now()}`
       const controller = new AbortController()
       activeStreams.set(streamId, controller)
-
-      // 返回 streamId 让前端可以追踪
-      event.returnValue = streamId
 
       setImmediate(() => {
         void ChatService.sendMessage(
@@ -151,7 +253,8 @@ export function registerChatIpc(): void {
     }
   )
 
-  ipcMain.handle(IPC.CHAT_STOP_STREAM, (_e, streamId: string) => {
+  handleMain(IPC.CHAT_STOP_STREAM, (_e, streamId: string) => {
+    streamId = z.string().uuid().parse(streamId)
     const controller = activeStreams.get(streamId)
     if (!controller) return { ok: false, error: '没有找到正在运行的任务。' }
     controller.abort()
@@ -159,47 +262,47 @@ export function registerChatIpc(): void {
     return { ok: true }
   })
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_NEW_CONVERSATION,
     (_e, mode?: ConversationMode) => ChatService.createConversation(mode)
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_LIST_CONVERSATIONS,
     () => ChatService.listConversations()
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_GET_HISTORY,
     (_e, conversationId: string, limit?: number) => ChatService.getHistory(conversationId, limit)
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_DELETE_CONVERSATION,
     (_e, id: string) => { ChatService.deleteConversation(id); return true }
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_RENAME_CONVERSATION,
     (_e, id: string, title: string) => { ChatService.renameConversation(id, title); return true }
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_ARCHIVE_CONVERSATION,
     (_e, id: string) => { ChatService.archiveConversation(id); return true }
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_UNARCHIVE_CONVERSATION,
     (_e, id: string) => { ChatService.unarchiveConversation(id); return true }
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_MOVE_CONVERSATION,
     (_e, id: string, projectId: string | null) => { ChatService.moveConversationToProject(id, projectId); return true }
   )
 
-  ipcMain.handle(
+  handleMain(
     IPC.CHAT_EXPORT_CONVERSATION,
     async (_e, id: string) => {
       const markdown = ChatService.exportConversation(id)
@@ -217,48 +320,55 @@ export function registerChatIpc(): void {
   )
 
   // ─── 模型 Profile 管理 ──────────────────────────────────
-  ipcMain.handle(IPC.CHAT_LIST_PROFILES, () => {
-    return ModelConfig.listProfiles()
+  handleMain(IPC.CHAT_LIST_PROFILES, () => {
+    return ModelConfig.listProfiles().map(profileForRenderer)
   })
 
-  ipcMain.handle(IPC.CHAT_GET_ACTIVE_PROFILE, () => {
-    return ModelConfig.getActive()
+  handleMain(IPC.CHAT_GET_ACTIVE_PROFILE, () => {
+    const profile = ModelConfig.getActive()
+    return profile ? profileForRenderer(profile) : null
   })
 
-  ipcMain.handle(IPC.CHAT_UPSERT_PROFILE, (_e, profile: ModelProfile) => {
-    ModelConfig.upsertProfile(prepareProfileForSave(profile))
+  handleMain(IPC.CHAT_UPSERT_PROFILE, (_e, profile: ModelProfile) => {
+    ModelConfig.upsertProfile(prepareProfileForSave(modelProfileSchema.parse(profile)))
     return true
   })
 
-  ipcMain.handle(IPC.CHAT_DELETE_PROFILE, (_e, id: string) => {
+  handleMain(IPC.CHAT_DELETE_PROFILE, (_e, id: string) => {
+    id = idSchema.parse(id)
     ModelConfig.deleteProfile(id)
     return true
   })
 
-  ipcMain.handle(IPC.CHAT_SET_ACTIVE_PROFILE, (_e, id: string) => {
+  handleMain(IPC.CHAT_SET_ACTIVE_PROFILE, (_e, id: string) => {
+    id = idSchema.parse(id)
     ModelConfig.setActive(id)
     return true
   })
 
-  ipcMain.handle(IPC.CHAT_TEST_PROFILE, async (_e, profile: ModelProfile) => {
-    return testConnection(resolveProfileApiKey(profile))
+  handleMain(IPC.CHAT_TEST_PROFILE, async (_e, profile: ModelProfile) => {
+    return testConnection(resolveProfileApiKey(modelProfileSchema.parse(profile)))
   })
 
-  ipcMain.handle(IPC.CHAT_LIST_MODELS, async (_e, profile: ModelProfile) => {
-    return listModels(resolveProfileApiKey(profile))
+  handleMain(IPC.CHAT_LIST_MODELS, async (_e, profile: ModelProfile) => {
+    return listModels(resolveProfileApiKey(modelProfileSchema.parse(profile)))
   })
 
   // ─── 人设 Persona ──────────────────────────────────────
-  ipcMain.handle(IPC.CHAT_SAVE_PERSONA, (_e, persona: { name: string; prompt: string; avatar?: string }) => {
-    store.set('persona', persona)
+  handleMain(IPC.CHAT_SAVE_PERSONA, (_e, persona: { name: string; prompt: string; avatar?: string }) => {
+    store.set('persona', z.object({
+      name: z.string().trim().min(1).max(80),
+      prompt: z.string().max(20_000),
+      avatar: z.string().max(1_000_000).optional(),
+    }).parse(persona))
     return true
   })
 
-  ipcMain.handle(IPC.CHAT_GET_PERSONA, () => {
+  handleMain(IPC.CHAT_GET_PERSONA, () => {
     return store.get('persona') ?? { name: DEFAULT_CHAT_PERSONA.name, prompt: '', avatar: '' }
   })
 
-  ipcMain.handle(IPC.CHAT_LIST_MEMORIES, (): ChatMemory[] => {
+  handleMain(IPC.CHAT_LIST_MEMORIES, (): ChatMemory[] => {
     try {
       return MemoryStore.query({ limit: 12 }).map((memory) => ({
         id: memory.id,
@@ -279,31 +389,34 @@ export function registerChatIpc(): void {
   })
 
   // ─── AgentRun ──────────────────────────────────────────
-  ipcMain.handle(IPC.AGENT_RUN_LIST_BY_THREAD, (_e, threadId: string) => {
+  handleMain(IPC.AGENT_RUN_LIST_BY_THREAD, (_e, threadId: string) => {
     return AgentRunStore.listByThread(threadId)
   })
 
-  ipcMain.handle(IPC.AGENT_RUN_GET, (_e, id: string) => {
+  handleMain(IPC.AGENT_RUN_GET, (_e, id: string) => {
     return AgentRunStore.get(id) ?? null
   })
 
-  ipcMain.handle(IPC.AGENT_APPROVAL_LIST_BY_RUN, (_e, runId: string) => {
+  handleMain(IPC.AGENT_APPROVAL_LIST_BY_RUN, (_e, runId: string) => {
     return ApprovalStore.listByRun(runId)
   })
 
-  ipcMain.handle(IPC.AGENT_APPROVAL_RESOLVE, (_e, id: string, decision: AgentApprovalDecision) => {
-    return ApprovalStore.resolve(id, decision) ?? null
+  handleMain(IPC.AGENT_APPROVAL_RESOLVE, (_e, id: string, decision: AgentApprovalDecision) => {
+    return ApprovalStore.resolve(idSchema.parse(id), z.enum(['allow-once', 'allow-workspace', 'deny']).parse(decision)) ?? null
   })
 
-  ipcMain.handle(IPC.AGENT_FILE_CHANGE_LIST_BY_RUN, (_e, runId: string) => {
+  handleMain(IPC.AGENT_FILE_CHANGE_LIST_BY_RUN, (_e, runId: string) => {
     return FileChangeStore.listByRun(runId)
   })
 
-  ipcMain.handle(IPC.AGENT_FILE_CHANGE_SET_REVIEW_STATE, (_e, id: string, reviewState: AgentFileChangeReviewState) => {
-    return FileChangeStore.updateReviewState(id, reviewState) ?? null
+  handleMain(IPC.AGENT_FILE_CHANGE_SET_REVIEW_STATE, (_e, id: string, reviewState: AgentFileChangeReviewState) => {
+    return FileChangeStore.updateReviewState(
+      idSchema.parse(id),
+      z.enum(['pending', 'accepted', 'rejected', 'restored']).parse(reviewState),
+    ) ?? null
   })
 
-  ipcMain.handle(IPC.AGENT_FILE_CHANGE_RESTORE, (_e, id: string) => {
+  handleMain(IPC.AGENT_FILE_CHANGE_RESTORE, (_e, id: string) => {
     const change = FileChangeStore.get(id)
     if (!change?.checkpointId) return { ok: false, error: '该变更没有可恢复 checkpoint。' }
     const run = AgentRunStore.get(change.runId)
@@ -316,97 +429,107 @@ export function registerChatIpc(): void {
     return { ok: true, ...result }
   })
 
-  ipcMain.handle(IPC.AGENT_FILE_CHANGE_OPEN, async (_e, id: string) => {
+  handleMain(IPC.AGENT_FILE_CHANGE_OPEN, async (_e, id: string) => {
     const resolved = resolveFileChangePath(id)
     if ('error' in resolved) return { ok: false, error: resolved.error }
     return openPathOrParent(resolved.absolutePath)
   })
 
-  ipcMain.handle(IPC.AGENT_FILE_CHANGE_SHOW_IN_FOLDER, async (_e, id: string) => {
+  handleMain(IPC.AGENT_FILE_CHANGE_SHOW_IN_FOLDER, async (_e, id: string) => {
     const resolved = resolveFileChangePath(id)
     if ('error' in resolved) return { ok: false, error: resolved.error }
     return showPathInFolder(resolved.absolutePath)
   })
 
-  ipcMain.handle(IPC.AGENT_ARTIFACT_LIST_BY_RUN, (_e, runId: string) => {
+  handleMain(IPC.AGENT_ARTIFACT_LIST_BY_RUN, (_e, runId: string) => {
     return ArtifactStore.listByRun(runId)
   })
 
-  ipcMain.handle(IPC.AGENT_ARTIFACT_OPEN, async (_e, id: string) => {
+  handleMain(IPC.AGENT_ARTIFACT_OPEN, async (_e, id: string) => {
     const resolved = resolveArtifactPath(id)
     if ('error' in resolved) return { ok: false, error: resolved.error }
     const error = await shell.openPath(resolved.absolutePath)
     return error ? { ok: false, error } : { ok: true }
   })
 
-  ipcMain.handle(IPC.AGENT_ARTIFACT_SHOW_IN_FOLDER, async (_e, id: string) => {
+  handleMain(IPC.AGENT_ARTIFACT_SHOW_IN_FOLDER, async (_e, id: string) => {
     const resolved = resolveArtifactPath(id)
     if ('error' in resolved) return { ok: false, error: resolved.error }
     return showPathInFolder(resolved.absolutePath)
   })
 
-  ipcMain.handle(IPC.AGENT_ARTIFACT_COPY_PATH, (_e, id: string) => {
+  handleMain(IPC.AGENT_ARTIFACT_COPY_PATH, (_e, id: string) => {
     const resolved = resolveArtifactPath(id)
     if ('error' in resolved) return { ok: false, error: resolved.error }
     clipboard.writeText(resolved.relativePath)
     return { ok: true, path: resolved.relativePath }
   })
 
-  ipcMain.handle(IPC.AGENT_AUTOMATION_LIST, () => {
+  handleMain(IPC.AGENT_AUTOMATION_LIST, () => {
     return AutomationStore.list()
   })
 
-  ipcMain.handle(IPC.AGENT_AUTOMATION_CREATE, (_e, data: CreateAutomationInput) => {
-    return AutomationStore.create(data)
+  handleMain(IPC.AGENT_AUTOMATION_CREATE, (_e, data: CreateAutomationInput) => {
+    return AutomationStore.create(automationCreateSchema.parse(data))
   })
 
-  ipcMain.handle(IPC.AGENT_AUTOMATION_UPDATE, (_e, id: string, data: UpdateAutomationInput) => {
-    return AutomationStore.update(id, data)
+  handleMain(IPC.AGENT_AUTOMATION_UPDATE, (_e, id: string, data: UpdateAutomationInput) => {
+    return AutomationStore.update(idSchema.parse(id), automationUpdateSchema.parse(data))
   })
 
-  ipcMain.handle(IPC.AGENT_AUTOMATION_DELETE, (_e, id: string) => {
-    return AutomationStore.softDelete(id)
+  handleMain(IPC.AGENT_AUTOMATION_DELETE, (_e, id: string) => {
+    return AutomationStore.softDelete(idSchema.parse(id))
   })
 
-  ipcMain.handle(IPC.AGENT_AUTOMATION_RUN_NOW, (_e, id: string) => {
-    return runAutomationNow(id)
+  handleMain(IPC.AGENT_AUTOMATION_RUN_NOW, (_e, id: string) => {
+    return runAutomationNow(idSchema.parse(id))
   })
 
-  ipcMain.handle(IPC.AGENT_AUTOMATION_RESULT_LIST, (_e, automationId?: string) => {
-    return AutomationStore.listResults(automationId)
+  handleMain(IPC.AGENT_AUTOMATION_RESULT_LIST, (_e, automationId?: string) => {
+    return AutomationStore.listResults(automationId == null ? undefined : idSchema.parse(automationId))
   })
 
   // ─── 项目管理 ──────────────────────────────────────────
-  ipcMain.handle(IPC.PROJECT_CREATE, (_e, data: { name: string; path?: string; icon?: string; color?: string }) => {
-    return ProjectStore.create(data.name, data.path, data.icon, data.color)
+  handleMain(IPC.PROJECT_CREATE, (_e, data: { name: string; path?: string; icon?: string; color?: string }) => {
+    const parsed = projectCreateSchema.parse(data)
+    const root = parsed.path ? requireGrantedProjectRoot(parsed.path) : undefined
+    return ProjectStore.create(parsed.name, root, parsed.icon, parsed.color)
   })
 
-  ipcMain.handle(IPC.PROJECT_LIST, () => {
+  handleMain(IPC.PROJECT_LIST, () => {
     return ProjectStore.list()
   })
 
-  ipcMain.handle(IPC.PROJECT_GET, (_e, id: string) => {
+  handleMain(IPC.PROJECT_GET, (_e, id: string) => {
     return ProjectStore.get(id) ?? null
   })
 
-  ipcMain.handle(IPC.PROJECT_UPDATE, (_e, id: string, data: { name?: string; path?: string; icon?: string; color?: string; permissionProfile?: WorkspacePermissionProfile }) => {
-    ProjectStore.update(id, data)
+  handleMain(IPC.PROJECT_UPDATE, (_e, id: string, data: { name?: string; path?: string; icon?: string; color?: string; permissionProfile?: WorkspacePermissionProfile }) => {
+    const projectId = idSchema.parse(id)
+    const parsed = projectUpdateSchema.parse(data)
+    const current = ProjectStore.get(projectId)
+    const next = parsed.path
+      ? { ...parsed, path: requireGrantedProjectRoot(parsed.path, current?.rootPath ?? current?.path), rootPath: requireGrantedProjectRoot(parsed.path, current?.rootPath ?? current?.path) }
+      : parsed
+    ProjectStore.update(projectId, next)
     return true
   })
 
-  ipcMain.handle(IPC.PROJECT_DELETE, (_e, id: string) => {
-    ProjectStore.delete(id)
+  handleMain(IPC.PROJECT_DELETE, (_e, id: string) => {
+    ProjectStore.delete(idSchema.parse(id))
     return true
   })
 
-  ipcMain.handle(IPC.PROJECT_PICK_FOLDER, async () => {
+  handleMain(IPC.PROJECT_PICK_FOLDER, async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     if (result.canceled || result.filePaths.length === 0) return null
-    return result.filePaths[0]
+    const root = normalizeProjectRoot(result.filePaths[0])
+    grantedProjectRoots.add(root)
+    return root
   })
 
-  ipcMain.handle(IPC.PROJECT_OPEN_FOLDER, async (_e, id: string) => {
-    const rootPath = getProjectRoot(id)
+  handleMain(IPC.PROJECT_OPEN_FOLDER, async (_e, id: string) => {
+    const rootPath = getProjectRoot(idSchema.parse(id))
     if (!rootPath) return { ok: false, error: '找不到项目文件夹。' }
     const error = await shell.openPath(rootPath)
     return error ? { ok: false, error } : { ok: true }

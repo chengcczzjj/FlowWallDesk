@@ -90,6 +90,9 @@ export function createCheckpointTools(context: WorkspaceToolContext) {
           const { runId, threadId } = ensureRunContext(context)
           const checkpoint = CheckpointStore.get(checkpointId)
           if (!checkpoint) return { ok: false, checkpointId, error: 'Checkpoint 不存在', contextFiles: [] }
+          if (!context.workspaceId || checkpoint.workspaceId !== context.workspaceId) {
+            return { ok: false, checkpointId, error: 'Checkpoint 不属于当前 Workspace。', contextFiles: [] }
+          }
           const affectedPaths = paths?.length ? paths : checkpoint.fileBackups.map((item) => item.path)
 
           if (dryRun) {
@@ -98,8 +101,17 @@ export function createCheckpointTools(context: WorkspaceToolContext) {
 
           if (approvalId) {
             const approval = ApprovalStore.get(approvalId)
-            if (!approval || approval.status !== 'approved') {
-              return { ok: false, approvalRequired: true, checkpointId, approvalId, error: '恢复 checkpoint 需要已批准的审批记录。', contextFiles: affectedPaths }
+            const approvalMatches = Boolean(
+              approval &&
+              approval.status === 'approved' &&
+              approval.workspaceId === context.workspaceId &&
+              approval.toolName === 'restore_checkpoint' &&
+              approval.action === '恢复 checkpoint' &&
+              approval.checkpointId === checkpointId &&
+              affectedPaths.every((item) => approval.affectedPaths.includes(item))
+            )
+            if (!approvalMatches) {
+              return { ok: false, approvalRequired: true, checkpointId, approvalId, error: '恢复 checkpoint 需要与当前 Workspace、快照和路径完全匹配的审批记录。', contextFiles: affectedPaths }
             }
             const result = CheckpointStore.restore(checkpointId, rootPath, paths)
             return { ok: true, checkpointId, ...result, contextFiles: result.restored }

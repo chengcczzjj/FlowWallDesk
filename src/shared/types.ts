@@ -385,7 +385,74 @@ export interface AgentAutomationResult {
   finishedAt: number | null
 }
 
+export type AppUpdatePhase =
+  | 'unsupported'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'not-available'
+  | 'error'
+
+export interface AppUpdateStatus {
+  phase: AppUpdatePhase
+  currentVersion: string
+  availableVersion?: string
+  progressPercent?: number
+  transferredBytes?: number
+  totalBytes?: number
+  bytesPerSecond?: number
+  lastCheckedAt?: number
+  message?: string
+  canCheck: boolean
+  canInstall: boolean
+}
+
+export interface LaunchAtLoginStatus {
+  enabled: boolean
+  supported: boolean
+  message?: string
+}
+
 export type ModelProvider = 'openai-compatible' | 'google' | 'deepseek'
+
+export interface ModelCapabilities {
+  toolCalling?: 'auto' | 'native' | 'disabled'
+  reasoning?: boolean
+  maxContextTokens?: number
+  maxOutputTokens?: number
+}
+
+export type WeatherConditionKind = 'sunny' | 'cloudy' | 'rainy' | 'snowy' | 'stormy' | 'foggy'
+
+export interface WeatherSnapshot {
+  ok: boolean
+  location: string
+  city?: string
+  usedUserLocation: boolean
+  current?: {
+    temperature: number
+    apparentTemperature: number
+    humidity: number
+    weatherCode: number
+    weather: string
+    condition: WeatherConditionKind
+    windSpeed: number
+    windDirection: number
+  }
+  forecast: Array<{
+    date: string
+    weatherCode: number
+    weather: string
+    condition: WeatherConditionKind
+    tempMax: number
+    tempMin: number
+    precipitation: number
+    windMax: number
+  }>
+  error?: string
+}
 
 export interface ModelProfile {
   id: string
@@ -398,4 +465,5 @@ export interface ModelProfile {
   temperature?: number
   maxTokens?: number
   headers?: Record<string, string>
+  capabilities?: ModelCapabilities
 }

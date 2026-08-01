@@ -13,4 +13,12 @@
  */
 
 export { getToolSet, type ToolCallEvent } from './registry'
-export { buildToolRouterPrompt, isRegisteredToolName, REGISTERED_TOOL_NAMES, type RegisteredToolName } from './toolRouter'
+export {
+  AGENT_RUN_TOOL_NAMES,
+  buildToolRouterPrompt,
+  decideToolRoute,
+  isRegisteredToolName,
+  REGISTERED_TOOL_NAMES,
+  type RegisteredToolName,
+  type ToolRouteDecision,
+} from './toolRouter'

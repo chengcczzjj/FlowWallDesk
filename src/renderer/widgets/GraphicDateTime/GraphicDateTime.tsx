@@ -51,15 +51,6 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
-function weatherCodeToText(code: number): string {
-  if ([0, 1].includes(code)) return 'clear'
-  if ([2, 3].includes(code)) return 'cloudy'
-  if ((code >= 45 && code <= 48) || (code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return 'rainy'
-  if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) return 'snowy'
-  if (code >= 95) return 'stormy'
-  return 'calm'
-}
-
 export function GraphicDateTime({ config }: GraphicDateTimeProps) {
   const themeId = (config?.themeId as string) || 'yellow'
   const darkMode = (config?.darkMode as boolean) ?? true
@@ -67,6 +58,7 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
     COLOR_THEMES.find((t) => t.id === themeId) || COLOR_THEMES.find((t) => t.id === 'yellow') || COLOR_THEMES[0]
   const [now, setNow] = useState(new Date())
   const [weatherSummary, setWeatherSummary] = useState<WeatherSummary>(DEFAULT_WEATHER)
+  const configuredCity = typeof config?.city === 'string' ? config.city.trim() : undefined
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000)
@@ -78,45 +70,22 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
 
     const fetchWeather = async () => {
       try {
-        let latitude: number
-        let longitude: number
-        let city = DEFAULT_WEATHER.city
-
-        try {
-          const locationResponse = await fetch('https://ipwho.is/')
-          const locationData = await locationResponse.json()
-          if (!locationData.success) throw new Error('ipwho.is failed')
-          latitude = Number(locationData.latitude)
-          longitude = Number(locationData.longitude)
-          city = locationData.city || city
-        } catch {
-          const fallbackResponse = await fetch('https://get.geojs.io/v1/ip/geo.json')
-          if (!fallbackResponse.ok) throw new Error('location fetch failed')
-          const fallbackData = await fallbackResponse.json()
-          latitude = Number(fallbackData.latitude)
-          longitude = Number(fallbackData.longitude)
-          city = fallbackData.city || city
-        }
-
-        const weatherResponse = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`
-        )
-        if (!weatherResponse.ok) throw new Error('weather fetch failed')
-        const weatherData = await weatherResponse.json()
-        const current = weatherData.current || {}
+        const snapshot = await window.canvasBridge?.fetchWeather({ city: configuredCity, days: 1 })
+        const current = snapshot?.current
+        if (!snapshot?.ok || !current) throw new Error(snapshot?.error || 'weather fetch failed')
 
         if (!cancelled) {
           setWeatherSummary({
-            city,
-            condition: weatherCodeToText(Number(current.weather_code)),
-            temp: Number.isFinite(Number(current.temperature_2m))
-              ? String(Math.round(Number(current.temperature_2m)))
+            city: snapshot.city || snapshot.location || DEFAULT_WEATHER.city,
+            condition: current.condition === 'sunny' ? 'clear' : current.condition,
+            temp: Number.isFinite(current.temperature)
+              ? String(Math.round(current.temperature))
               : '--',
-            humidity: Number.isFinite(Number(current.relative_humidity_2m))
-              ? String(Math.round(Number(current.relative_humidity_2m)))
+            humidity: Number.isFinite(current.humidity)
+              ? String(Math.round(current.humidity))
               : '--',
-            windSpeed: Number.isFinite(Number(current.wind_speed_10m))
-              ? String(Math.round(Number(current.wind_speed_10m)))
+            windSpeed: Number.isFinite(current.windSpeed)
+              ? String(Math.round(current.windSpeed))
               : '--',
           })
         }
@@ -125,11 +94,11 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
       }
     }
 
-    fetchWeather()
+    void fetchWeather()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [configuredCity])
 
   const day = now.toLocaleDateString('en-US', { day: '2-digit' })
   const month = now.toLocaleDateString('en-US', { month: 'long' }).toUpperCase()

@@ -4,6 +4,9 @@ const READ_KEYWORDS = /查看|读取|搜索|查找|找文件|分析|总结|检�
 const WRITE_KEYWORDS = /修改|改写|创建|生成|写入|写到|保存|存成|存到|导出|输出到|落盘|记录到|删除|移动|重命名|整理|归类|修复|实现|新增|替换|批量/i
 const COMMAND_KEYWORDS = /运行|执行|命令|脚本|测试|构建|npm|pnpm|python|node/i
 const AGENT_TASK_KEYWORDS = /文件|文件夹|目录|项目|代码|文档|表格|PDF|DOCX|XLSX|Excel|Word|OCR|截图|创建|生成|写入|写到|保存|存成|存到|导出|输出到|落盘|记录到|删除|移动|重命名|整理|归类|修复|实现|新增|替换|批量|运行|执行|命令|脚本|测试|构建|npm|pnpm|python|node/i
+const WIDGET_KEYWORDS = /组件|小组件|挂件|桌面组件|桌面文字|便签|贴纸|天气卡片|天气组件|日历组件|时钟组件|白噪音|快捷工具|桌宠|萌宠|放到桌面|加到桌面|摆到桌面|调整.*桌面|改.*组件/i
+const LOCAL_AGENT_DOMAIN_KEYWORDS = /文件|文件夹|目录|项目|代码|文档|表格|PDF|DOCX|XLSX|Excel|Word|OCR|截图|保存到|存成|存到|导出|输出到|落盘|记录到|运行|执行|命令|脚本|测试|构建|npm|pnpm|python|node/i
+const DEBUG_AGENT_KEYWORDS = /(检查|定位|排查|看看|查一下).*(工具|问题|失败|报错|错误|bug|为什么)|为什么.*(失败|报错|错误)|调试|修复|修一下|改一下/i
 
 function extractExpectedFiles(intent: string): string[] {
   const matches = intent.match(/[^\s"'<>|:*?]+\.(?:ts|tsx|js|jsx|json|md|txt|css|html|py|yml|yaml|csv|xlsx|docx|pdf)/gi)
@@ -22,9 +25,10 @@ export function createAgentRunTitle(params: { intent: string; workspace?: ChatPr
   const { intent, workspace } = params
   const hasWorkspace = Boolean(workspace?.rootPath ?? workspace?.path)
   const expectedFiles = extractExpectedFiles(intent)
-  const wantsWrite = WRITE_KEYWORDS.test(intent)
+  const debugIntent = DEBUG_AGENT_KEYWORDS.test(intent)
+  const wantsWrite = WRITE_KEYWORDS.test(intent) || /修复|修一下|改一下|调试/.test(intent)
   const wantsCommand = COMMAND_KEYWORDS.test(intent)
-  const wantsRead = READ_KEYWORDS.test(intent)
+  const wantsRead = READ_KEYWORDS.test(intent) || debugIntent
 
   if (/整理|归类|分类|收纳/i.test(intent)) return hasWorkspace ? '整理工作区文件' : '整理文件任务'
   if (/创建|生成|写入|新增/i.test(intent)) return hasWorkspace ? '生成工作区文件' : '生成文件任务'
@@ -45,8 +49,9 @@ export function createInitialAgentPlan(params: {
   const { intent, workspace } = params
   const hasWorkspace = Boolean(workspace?.rootPath ?? workspace?.path)
   const expectedFiles = extractExpectedFiles(intent)
-  const wantsRead = READ_KEYWORDS.test(intent)
-  const wantsWrite = WRITE_KEYWORDS.test(intent)
+  const debugIntent = DEBUG_AGENT_KEYWORDS.test(intent)
+  const wantsRead = READ_KEYWORDS.test(intent) || debugIntent
+  const wantsWrite = WRITE_KEYWORDS.test(intent) || /修复|修一下|改一下|调试/.test(intent)
   const wantsCommand = COMMAND_KEYWORDS.test(intent)
   const autoWorkspaceWrite = workspace?.permissionProfile === 'workspace-write' || workspace?.permissionProfile === 'full-access'
   const writeStepRequiresApproval = wantsCommand || !autoWorkspaceWrite
@@ -116,12 +121,16 @@ export function createInitialAgentPlan(params: {
 
 export function shouldCreateAgentRun(params: { intent: string; workspace?: ChatProject | null; force?: boolean }): boolean {
   if (params.force) return true
+  const debugIntent = DEBUG_AGENT_KEYWORDS.test(params.intent)
+  const widgetOnly = WIDGET_KEYWORDS.test(params.intent) && !debugIntent && !/文件|文件夹|目录|项目|代码|PDF|DOCX|XLSX|Excel|Word|OCR|运行|执行|命令|脚本|测试|构建|npm|pnpm|python|node/i.test(params.intent)
+  if (widgetOnly) return false
   const hasWorkspace = Boolean(params.workspace?.rootPath ?? params.workspace?.path)
   const expectedFiles = extractExpectedFiles(params.intent)
-  const wantsRead = hasWorkspace && READ_KEYWORDS.test(params.intent)
-  const wantsWrite = WRITE_KEYWORDS.test(params.intent)
+  const localAgentIntent = LOCAL_AGENT_DOMAIN_KEYWORDS.test(params.intent) || debugIntent || expectedFiles.length > 0
+  const wantsRead = hasWorkspace && (debugIntent || (localAgentIntent && READ_KEYWORDS.test(params.intent)))
+  const wantsWrite = localAgentIntent && (WRITE_KEYWORDS.test(params.intent) || /修复|修一下|改一下|调试/.test(params.intent))
   const wantsCommand = COMMAND_KEYWORDS.test(params.intent)
-  const namesAgentDomain = AGENT_TASK_KEYWORDS.test(params.intent)
+  const namesAgentDomain = localAgentIntent && AGENT_TASK_KEYWORDS.test(params.intent)
   return wantsWrite || wantsCommand || expectedFiles.length > 0 || wantsRead || (hasWorkspace && namesAgentDomain)
 }
 

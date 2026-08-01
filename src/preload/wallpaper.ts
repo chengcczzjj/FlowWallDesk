@@ -32,12 +32,19 @@ const api = {
     ipcRenderer.on(IPC.WALLPAPER_PAUSE_CAPTURE, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_PAUSE_CAPTURE, handler)
   },
+  onCaptureDemand: (cb: (enabled: boolean) => void): (() => void) => {
+    const handler = (_: unknown, enabled: boolean) => cb(enabled)
+    ipcRenderer.on(IPC.WALLPAPER_CAPTURE_DEMAND, handler)
+    return () => ipcRenderer.off(IPC.WALLPAPER_CAPTURE_DEMAND, handler)
+  },
 }
 
 export type WallpaperPreload = typeof api
 
-if (process.contextIsolated) {
-  contextBridge.exposeInMainWorld('wallpaperBridge', api)
-} else {
-  ;(window as unknown as { wallpaperBridge: typeof api }).wallpaperBridge = api
+export function exposeWallpaperApi(): void {
+  if (process.contextIsolated) {
+    contextBridge.exposeInMainWorld('wallpaperBridge', api)
+  } else {
+    ;(window as unknown as { wallpaperBridge: typeof api }).wallpaperBridge = api
+  }
 }

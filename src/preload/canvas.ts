@@ -1,11 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
+import type { DesktopSceneLayoutPlan } from '@shared/desktop-scene-layout'
 import type {
   WidgetInstance,
   NewsItem,
   StockItem,
   StockSymbol,
   ApiEndpointMeta,
+  WeatherSnapshot,
   DesktopIconImportResult,
   DesktopIconContextMenuResult,
   DesktopIconItem,
@@ -17,6 +19,16 @@ const api = {
     const handler = (_: unknown, list: WidgetInstance[]) => cb(list)
     ipcRenderer.on(IPC.WIDGET_SYNC, handler)
     return () => ipcRenderer.off(IPC.WIDGET_SYNC, handler)
+  },
+  onDesktopScenePreview: (cb: (plan: DesktopSceneLayoutPlan) => void): (() => void) => {
+    const handler = (_: unknown, plan: DesktopSceneLayoutPlan) => cb(plan)
+    ipcRenderer.on(IPC.DESKTOP_SCENE_PREVIEW_SHOW, handler)
+    return () => ipcRenderer.off(IPC.DESKTOP_SCENE_PREVIEW_SHOW, handler)
+  },
+  onDesktopScenePreviewClear: (cb: () => void): (() => void) => {
+    const handler = () => cb()
+    ipcRenderer.on(IPC.DESKTOP_SCENE_PREVIEW_CLEAR, handler)
+    return () => ipcRenderer.off(IPC.DESKTOP_SCENE_PREVIEW_CLEAR, handler)
   },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
   getFilePath: (file: File): string | undefined => {
@@ -62,12 +74,17 @@ const api = {
     ipcRenderer.on(IPC.WALLPAPER_FRAME, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_FRAME, handler)
   },
+  setWallpaperFrameDemand: (enabled: boolean): void => {
+    ipcRenderer.send(IPC.WALLPAPER_CAPTURE_DEMAND, enabled)
+  },
   /** 获取热搜新闻 */
   fetchNews: (source: string, maxItems: number): Promise<NewsItem[]> =>
     ipcRenderer.invoke(IPC.DATA_FETCH_NEWS, source, maxItems),
   /** 获取股票实时行情 */
   fetchStocks: (symbols: StockSymbol[]): Promise<StockItem[]> =>
     ipcRenderer.invoke(IPC.DATA_FETCH_STOCKS, symbols),
+  fetchWeather: (options?: { city?: string; days?: number }): Promise<WeatherSnapshot> =>
+    ipcRenderer.invoke(IPC.DATA_FETCH_WEATHER, options),
   /** 获取 API 注册表（供 LLM 或调试使用） */
   getApiRegistry: (): Promise<ApiEndpointMeta[]> =>
     ipcRenderer.invoke(IPC.DATA_GET_API_REGISTRY),
@@ -75,8 +92,10 @@ const api = {
 
 export type CanvasPreload = typeof api
 
-if (process.contextIsolated) {
-  contextBridge.exposeInMainWorld('canvasBridge', api)
-} else {
-  ;(window as unknown as { canvasBridge: typeof api }).canvasBridge = api
+export function exposeCanvasApi(): void {
+  if (process.contextIsolated) {
+    contextBridge.exposeInMainWorld('canvasBridge', api)
+  } else {
+    ;(window as unknown as { canvasBridge: typeof api }).canvasBridge = api
+  }
 }

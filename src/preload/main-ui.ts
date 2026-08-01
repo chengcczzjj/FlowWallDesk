@@ -1,10 +1,22 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile } from '@shared/types'
+import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
 
 const api = {
   app: {
     getVersion: (): Promise<string> => ipcRenderer.invoke(IPC.APP_GET_VERSION),
+    getLaunchAtLogin: (): Promise<LaunchAtLoginStatus> => ipcRenderer.invoke(IPC.APP_GET_LAUNCH_AT_LOGIN),
+    setLaunchAtLogin: (enabled: boolean): Promise<LaunchAtLoginStatus> =>
+      ipcRenderer.invoke(IPC.APP_SET_LAUNCH_AT_LOGIN, enabled),
+    getUpdateStatus: (): Promise<AppUpdateStatus> => ipcRenderer.invoke(IPC.APP_UPDATE_GET_STATUS),
+    checkForUpdates: (): Promise<AppUpdateStatus> => ipcRenderer.invoke(IPC.APP_UPDATE_CHECK),
+    downloadUpdate: (): Promise<AppUpdateStatus> => ipcRenderer.invoke(IPC.APP_UPDATE_DOWNLOAD),
+    installUpdate: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_UPDATE_INSTALL),
+    onUpdateStateChanged: (cb: (status: AppUpdateStatus) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) => cb(status)
+      ipcRenderer.on(IPC.APP_UPDATE_STATE_CHANGED, handler)
+      return () => ipcRenderer.off(IPC.APP_UPDATE_STATE_CHANGED, handler)
+    },
     getLocationSettings: (): Promise<{ preciseLocationEnabled: boolean }> => ipcRenderer.invoke(IPC.APP_GET_LOCATION_SETTINGS),
     setPreciseLocationEnabled: (enabled: boolean): Promise<{ ok: boolean; settings: { preciseLocationEnabled: boolean }; error?: string }> =>
       ipcRenderer.invoke(IPC.APP_SET_PRECISE_LOCATION_ENABLED, enabled),
@@ -40,6 +52,8 @@ const api = {
     apply: (item: WallpaperItem): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WALLPAPER_APPLY, item),
     pickFile: (): Promise<WallpaperItem | null> => ipcRenderer.invoke(IPC.WALLPAPER_PICK_FILE),
+    grantPreview: (filePath: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_GRANT_PREVIEW, filePath),
     attachStatus: (): Promise<boolean> => ipcRenderer.invoke(IPC.WALLPAPER_ATTACH_STATUS),
     saveSettings: (wallpaperId: string, settings: WallpaperSettings): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WALLPAPER_SAVE_SETTINGS, wallpaperId, settings),
@@ -67,13 +81,18 @@ const api = {
       ipcRenderer.invoke(IPC.DATA_FETCH_NEWS, source, maxItems),
     fetchStocks: (symbols: StockSymbol[]): Promise<StockItem[]> =>
       ipcRenderer.invoke(IPC.DATA_FETCH_STOCKS, symbols),
+    fetchWeather: (options?: { city?: string; days?: number }): Promise<WeatherSnapshot> =>
+      ipcRenderer.invoke(IPC.DATA_FETCH_WEATHER, options),
     getApiRegistry: (): Promise<ApiEndpointMeta[]> =>
       ipcRenderer.invoke(IPC.DATA_GET_API_REGISTRY),
   },
   chat: {
-    /** 发送消息（同步返回 streamId，后续通过事件接收流式数据） */
-    sendMessage: (payload: { conversationId?: string; projectId?: string | null; mode?: ConversationMode; text: string; internal?: boolean; forceAgentRun?: boolean }): string =>
-      ipcRenderer.sendSync(IPC.CHAT_SEND_MESSAGE, payload),
+    /** 本地生成 streamId，避免同步 IPC 阻塞渲染线程。 */
+    sendMessage: (payload: { conversationId?: string; projectId?: string | null; mode?: ConversationMode; text: string; internal?: boolean; forceAgentRun?: boolean }): string => {
+      const streamId = globalThis.crypto.randomUUID()
+      ipcRenderer.send(IPC.CHAT_SEND_MESSAGE, { streamId, payload })
+      return streamId
+    },
     stopStream: (streamId: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.CHAT_STOP_STREAM, streamId),
     /** 监听流式 token */
@@ -203,12 +222,14 @@ const api = {
 
 export type LingyueApi = typeof api
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('lingyue', api)
-  } catch (err) {
-    console.error(err)
+export function exposeMainUiApi(): void {
+  if (process.contextIsolated) {
+    try {
+      contextBridge.exposeInMainWorld('lingyue', api)
+    } catch (err) {
+      console.error(err)
+    }
+  } else {
+    ;(window as unknown as { lingyue: typeof api }).lingyue = api
   }
-} else {
-  ;(window as unknown as { lingyue: typeof api }).lingyue = api
 }

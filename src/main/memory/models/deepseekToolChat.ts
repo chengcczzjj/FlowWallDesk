@@ -334,7 +334,7 @@ async function executeDeepSeekToolCall(params: {
 }
 
 async function* emptyTextStream(): AsyncIterable<string> {
-  return
+  yield* []
 }
 
 export async function streamDeepSeekToolChat(params: {

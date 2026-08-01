@@ -1,6 +1,7 @@
 import { AutomationStore } from './automationStore'
 import { ChatService } from '../chat/chatService'
 import type { AgentAutomation } from '@shared/types'
+import { automationStatusFromChat } from '@shared/agent-runtime'
 
 let timer: ReturnType<typeof setInterval> | null = null
 let ticking = false
@@ -10,44 +11,54 @@ async function executeAutomation(automation: AgentAutomation): Promise<void> {
   const result = AutomationStore.createResult(automation.id)
   let runId: string | null = null
   let summary = ''
-  await ChatService.sendMessage(
-    {
-      conversationId: automation.conversationId ?? undefined,
-      projectId: automation.workspaceId,
-      mode: 'work',
-      text: automation.prompt,
-    },
-    {
-      onToken(delta) {
-        summary += delta
+  try {
+    const terminal = await ChatService.sendMessage(
+      {
+        conversationId: automation.conversationId ?? undefined,
+        projectId: automation.workspaceId,
+        mode: 'work',
+        text: automation.prompt,
       },
-      onDone(full) {
-        AutomationStore.updateResult(result.id, {
-          runId,
-          status: 'completed',
-          summary: (full || summary).slice(0, 1000),
-          finishedAt: Date.now(),
-        })
-        AutomationStore.finishSchedule(automation.id)
-      },
-      onError(error) {
-        AutomationStore.updateResult(result.id, {
-          runId,
-          status: 'failed',
-          error,
-          summary: summary.slice(0, 1000) || null,
-          finishedAt: Date.now(),
-        })
-        AutomationStore.finishSchedule(automation.id)
-      },
-      onRunEvent(event) {
-        if (!runId && event.runId) {
-          runId = event.runId
-          AutomationStore.updateResult(result.id, { runId })
-        }
-      },
-    }
-  )
+      {
+        onToken(delta) {
+          summary += delta
+        },
+        onDone(full) {
+          summary = full || summary
+        },
+        onError(error) {
+          summary ||= error
+        },
+        onRunEvent(event) {
+          if (!runId && event.runId) {
+            runId = event.runId
+            AutomationStore.updateResult(result.id, { runId })
+          }
+        },
+      }
+    )
+
+    const terminalState = automationStatusFromChat(terminal.status)
+    const error = terminalState.error ?? terminal.error
+
+    AutomationStore.updateResult(result.id, {
+      runId: terminal.runId ?? runId,
+      status: terminalState.status,
+      summary: (terminal.text || summary).slice(0, 1000) || null,
+      error: error || null,
+      finishedAt: Date.now(),
+    })
+  } catch (error) {
+    AutomationStore.updateResult(result.id, {
+      runId,
+      status: 'failed',
+      error: (error as Error).message,
+      summary: summary.slice(0, 1000) || null,
+      finishedAt: Date.now(),
+    })
+  } finally {
+    AutomationStore.finishSchedule(automation.id)
+  }
 }
 
 export async function runAutomationNow(id: string): Promise<{ ok: boolean; error?: string }> {

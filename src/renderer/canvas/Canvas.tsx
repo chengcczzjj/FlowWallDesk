@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WidgetInstance } from '@shared/types'
+import type { DesktopSceneLayoutPlan, PlannedSceneWidget } from '@shared/desktop-scene-layout'
 import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } from '../widgets'
 import { FloatingToolbar } from '../widgets/FloatingToolbar'
-import { WallpaperFrameCtx, WidgetPosCtx } from './contexts'
+import { WidgetPosCtx } from './contexts'
+import { setWallpaperFrame } from './wallpaperFrameStore'
 
 const GRID = 16
 const EDGE_PADDING = 24
@@ -337,7 +339,7 @@ export function Canvas() {
   widgetsRef.current = widgets
   const [editing, setEditing] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [frame, setFrame] = useState<string | null>(null)
+  const [scenePreview, setScenePreview] = useState<DesktopSceneLayoutPlan | null>(null)
   const [snapPreviews, setSnapPreviews] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>(
     []
   )
@@ -345,12 +347,38 @@ export function Canvas() {
   useEffect(() => {
     window.canvasBridge?.getWidgets().then((list) => setWidgets(list))
     const offSync = window.canvasBridge?.onSync((list) => setWidgets(list))
-    const offFrame = window.canvasBridge?.onFrame((data) => setFrame(data))
+    const offFrame = window.canvasBridge?.onFrame(setWallpaperFrame)
+    const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
+    const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
     return () => {
       offSync?.()
       offFrame?.()
+      offScenePreview?.()
+      offScenePreviewClear?.()
     }
   }, [])
+
+  useEffect(() => {
+    const glassTypes = new Set([
+      'calendar', 'news', 'stocks', 'quicktools', 'sysmonitor', 'pet',
+      'desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock',
+    ])
+    const demanded = widgets.some((widget) => {
+      if (!widget.enabled) return false
+      if (glassTypes.has(widget.type)) return true
+      return widget.type === 'generated-widget' && widget.config?.definition &&
+        typeof widget.config.definition === 'object' &&
+        (widget.config.definition as { theme?: unknown }).theme === 'glass'
+    })
+    window.canvasBridge?.setWallpaperFrameDemand(demanded)
+    return () => window.canvasBridge?.setWallpaperFrameDemand(false)
+  }, [widgets])
+
+  useEffect(() => {
+    if (!scenePreview) return
+    const timer = window.setTimeout(() => setScenePreview(null), 60_000)
+    return () => window.clearTimeout(timer)
+  }, [scenePreview])
 
   useEffect(() => {
     window.canvasBridge?.setEditMode(editing)
@@ -378,6 +406,8 @@ export function Canvas() {
     },
     [editing, onBgClick]
   )
+
+  const previewHiddenIds = useMemo(() => new Set(scenePreview?.hiddenWidgetIds ?? []), [scenePreview])
 
   const updateWidgetConfig = useCallback((id: string, newConfig: Record<string, unknown>, options?: ConfigUpdateOptions) => {
     setWidgets((prev) => {
@@ -448,8 +478,7 @@ export function Canvas() {
   )
 
   return (
-    <WallpaperFrameCtx.Provider value={frame}>
-      <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick} onContextMenu={onBgContextMenu}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick} onContextMenu={onBgContextMenu}>
         {widgets
           .filter((w) => w.enabled)
           .map((w) => (
@@ -458,6 +487,7 @@ export function Canvas() {
               widget={w}
               editing={editing}
               selected={selectedId === w.id}
+              previewDimmed={previewHiddenIds.has(w.id)}
               onSelect={() => {
                 if (editing) setSelectedId(w.id)
               }}
@@ -471,6 +501,7 @@ export function Canvas() {
               onDragPreview={onDragPreview}
             />
           ))}
+        {scenePreview && <DesktopScenePreviewLayer plan={scenePreview} />}
         {/* 吸附预览虚线框 */}
         {snapPreviews.map((p) => (
           <div
@@ -489,8 +520,101 @@ export function Canvas() {
             }}
           />
         ))}
+    </div>
+  )
+}
+
+function DesktopScenePreviewLayer({ plan }: { plan: DesktopSceneLayoutPlan }) {
+  const previewWidgets = plan.widgets.filter((widget) => !widget.persistent)
+  const score = plan.aestheticCheck.score
+  const ok = plan.aestheticCheck.ok
+
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: 'absolute',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 850,
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          maxWidth: 'min(680px, calc(100vw - 48px))',
+          padding: '9px 14px',
+          border: '1px solid rgba(255,255,255,0.36)',
+          borderRadius: 8,
+          background: 'rgba(15,23,42,0.58)',
+          color: '#fff',
+          fontSize: 12,
+          lineHeight: 1.35,
+          boxShadow: '0 12px 34px rgba(15,23,42,0.24)',
+          backdropFilter: 'blur(18px)',
+        }}
+      >
+        <strong style={{ fontSize: 13, fontWeight: 800 }}>{plan.sceneName}</strong>
+        <span style={{ opacity: 0.82 }}>{ok ? '美学检查通过' : '需要微调'}</span>
+        <span style={{ opacity: 0.72 }}>评分 {score}</span>
       </div>
-    </WallpaperFrameCtx.Provider>
+      {previewWidgets.map((widget) => (
+        <DesktopScenePreviewGhost key={`${widget.id}-${widget.source}`} widget={widget} />
+      ))}
+    </div>
+  )
+}
+
+function DesktopScenePreviewGhost({ widget }: { widget: PlannedSceneWidget }) {
+  const label = widget.source === 'new' ? '新增' : '调整'
+  const isHero = widget.visualWeight === 'hero'
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: widget.rect.x,
+        top: widget.rect.y,
+        width: widget.rect.width,
+        height: widget.rect.height,
+        border: isHero ? '2px solid rgba(96,165,250,0.82)' : '1.5px dashed rgba(255,255,255,0.78)',
+        borderRadius: 8,
+        background: widget.material === 'transparent'
+          ? 'rgba(96,165,250,0.08)'
+          : 'rgba(248,250,252,0.14)',
+        boxShadow: isHero
+          ? '0 16px 46px rgba(37,99,235,0.22), inset 0 0 0 1px rgba(255,255,255,0.24)'
+          : '0 10px 28px rgba(15,23,42,0.16), inset 0 0 0 1px rgba(255,255,255,0.12)',
+        backdropFilter: widget.material === 'transparent' ? undefined : 'blur(10px)',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          left: 8,
+          top: 8,
+          display: 'inline-flex',
+          alignItems: 'center',
+          height: 22,
+          padding: '0 8px',
+          borderRadius: 8,
+          background: 'rgba(15,23,42,0.7)',
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 750,
+          lineHeight: '22px',
+          boxShadow: '0 4px 14px rgba(15,23,42,0.18)',
+        }}
+      >
+        {label} {widget.type}
+      </span>
+    </div>
   )
 }
 
@@ -498,6 +622,7 @@ function DraggableWidget({
   widget,
   editing,
   selected,
+  previewDimmed,
   onSelect,
   onEnterEdit,
   onUpdateConfig,
@@ -508,6 +633,7 @@ function DraggableWidget({
   widget: WidgetInstance
   editing: boolean
   selected: boolean
+  previewDimmed?: boolean
   onSelect: () => void
   onEnterEdit: () => void
   onUpdateConfig: (config: Record<string, unknown>, options?: ConfigUpdateOptions) => void
@@ -968,7 +1094,7 @@ function DraggableWidget({
         onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
       }
     },
-    [clearLongPressDrag, widget, onResolveCollisions, getActualSize]
+    [clearInteractivePointer, clearLongPressDrag, widget, onResolveCollisions, getActualSize]
   )
 
   const onPointerCancel = useCallback(
@@ -982,7 +1108,7 @@ function DraggableWidget({
       setDragging(false)
       setResizing(false)
     },
-    [clearLongPressDrag]
+    [clearInteractivePointer, clearLongPressDrag]
   )
 
   const onContextMenu = useCallback(
@@ -1045,8 +1171,10 @@ function DraggableWidget({
         borderRadius: 16,
         pointerEvents: 'auto',
         cursor: editing ? (dragging ? 'grabbing' : 'grab') : 'default',
+        opacity: previewDimmed ? 0.34 : 1,
+        filter: previewDimmed ? 'saturate(0.65) blur(0.2px)' : undefined,
         transition:
-          isActive || styleChanging ? 'none' : 'left 0.25s ease, top 0.25s ease, width 0.2s ease, height 0.2s ease',
+          isActive || styleChanging ? 'none' : 'left 0.25s ease, top 0.25s ease, width 0.2s ease, height 0.2s ease, opacity 0.2s ease, filter 0.2s ease',
         touchAction: 'none',
       }}
     >

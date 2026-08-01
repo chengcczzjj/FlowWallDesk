@@ -147,8 +147,27 @@ export function evaluateWorkspaceAccess(params: {
   const exists = fs.existsSync(normalizedPath)
 
   if (!exists) {
-    const isOutsideWorkspace = !isInside(rootRealPath, normalizedPath)
-    const isSensitive = isSensitiveRelativePath(lexicalRelativePath)
+    // 不存在的目标仍可能位于一个指向 Workspace 外部的 junction/symlink 下。
+    // 从最近存在的祖先解析真实路径，避免创建文件时绕过边界检查。
+    let existingAncestor = normalizedPath
+    while (!fs.existsSync(existingAncestor)) {
+      const parent = path.dirname(existingAncestor)
+      if (parent === existingAncestor) break
+      existingAncestor = parent
+    }
+    const ancestorRealPath = fs.existsSync(existingAncestor)
+      ? fs.realpathSync.native(existingAncestor)
+      : existingAncestor
+    const resolvedFromAncestor = path.resolve(
+      ancestorRealPath,
+      path.relative(existingAncestor, normalizedPath),
+    )
+    const lexicalInside = isInside(rootRealPath, normalizedPath)
+    const realInside = isInside(rootRealPath, resolvedFromAncestor)
+    const isSymlinkEscape = lexicalInside && !realInside
+    const isOutsideWorkspace = !lexicalInside || !realInside
+    const resolvedRelativePath = normalizeRelative(path.relative(rootRealPath, resolvedFromAncestor))
+    const isSensitive = isSensitiveRelativePath(realInside ? resolvedRelativePath : lexicalRelativePath)
     if (!isOutsideWorkspace && (params.operation === 'write_file' || params.operation === 'create_directory' || params.operation === 'copy_path' || params.operation === 'move_path')) {
       const decision = classifyAllowedOperation(params.operation, isSensitive)
       return {
@@ -157,11 +176,11 @@ export function evaluateWorkspaceAccess(params: {
         rootPath: rootRealPath,
         requestedPath,
         normalizedPath,
-        resolvedPath: normalizedPath,
-        relativePath: lexicalRelativePath,
+        resolvedPath: resolvedFromAncestor,
+        relativePath: resolvedRelativePath,
         exists: false,
         isOutsideWorkspace: false,
-        isSymlinkEscape: false,
+        isSymlinkEscape,
         isSensitive,
       }
     }
@@ -169,16 +188,20 @@ export function evaluateWorkspaceAccess(params: {
     return {
       decision: 'denied',
       riskLevel: 'low',
-      reason: `路径不存在: ${lexicalRelativePath}`,
+      reason: isSymlinkEscape
+        ? '目标路径通过符号链接或目录联接跳出了当前工作文件夹，已阻止访问。'
+        : isOutsideWorkspace
+          ? '目标路径位于当前工作文件夹之外，已阻止访问。'
+          : `路径不存在: ${lexicalRelativePath}`,
       operation: params.operation,
       rootPath: rootRealPath,
       requestedPath,
       normalizedPath,
-      resolvedPath: null,
+      resolvedPath: isOutsideWorkspace ? resolvedFromAncestor : null,
       relativePath: lexicalRelativePath,
       exists: false,
       isOutsideWorkspace,
-      isSymlinkEscape: false,
+      isSymlinkEscape,
       isSensitive,
     }
   }
