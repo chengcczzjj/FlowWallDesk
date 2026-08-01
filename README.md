@@ -56,7 +56,7 @@ npm run build:win:signed  # 未配置证书时先用 build:win 做内部验证
 git tag -a v1.0.1 -m "LingyueDesk 1.0.1"
 ```
 
-随后创建同版本 GitHub Release，并上传 `dist/latest.yml`、安装包和对应 `.blockmap`。客户端更新源必须可由终端用户公开访问；当前 `chengcczzjj/FlowWallDesk` 为私有仓库，正式对外启用更新前需公开 Release 源，或将 `electron-builder.yml` 切换到公共对象存储。
+随后创建同版本 GitHub Release，并上传 `dist/latest.yml`、安装包和对应 `.blockmap`。`chengcczzjj/FlowWallDesk` 已设为公开仓库，客户端可直接发现公开 Release；如果后续改回私有仓库，需要同步切换到公共对象存储更新源。
 
 ## 目录结构
 

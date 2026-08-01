@@ -1,5 +1,23 @@
 # 灵月桌面 开发日志
 
+## [2026-08-01 19:14] 发布 1.0.1 自动更新测试版
+
+**变更摘要**: 将桌面小组件毛玻璃默认模糊强度从 20px 提升到 24px，升级版本并生成用于验证公开 GitHub Release 自动更新链路的 1.0.1 安装包。
+
+**涉及模块**:
+
+- `src/renderer/widgets/FrostedGlassBackground.tsx`: 提高未显式配置组件的默认毛玻璃模糊强度。
+- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 将应用与发布契约版本同步升级到 1.0.1。
+- `README.md` / `TempFile/文档资料/project-status.md`: 同步公开更新源和正式更新测试版状态。
+
+**遇到的问题**:
+
+- 未打包版本首次启动在后台保持运行，主窗口不可见 → 再次启动触发单实例唤起后完成设置页 v1.0.1 实机验证。
+
+**Git Commit**: 已提交 — `feat(release): publish LingyueDesk 1.0.1`
+
+---
+
 ## [2026-08-01 10:35] 发布首个正式版本并完成桌面实测
 
 **变更摘要**: 完成 Agent/记忆/AI 小组件架构升级与安全性能修复，接入自动更新和开机启动，完成开发态、打包态和安装态实操验证并生成 v1.0.0 安装包。

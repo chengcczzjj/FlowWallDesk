@@ -12,7 +12,7 @@ import { getWallpaperFrame, subscribeWallpaperFrame } from '../canvas/wallpaperF
  */
 export function FrostedGlassBackground({
   overlayColor = 'rgba(255,255,255,0.85)',
-  blurPx = 20,
+  blurPx = 24,
 }: {
   overlayColor?: string
   blurPx?: number

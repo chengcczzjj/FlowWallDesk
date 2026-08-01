@@ -1,6 +1,6 @@
 {
   "name": "lingyue-desk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "灵月 — Windows 桌面 AI 伴侣（动态壁纸 / 桌面组件 / 桌宠）",
   "main": "./out/main/index.js",
