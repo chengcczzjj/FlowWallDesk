@@ -1,5 +1,26 @@
 # 灵月桌面 开发日志
 
+## [2026-08-01 23:05] 发布 1.0.2 Dock 与毛玻璃稳定性修复版
+
+**变更摘要**: 修复反复全屏、最小化造成壁纸暂停/恢复后 Dock 与图标收纳悬停失效、图标无法点击的问题，并将组件背景升级为带抽帧兜底的真实毛玻璃效果。
+
+**涉及模块**:
+
+- `src/main/windows/` / `src/renderer/canvas/Canvas.tsx` / `src/shared/desktop-occlusion.ts`: 统一桌面遮挡状态机，恢复时重建窗口层级、鼠标穿透和画布交互状态。
+- `src/renderer/widgets/DesktopIcons/DesktopIcons.tsx`: 清理悬停、拖拽、指针捕获和动画残留，并按恢复后的真实光标位置重新对齐命中状态。
+- `src/main/ipc/wallpaperIpc.ts` / `src/renderer/wallpaper/Wallpaper.tsx`: 稳定壁纸暂停/恢复订阅，取消过期播放任务并增加抽帧失活 watchdog。
+- `src/renderer/canvas/wallpaperFrameStore.ts` / `src/renderer/widgets/FrostedGlassBackground.tsx`: 增加像素级预模糊帧和 CSS 模糊双重保障，避免透明桌面窗口合成时退化成纯半透明背景。
+- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 将应用与发布契约版本同步升级到 1.0.2。
+
+**遇到的问题**:
+
+- 透明画布在反复遮挡时持续调整 z-order，并遗留 pointer capture 与 MotionValue 状态，最终导致点击链路失效 → 用稳定遮挡状态机收敛窗口操作，并在恢复边界完整重置交互状态。
+- CSS `backdrop-filter` 无法跨 Electron 透明窗口采样壁纸，原实现实际只剩半透明叠色 → 将壁纸帧传入画布并预先做像素模糊，渲染帧中断时由主进程截图兜底。
+
+**Git Commit**: 已提交 — `fix(release): publish LingyueDesk 1.0.2`
+
+---
+
 ## [2026-08-01 19:14] 发布 1.0.1 自动更新测试版
 
 **变更摘要**: 将桌面小组件毛玻璃默认模糊强度从 20px 提升到 24px，升级版本并生成用于验证公开 GitHub Release 自动更新链路的 1.0.1 安装包。

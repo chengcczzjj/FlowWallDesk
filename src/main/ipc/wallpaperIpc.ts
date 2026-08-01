@@ -309,14 +309,23 @@ async function listAllWallpapers(): Promise<WallpaperItem[]> {
 
 // ─── 壁纸帧捕获（用于组件毛玻璃效果）───
 // video/image 类型由壁纸渲染进程 canvas 抽帧，通过 IPC 中转
-// web 类型（iframe）无法用 canvas.drawImage，改用主进程 capturePage
+// web 类型与渲染端断帧场景由主进程 capturePage 兜底
 let captureTimer: ReturnType<typeof setInterval> | null = null
-let captureStartTimer: ReturnType<typeof setTimeout> | null = null
 let captureInFlight = false
 let wallpaperFrameDemanded = false
+let lastRendererFrameAt = 0
+let rendererFrameSeen = false
+let fallbackCaptureActive = false
+const RENDERER_FRAME_STALE_MS = 1_250
 
-async function captureWebWallpaperFrame(): Promise<void> {
+async function captureWallpaperFrameFallback(): Promise<void> {
   if (captureInFlight || !wallpaperFrameDemanded || isDesktopOccluded()) return
+  const wallpaperType = store.get('wallpaper').current?.type
+  if (wallpaperType !== 'web' && Date.now() - lastRendererFrameAt < RENDERER_FRAME_STALE_MS) return
+  if (!fallbackCaptureActive) {
+    fallbackCaptureActive = true
+    console.warn(`[wallpaper] renderer frames stale; using main capture fallback (${wallpaperType ?? 'unknown'})`)
+  }
   const wp = getWallpaperWindow()
   const canvas = getCanvasWindow()
   if (
@@ -341,28 +350,15 @@ async function captureWebWallpaperFrame(): Promise<void> {
 
 function startMainCapture(): void {
   if (!wallpaperFrameDemanded || captureTimer) return
-  void captureWebWallpaperFrame()
-  captureTimer = setInterval(() => void captureWebWallpaperFrame(), 250)
+  void captureWallpaperFrameFallback()
+  captureTimer = setInterval(() => void captureWallpaperFrameFallback(), 250)
 }
 
 function stopMainCapture(): void {
-  if (captureStartTimer) {
-    clearTimeout(captureStartTimer)
-    captureStartTimer = null
-  }
   if (captureTimer) {
     clearInterval(captureTimer)
     captureTimer = null
   }
-}
-
-function scheduleMainCapture(delayMs: number): void {
-  stopMainCapture()
-  if (!wallpaperFrameDemanded) return
-  captureStartTimer = setTimeout(() => {
-    captureStartTimer = null
-    if (store.get('wallpaper').current?.type === 'web') startMainCapture()
-  }, delayMs)
 }
 
 export function registerWallpaperIpc(): void {
@@ -376,6 +372,15 @@ export function registerWallpaperIpc(): void {
     if (_e.sender.id !== getWallpaperWindow()?.webContents.id) return
     if (typeof data !== 'string' || data.length > 5 * 1024 * 1024 || !data.startsWith('data:image/jpeg;base64,')) return
     if (!wallpaperFrameDemanded || isDesktopOccluded()) return
+    lastRendererFrameAt = Date.now()
+    if (!rendererFrameSeen) {
+      rendererFrameSeen = true
+      console.log('[wallpaper] renderer frame stream active')
+    }
+    if (fallbackCaptureActive) {
+      fallbackCaptureActive = false
+      console.log('[wallpaper] renderer frame stream recovered; fallback idle')
+    }
     const canvas = getCanvasWindow()
     safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, data)
   })
@@ -386,8 +391,11 @@ export function registerWallpaperIpc(): void {
     safeSendToWindow(getWallpaperWindow(), IPC.WALLPAPER_CAPTURE_DEMAND, enabled)
     if (!enabled) {
       stopMainCapture()
-    } else if (store.get('wallpaper').current?.type === 'web') {
-      scheduleMainCapture(0)
+      rendererFrameSeen = false
+      fallbackCaptureActive = false
+    } else {
+      lastRendererFrameAt = Date.now()
+      startMainCapture()
     }
   })
 
@@ -400,6 +408,9 @@ export function registerWallpaperIpc(): void {
     if (payload?.itemId && payload.itemId !== current.id) return
     if (payload?.source && payload.source !== current.source) return
     safeSendToWindow(getWallpaperWindow(), IPC.WALLPAPER_CAPTURE_DEMAND, wallpaperFrameDemanded)
+    // READY may arrive after the edge-triggered occlusion event, so always resync it.
+    safeSendToWindow(getWallpaperWindow(), IPC.WALLPAPER_PAUSE_CAPTURE, isDesktopOccluded())
+    if (wallpaperFrameDemanded) startMainCapture()
     if (!isWallpaperAttached()) {
       await ensureWallpaperAttached()
       refreshCanvasZOrder()
@@ -418,13 +429,11 @@ export function registerWallpaperIpc(): void {
     // 壁纸操作可能扰乱画布 z-order，刷新一次
     refreshCanvasZOrder()
 
-    // web 类型壁纸无法在渲染端 canvas 抽帧（iframe 跨域），改用主进程 capturePage
-    if (item.type === 'web') {
-      // capturePage 需要等 iframe 加载完成，延迟启动
-      scheduleMainCapture(1000)
-    } else {
-      stopMainCapture() // video/image 由渲染端抽帧
-    }
+    // 主进程定时器同时负责 web 抽帧与 video/image 断帧看门狗。
+    lastRendererFrameAt = Date.now()
+    rendererFrameSeen = false
+    fallbackCaptureActive = false
+    if (wallpaperFrameDemanded) startMainCapture()
 
     await loadWidgetsForWallpaper(item.id)
 
@@ -687,10 +696,8 @@ export async function restoreWallpaper(): Promise<void> {
     if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
       console.log('[wallpaper] restore 推送:', state.current?.name)
       safeSendToWindow(win, IPC.WALLPAPER_LOAD, state.current)
-      // web 类型壁纸启动主进程帧捕获
-      if (state.current?.type === 'web') {
-        scheduleMainCapture(2000)
-      }
+      lastRendererFrameAt = Date.now()
+      if (wallpaperFrameDemanded) startMainCapture()
     }
   }
   if (win.webContents.isLoading()) {

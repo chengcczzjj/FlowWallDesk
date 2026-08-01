@@ -12,6 +12,7 @@ import type {
   DesktopIconContextMenuResult,
   DesktopIconItem,
   DesktopIconLaunchResult,
+  CanvasOcclusionState,
 } from '@shared/types'
 
 const api = {
@@ -29,6 +30,11 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on(IPC.DESKTOP_SCENE_PREVIEW_CLEAR, handler)
     return () => ipcRenderer.off(IPC.DESKTOP_SCENE_PREVIEW_CLEAR, handler)
+  },
+  onDesktopOcclusionChange: (cb: (state: CanvasOcclusionState) => void): (() => void) => {
+    const handler = (_: unknown, state: CanvasOcclusionState) => cb(state)
+    ipcRenderer.on(IPC.CANVAS_OCCLUSION_CHANGED, handler)
+    return () => ipcRenderer.off(IPC.CANVAS_OCCLUSION_CHANGED, handler)
   },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
   getFilePath: (file: File): string | undefined => {

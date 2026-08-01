@@ -69,6 +69,8 @@ export const IPC = {
   CANVAS_CONTEXT_MENU: 'canvas:context-menu',
   // 画布 → 主进程：编辑模式（z-order + 穿透 + 焦点）
   CANVAS_SET_EDIT_MODE: 'canvas:set-edit-mode',
+  // 主进程 → 画布：桌面被全屏窗口遮挡/重新可见
+  CANVAS_OCCLUSION_CHANGED: 'canvas:occlusion-changed',
   // 主进程 → 壁纸窗口：暂停/恢复帧捕获（全屏遮挡优化）
   WALLPAPER_PAUSE_CAPTURE: 'wallpaper:pause-capture',
 

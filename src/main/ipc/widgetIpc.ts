@@ -685,13 +685,7 @@ export function registerWidgetIpc(): void {
   ipcMain.on(IPC.CANVAS_SET_IGNORE_MOUSE, (_e, ignore: boolean) => {
     assertTrustedIpcSender(_e, ['canvas'])
     if (typeof ignore !== 'boolean') return
-    const win = getCanvasWindow()
-    if (!win) return
-    if (ignore) {
-      win.setIgnoreMouseEvents(true, { forward: true })
-    } else {
-      win.setIgnoreMouseEvents(false)
-    }
+    setCanvasMousePassthrough(ignore)
   })
 
   // 原生右键菜单（避免 setIgnoreMouseEvents 冲突）

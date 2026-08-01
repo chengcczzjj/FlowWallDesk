@@ -5,3 +5,6 @@ export const WallpaperFrameCtx = createContext<string | null>(null)
 
 /** 当前组件在画布上的位置（用于毛玻璃偏移对齐） */
 export const WidgetPosCtx = createContext<{ x: number; y: number }>({ x: 0, y: 0 })
+
+/** Increments whenever full-screen occlusion invalidates pointer/hover state. */
+export const DesktopInteractionEpochCtx = createContext(0)

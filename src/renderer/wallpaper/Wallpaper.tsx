@@ -91,7 +91,13 @@ export function Wallpaper() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
   const playRetryTimerRef = useRef<number | null>(null)
+  const playRequestGenerationRef = useRef(0)
   const readyReportedRef = useRef<string | null>(null)
+  const captureErrorKeyRef = useRef<string | null>(null)
+  const captureDemandRef = useRef(false)
+  const pausedRef = useRef(false)
+  const [captureDemanded, setCaptureDemanded] = useState(false)
+  const [capturePaused, setCapturePaused] = useState(false)
 
   // 实时设置状态
   const [volume, setVolume] = useState(50)
@@ -118,7 +124,12 @@ export function Wallpaper() {
   }, [item])
 
   const playVideo = useCallback(
-    (attempt = 0) => {
+    (attempt = 0, requestGeneration?: number) => {
+      const generation = requestGeneration ?? ++playRequestGenerationRef.current
+      if (pausedRef.current) {
+        clearPlayRetry()
+        return
+      }
       const v = videoRef.current
       if (!v || item?.type !== 'video') return
       clearPlayRetry()
@@ -127,14 +138,23 @@ export function Wallpaper() {
       v.playbackRate = speed
       v.play()
         .then(() => {
+          if (pausedRef.current) {
+            v.pause()
+            return
+          }
+          if (generation !== playRequestGenerationRef.current) return
           setVideoStarted(true)
           if (volume > 0) v.muted = false
         })
         .catch((e: DOMException) => {
+          if (generation !== playRequestGenerationRef.current || pausedRef.current) return
           console.warn('[wallpaper] video.play 被拒:', e.name, e.message)
           if (attempt >= 3 || videoRef.current !== v) return
           v.muted = true
-          playRetryTimerRef.current = window.setTimeout(() => playVideo(attempt + 1), attempt === 0 ? 250 : 1000)
+          playRetryTimerRef.current = window.setTimeout(
+            () => playVideo(attempt + 1, generation),
+            attempt === 0 ? 250 : 1000
+          )
         })
     },
     [clearPlayRetry, item?.type, speed, videoStarted, volume]
@@ -143,8 +163,6 @@ export function Wallpaper() {
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const captureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const captureDemandRef = useRef(false)
-  const pausedRef = useRef(false)
 
   useEffect(() => {
     const c = document.createElement('canvas')
@@ -153,6 +171,7 @@ export function Wallpaper() {
     c.height = Math.max(1, Math.round(c.width * aspect))
     captureCanvasRef.current = c
     return () => {
+      playRequestGenerationRef.current += 1
       if (captureTimerRef.current) clearInterval(captureTimerRef.current)
       clearPlayRetry()
     }
@@ -162,6 +181,8 @@ export function Wallpaper() {
     setMediaReady(false)
     setVideoStarted(false)
     readyReportedRef.current = null
+    captureErrorKeyRef.current = null
+    playRequestGenerationRef.current += 1
     clearPlayRetry()
   }, [clearPlayRetry, item?.id, item?.source])
 
@@ -178,10 +199,19 @@ export function Wallpaper() {
       source = imgRef.current
     }
     if (!source) return
-    drawWallpaperFrame(ctx, source, c.width, c.height, objectFit, transform)
-    const data = c.toDataURL('image/jpeg', 0.62)
-    window.wallpaperBridge?.sendFrame?.(data)
-  }, [objectFit, transform])
+    try {
+      drawWallpaperFrame(ctx, source, c.width, c.height, objectFit, transform)
+      const data = c.toDataURL('image/jpeg', 0.62)
+      captureErrorKeyRef.current = null
+      window.wallpaperBridge?.sendFrame?.(data)
+    } catch (error) {
+      const errorKey = `${item?.id ?? 'unknown'}:${error instanceof Error ? error.name : 'capture-error'}`
+      if (captureErrorKeyRef.current !== errorKey) {
+        captureErrorKeyRef.current = errorKey
+        console.warn('[wallpaper] renderer frame capture failed; main fallback will take over:', error)
+      }
+    }
+  }, [item?.id, objectFit, transform])
 
   // 根据壁纸类型启动/停止抽帧
   const startCapture = useCallback(() => {
@@ -198,54 +228,57 @@ export function Wallpaper() {
     }
   }, [])
 
+  // Keep edge-triggered IPC listeners stable; changing media callbacks must not
+  // create a gap where a pause/resume event can be lost.
   useEffect(() => {
-    stopCapture()
-    if (!item) return
-    if (item.type === 'video' && captureDemandRef.current) {
-      startCapture()
-    } else if (item.type === 'image' && captureDemandRef.current) {
-      // 静态图片：onLoad 会触发一次 captureFrame
-      // 额外延迟再发一次，确保 canvas 窗口已就绪
-      const t = setTimeout(captureFrame, 1500)
-      return () => clearTimeout(t)
-    }
-    // web 类型由主进程 capturePage 抽帧，渲染端不处理
-    return () => stopCapture()
-  }, [item, startCapture, stopCapture, captureFrame])
-
-  // 全屏遮挡时暂停帧捕获和视频播放，节省 CPU 和 IPC 开销
-  useEffect(() => {
-    const off = window.wallpaperBridge?.onPauseCapture?.((paused) => {
+    const offPause = window.wallpaperBridge?.onPauseCapture?.((paused) => {
       pausedRef.current = paused
       if (paused) {
-        stopCapture()
-        // 暂停视频播放以节省解码开销
-        if (videoRef.current && !videoRef.current.paused) {
-          videoRef.current.pause()
-        }
-      } else {
-        // 恢复视频播放和帧捕获
-        if (item?.type === 'video') {
-          playVideo()
-          if (captureDemandRef.current) startCapture()
+        playRequestGenerationRef.current += 1
+        if (playRetryTimerRef.current !== null) {
+          window.clearTimeout(playRetryTimerRef.current)
+          playRetryTimerRef.current = null
         }
       }
+      setCapturePaused(paused)
     })
-    return () => off?.()
-  }, [item, playVideo, startCapture, stopCapture])
-
-  useEffect(() => {
-    const off = window.wallpaperBridge?.onCaptureDemand?.((enabled) => {
+    const offDemand = window.wallpaperBridge?.onCaptureDemand?.((enabled) => {
       captureDemandRef.current = enabled
-      if (!enabled) {
-        stopCapture()
-        return
-      }
-      if (item?.type === 'video') startCapture()
-      if (item?.type === 'image') captureFrame()
+      setCaptureDemanded(enabled)
     })
-    return () => off?.()
-  }, [captureFrame, item?.type, startCapture, stopCapture])
+    return () => {
+      offPause?.()
+      offDemand?.()
+    }
+  }, [])
+
+  // Full-screen occlusion owns video playback independently from frame demand.
+  useEffect(() => {
+    if (item?.type !== 'video') return
+    if (capturePaused) {
+      clearPlayRetry()
+      if (videoRef.current && !videoRef.current.paused) videoRef.current.pause()
+      return
+    }
+    playVideo()
+  }, [capturePaused, clearPlayRetry, item?.type, playVideo])
+
+  // Frame capture has one idempotent owner, so repeated pause/resume cannot
+  // leave duplicate intervals or revive a stopped timer.
+  useEffect(() => {
+    stopCapture()
+    if (!item || capturePaused || !captureDemanded) return
+    if (item.type === 'video') {
+      startCapture()
+      return () => stopCapture()
+    }
+    if (item.type === 'image') {
+      captureFrame()
+      const timer = window.setTimeout(captureFrame, 1500)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [captureDemanded, captureFrame, capturePaused, item, startCapture, stopCapture])
 
   useEffect(() => {
     const off = window.wallpaperBridge?.onLoad((it) => {
@@ -317,12 +350,6 @@ export function Wallpaper() {
     }
   }, [speed, item])
 
-  useEffect(() => {
-    if (item?.type === 'video' && videoRef.current) {
-      playVideo()
-    }
-  }, [item, playVideo])
-
   if (!item) {
     return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
   }
@@ -364,6 +391,7 @@ export function Wallpaper() {
         <video
           key={item.source}
           ref={videoRef}
+          crossOrigin="anonymous"
           src={src}
           autoPlay
           muted={volume === 0 || !videoStarted}
@@ -400,6 +428,7 @@ export function Wallpaper() {
         <img
           key={item.source}
           ref={imgRef}
+          crossOrigin="anonymous"
           src={src}
           onLoad={() => {
             markMediaReady()

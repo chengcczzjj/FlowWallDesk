@@ -13,3 +13,17 @@ export function toRendererPublicUrl(relativePath: string): string {
   const cleanPath = relativePath.replace(/^\/+/, '')
   return new URL(`../${cleanPath}`, globalThis.location.href).toString()
 }
+
+/** Origins used by Lingyue renderer pages in development and packaged builds. */
+export function isTrustedRendererAssetOrigin(origin: string | null): boolean {
+  if (!origin || origin === 'null' || origin === 'file://') return origin === 'null' || origin === 'file://'
+  try {
+    const url = new URL(origin)
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]')
+    )
+  } catch {
+    return false
+  }
+}

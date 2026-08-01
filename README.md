@@ -50,10 +50,10 @@ npm run build:dir        # 仅生成未打包目录，便于本地调试
 发布新版本时按以下顺序执行：
 
 ```powershell
-npm version 1.0.1 --no-git-tag-version
+npm version 1.0.2 --no-git-tag-version
 npm test
 npm run build:win:signed  # 未配置证书时先用 build:win 做内部验证
-git tag -a v1.0.1 -m "LingyueDesk 1.0.1"
+git tag -a v1.0.2 -m "LingyueDesk 1.0.2"
 ```
 
 随后创建同版本 GitHub Release，并上传 `dist/latest.yml`、安装包和对应 `.blockmap`。`chengcczzjj/FlowWallDesk` 已设为公开仓库，客户端可直接发现公开 Release；如果后续改回私有仓库，需要同步切换到公共对象存储更新源。

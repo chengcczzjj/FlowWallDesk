@@ -1,12 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { toAssetUrl, toRendererPublicUrl } from '../src/shared/asset-url.ts'
+import { isTrustedRendererAssetOrigin, toAssetUrl, toRendererPublicUrl } from '../src/shared/asset-url.ts'
 import { isGeneratedWidgetDefinition } from '../src/shared/generated-widget.ts'
 import { DEFAULT_WIDGET_SIZE_BY_TYPE, WIDGET_TYPES } from '../src/shared/desktop-scene.ts'
 import { TOOL_MANIFEST, getToolManifest } from '../src/shared/tool-manifest.ts'
 import { approvalMatchesRequest } from '../src/shared/approval-scope.ts'
 import { automationStatusFromChat } from '../src/shared/agent-runtime.ts'
+import { rectCoversDisplay, StableBooleanTransition } from '../src/shared/desktop-occlusion.ts'
 
 test('asset URLs preserve Windows paths and packaged public assets', () => {
   assert.equal(
@@ -24,6 +25,15 @@ test('asset URLs preserve Windows paths and packaged public assets', () => {
     'file:///C:/Lingyue/resources/app.asar/out/renderer/audio/Water.WAV',
   )
   Object.defineProperty(globalThis, 'location', { configurable: true, value: originalLocation })
+})
+
+test('asset CORS is limited to packaged and local development renderers', () => {
+  assert.equal(isTrustedRendererAssetOrigin('null'), true)
+  assert.equal(isTrustedRendererAssetOrigin('file://'), true)
+  assert.equal(isTrustedRendererAssetOrigin('http://localhost:5174'), true)
+  assert.equal(isTrustedRendererAssetOrigin('http://127.0.0.1:5174'), true)
+  assert.equal(isTrustedRendererAssetOrigin('https://example.com'), false)
+  assert.equal(isTrustedRendererAssetOrigin(null), false)
 })
 
 test('generated widgets use a validated declarative contract', () => {
@@ -91,4 +101,21 @@ test('automations never report approval waits or failures as completed', () => {
   assert.deepEqual(automationStatusFromChat('cancelled'), { status: 'cancelled' })
   assert.equal(automationStatusFromChat('failed').status, 'failed')
   assert.equal(automationStatusFromChat('waiting-approval').status, 'failed')
+})
+
+test('desktop occlusion only commits stable coverage of the primary display', () => {
+  const primary = { x: 0, y: 0, width: 1920, height: 1080 }
+  assert.equal(rectCoversDisplay({ left: 0, top: 0, right: 1920, bottom: 1080 }, primary), true)
+  assert.equal(rectCoversDisplay({ left: 1920, top: 0, right: 3840, bottom: 1080 }, primary), false)
+  assert.equal(rectCoversDisplay({ left: 0, top: 0, right: 1920, bottom: 1040 }, primary), false)
+
+  const transition = new StableBooleanTransition(false, 2)
+  assert.equal(transition.sample(true), null)
+  assert.equal(transition.sample(false), null)
+  assert.equal(transition.sample(true), null)
+  assert.equal(transition.sample(true), true)
+  assert.equal(transition.value, true)
+  assert.equal(transition.sample(false), null)
+  assert.equal(transition.sample(false), false)
+  assert.equal(transition.value, false)
 })

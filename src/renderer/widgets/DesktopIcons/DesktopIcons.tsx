@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from
 import type { MotionValue } from 'framer-motion'
 import { AppWindow, File as FileGlyph, Folder, Plus } from 'lucide-react'
 import type { DesktopIconItem, WidgetInstance } from '@shared/types'
-import { WidgetPosCtx } from '../../canvas/contexts'
+import { DesktopInteractionEpochCtx, WidgetPosCtx } from '../../canvas/contexts'
 import { FrostedGlassBackground } from '../FrostedGlassBackground'
 import { toRendererPublicUrl } from '@shared/asset-url'
 
@@ -189,6 +189,7 @@ function DesktopIconsWidget({
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [hoveredStorageId, setHoveredStorageId] = useState<string | null>(null)
   const [bouncingId, setBouncingId] = useState<string | null>(null)
+  const interactionEpoch = useContext(DesktopInteractionEpochCtx)
   const liveWidgetPos = useContext(WidgetPosCtx)
 
   useEffect(() => {
@@ -264,16 +265,35 @@ function DesktopIconsWidget({
     setDraftItems(nextItems)
   }, [])
 
-  useEffect(() => {
-    if (!editing) return
+  const resetInteraction = useCallback(() => {
     const drag = dragRef.current
     if (drag) clearDragTimer(drag)
     dragRef.current = null
+    dropDepthRef.current = 0
+    lastClickRef.current = null
+    lastActivationRef.current = null
+    suppressActivationRef.current = null
+    setDropActive(false)
     setDraggingId(null)
     setHoverIndex(null)
     setHoveredStorageId(null)
+    setBouncingId(null)
     setDraft(null)
-  }, [editing, setDraft])
+  }, [setDraft])
+
+  useEffect(() => {
+    if (!editing) return
+    resetInteraction()
+  }, [editing, resetInteraction])
+
+  useEffect(() => {
+    resetInteraction()
+  }, [interactionEpoch, resetInteraction])
+
+  useEffect(() => () => {
+    const drag = dragRef.current
+    if (drag) clearDragTimer(drag)
+  }, [])
 
   useEffect(() => {
     if (variant === 'dock') {
@@ -601,6 +621,7 @@ function DesktopIconsWidget({
       <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%' }}>
         {variant === 'dock' ? (
           <IconDockSurface
+            key={`dock-${interactionEpoch}`}
             items={dockItems}
             height={containerSize.height}
             hoverIndex={hoverIndex}
@@ -623,6 +644,7 @@ function DesktopIconsWidget({
           <>
             {storageAppearance?.chromeStyle === 'titled' && <StorageTitleBar title={storageAppearance.title} />}
             <StorageSurface
+              key={`storage-${interactionEpoch}`}
               refEl={scrollRef}
               variant={variant}
               topInset={titleHeight}

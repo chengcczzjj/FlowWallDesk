@@ -2,6 +2,7 @@ import { protocol, net } from 'electron'
 import { promises as fs } from 'fs'
 import { extname, dirname, isAbsolute, relative, resolve } from 'path'
 import { pathToFileURL } from 'url'
+import { isTrustedRendererAssetOrigin } from '@shared/asset-url'
 
 /**
  * 自定义协议 lyasset://<encoded-absolute-path>
@@ -57,6 +58,13 @@ const MIME: Record<string, string> = {
 
 const allowedRoots = new Set<string>()
 const allowedFiles = new Set<string>()
+
+function addAssetCorsHeaders(request: Request, headers: Headers): void {
+  const origin = request.headers.get('Origin')
+  if (!isTrustedRendererAssetOrigin(origin)) return
+  headers.set('Access-Control-Allow-Origin', origin!)
+  headers.set('Vary', 'Origin')
+}
 
 function isInside(rootPath: string, targetPath: string): boolean {
   const rel = relative(rootPath, targetPath)
@@ -148,16 +156,19 @@ export function registerAssetProtocol(): void {
         const resp = await net.fetch(fileUrl)
         const headers = new Headers(resp.headers)
         headers.set('Content-Type', mime)
+        addAssetCorsHeaders(request, headers)
         return new Response(resp.body, { status: resp.status, headers })
       }
       const buf = await fs.readFile(absPath)
+      const headers = new Headers({
+        'Content-Type': mime,
+        'Content-Length': String(buf.byteLength),
+        'Cache-Control': 'no-cache',
+      })
+      addAssetCorsHeaders(request, headers)
       return new Response(buf, {
         status: 200,
-        headers: {
-          'Content-Type': mime,
-          'Content-Length': String(buf.byteLength),
-          'Cache-Control': 'no-cache',
-        },
+        headers,
       })
     } catch (err) {
       console.error('[lyasset] 读取失败', absPath, err)

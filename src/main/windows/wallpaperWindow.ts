@@ -105,6 +105,11 @@ export function createWallpaperWindow(): BrowserWindow {
 
   wallpaperWindow.setMenu(null)
   secureWindowNavigation(wallpaperWindow)
+  if (is.dev) {
+    wallpaperWindow.webContents.on('console-message', (details) => {
+      console.log(`[wallpaper:renderer] ${details.message}`)
+    })
+  }
   wallpaperWindow.setAlwaysOnTop(false)
   wallpaperWindow.setIgnoreMouseEvents(true, { forward: false })
   registerDisplayBoundsListener()

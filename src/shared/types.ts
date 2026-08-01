@@ -43,6 +43,11 @@ export interface WidgetInstance {
   config?: Record<string, unknown>
 }
 
+export interface CanvasOcclusionState {
+  occluded: boolean
+  cursor: { x: number; y: number }
+}
+
 /** 桌面图标收纳条目 */
 export interface DesktopIconItem {
   id: string

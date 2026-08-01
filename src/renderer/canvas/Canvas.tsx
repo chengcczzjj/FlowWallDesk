@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan, PlannedSceneWidget } from '@shared/desktop-scene-layout'
 import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } from '../widgets'
 import { FloatingToolbar } from '../widgets/FloatingToolbar'
-import { WidgetPosCtx } from './contexts'
+import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
 import { setWallpaperFrame } from './wallpaperFrameStore'
 
 const GRID = 16
@@ -338,6 +338,7 @@ export function Canvas() {
   const widgetsRef = useRef(widgets)
   widgetsRef.current = widgets
   const [editing, setEditing] = useState(false)
+  const [interactionEpoch, setInteractionEpoch] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [scenePreview, setScenePreview] = useState<DesktopSceneLayoutPlan | null>(null)
   const [snapPreviews, setSnapPreviews] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>(
@@ -350,11 +351,27 @@ export function Canvas() {
     const offFrame = window.canvasBridge?.onFrame(setWallpaperFrame)
     const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
     const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
+    const offOcclusion = window.canvasBridge?.onDesktopOcclusionChange((state) => {
+      setInteractionEpoch((current) => current + 1)
+      if (state.occluded) return
+
+      // Reconcile native hit testing even if the cursor did not move after the
+      // full-screen window disappeared; otherwise the first Dock click is lost.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const clientX = state.cursor.x - window.screenX
+          const clientY = state.cursor.y - window.screenY
+          const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null
+          window.canvasBridge?.setIgnoreMouse(!target?.closest('[data-widget]'))
+        })
+      })
+    })
     return () => {
       offSync?.()
       offFrame?.()
       offScenePreview?.()
       offScenePreviewClear?.()
+      offOcclusion?.()
     }
   }, [])
 
@@ -478,7 +495,8 @@ export function Canvas() {
   )
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick} onContextMenu={onBgContextMenu}>
+    <DesktopInteractionEpochCtx.Provider value={interactionEpoch}>
+      <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick} onContextMenu={onBgContextMenu}>
         {widgets
           .filter((w) => w.enabled)
           .map((w) => (
@@ -520,7 +538,8 @@ export function Canvas() {
             }}
           />
         ))}
-    </div>
+      </div>
+    </DesktopInteractionEpochCtx.Provider>
   )
 }
 
@@ -641,7 +660,8 @@ function DraggableWidget({
   onResolveCollisions: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
   onDragPreview: (id: string, rect: { x: number; y: number; w: number; h: number }) => void
 }) {
-  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const interactionEpoch = useContext(DesktopInteractionEpochCtx)
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number; pointerId: number } | null>(null)
   const interactivePointerRef = useRef<number | null>(null)
   const longPressDragRef = useRef<{
     startX: number
@@ -664,6 +684,7 @@ function DraggableWidget({
     origX: number
     origY: number
     edge: string
+    pointerId: number
     nextIconScale?: number
   } | null>(null)
   const hasDraggedRef = useRef(false)
@@ -829,6 +850,27 @@ function DraggableWidget({
     longPressDragRef.current = null
   }, [])
 
+  useEffect(() => {
+    const element = elRef.current
+    const pointerIds = new Set<number>()
+    if (interactivePointerRef.current !== null) pointerIds.add(interactivePointerRef.current)
+    if (longPressDragRef.current) pointerIds.add(longPressDragRef.current.pointerId)
+    if (dragRef.current) pointerIds.add(dragRef.current.pointerId)
+    if (resizeRef.current) pointerIds.add(resizeRef.current.pointerId)
+    for (const pointerId of pointerIds) {
+      if (element?.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId)
+    }
+
+    clearLongPressDrag()
+    interactivePointerRef.current = null
+    dragRef.current = null
+    resizeRef.current = null
+    hasDraggedRef.current = false
+    setPendingIconScale(null)
+    setDragging(false)
+    setResizing(false)
+  }, [clearLongPressDrag, interactionEpoch])
+
   const clearInteractivePointer = useCallback(
     (pointerId: number) => {
       if (interactivePointerRef.current !== pointerId) return
@@ -917,6 +959,7 @@ function DraggableWidget({
             origX: posRef.current.x,
             origY: posRef.current.y,
             edge: resizeEdge,
+            pointerId: e.pointerId,
           }
           return
         }
@@ -925,7 +968,13 @@ function DraggableWidget({
         onSelect() // 点击/拖拽即选中
         setDragging(true)
         hasDraggedRef.current = false
-        dragRef.current = { startX: e.clientX, startY: e.clientY, origX: posRef.current.x, origY: posRef.current.y }
+        dragRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origX: posRef.current.x,
+          origY: posRef.current.y,
+          pointerId: e.pointerId,
+        }
         return
       }
 
@@ -937,7 +986,13 @@ function DraggableWidget({
         window.canvasBridge?.setIgnoreMouse(false)
         setDragging(true)
         hasDraggedRef.current = false
-        dragRef.current = { startX: e.clientX, startY: e.clientY, origX: posRef.current.x, origY: posRef.current.y }
+        dragRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origX: posRef.current.x,
+          origY: posRef.current.y,
+          pointerId: e.pointerId,
+        }
         return
       }
 
@@ -954,7 +1009,7 @@ function DraggableWidget({
           window.canvasBridge?.setIgnoreMouse(false)
           setDragging(true)
           hasDraggedRef.current = false
-          dragRef.current = { startX, startY, origX: posRef.current.x, origY: posRef.current.y }
+          dragRef.current = { startX, startY, origX: posRef.current.x, origY: posRef.current.y, pointerId }
         }, LONG_PRESS_WIDGET_DRAG_MS)
         longPressDragRef.current = { startX, startY, pointerId, timer }
       }

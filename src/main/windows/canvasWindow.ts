@@ -3,6 +3,7 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
+import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occlusion'
 import { secureWindowNavigation } from './navigationSecurity'
 
 
@@ -36,6 +37,8 @@ function loadUser32Fns() {
       IsIconic: lib.func('__stdcall', 'IsIconic', 'int', ['intptr']),
       ShowWindow: lib.func('__stdcall', 'ShowWindow', 'int', ['intptr', 'int']),
       GetWindow: lib.func('__stdcall', 'GetWindow', 'intptr', ['intptr', 'uint']),
+      IsWindow: lib.func('__stdcall', 'IsWindow', 'int', ['intptr']),
+      GetAncestor: lib.func('__stdcall', 'GetAncestor', 'intptr', ['intptr', 'uint']),
       GetForegroundWindow: lib.func('__stdcall', 'GetForegroundWindow', 'intptr', []),
       GetWindowRect: lib.func('__stdcall', 'GetWindowRect', 'int', ['intptr', koffi.out(koffi.pointer(RECT))]),
       GetClassNameA: lib.func('__stdcall', 'GetClassNameA', 'int', ['intptr', 'void*', 'int']),
@@ -52,6 +55,7 @@ const SWP_NOACTIVATE = 0x0010
 const WS_EX_TOOLWINDOW = 0x00000080
 
 const GW_OWNER = 4
+const GA_ROOT = 2
 const SW_MINIMIZE = 6
 const GWL_STYLE = -16
 const GWL_EXSTYLE = -20
@@ -63,6 +67,7 @@ let defViewHwnd = 0
 
 /** 桌面是否被全屏窗口遮挡 */
 let desktopOccluded = false
+const occlusionTransition = new StableBooleanTransition(false, 2)
 
 /**
  * 检测前台窗口是否全屏覆盖整个屏幕。
@@ -82,8 +87,8 @@ function checkDesktopOccluded(): boolean {
     // 跳过 DefView 的父 WorkerW
     const dv = findDefView()
     if (dv) {
-      const dvOwner = Number(u32.GetWindow(dv, GW_OWNER))
-      if (dvOwner && fgHwnd === dvOwner) return false
+      const desktopRoot = Number(u32.GetAncestor(dv, GA_ROOT))
+      if (desktopRoot && fgHwnd === desktopRoot) return false
     }
     // 不计算 Electron 自身窗口
     for (const w of BrowserWindow.getAllWindows()) {
@@ -102,9 +107,8 @@ function checkDesktopOccluded(): boolean {
     const rect = { left: 0, top: 0, right: 0, bottom: 0 }
     u32.GetWindowRect(fgHwnd, rect)
     const primary = screen.getPrimaryDisplay()
-    const { width, height } = primary.size
-    // 前台窗口尺寸 >= 屏幕尺寸 → 视为真正全屏（游戏/F11 等）
-    return (rect.right - rect.left) >= width && (rect.bottom - rect.top) >= height
+    // 只在窗口真正覆盖主屏时暂停，避免副屏全屏误伤主屏 Dock。
+    return rectCoversDisplay(rect, primary.bounds)
   } catch {
     return false
   }
@@ -114,11 +118,18 @@ function checkDesktopOccluded(): boolean {
 function findDefView(): number {
   loadUser32Fns()
   if (!u32) return 0
-  if (defViewHwnd) return defViewHwnd
+  if (defViewHwnd && u32.IsWindow(defViewHwnd)) return defViewHwnd
+  defViewHwnd = 0
   try {
     const progman = Number(u32.FindWindowExA(0, 0, 'Progman', 0))
     if (!progman) return 0
     let dv = Number(u32.FindWindowExA(progman, 0, 'SHELLDLL_DefView', 0))
+    // Win11 Raised Desktop may nest DefView inside a WorkerW child of Progman.
+    let innerWorker = Number(u32.FindWindowExA(progman, 0, 'WorkerW', 0))
+    while (!dv && innerWorker) {
+      dv = Number(u32.FindWindowExA(innerWorker, 0, 'SHELLDLL_DefView', 0))
+      innerWorker = Number(u32.FindWindowExA(progman, innerWorker, 'WorkerW', 0))
+    }
     if (!dv) {
       u32.EnumWindows((hwnd: number) => {
         const found = Number(u32!.FindWindowExA(hwnd, 0, 'SHELLDLL_DefView', 0))
@@ -166,9 +177,60 @@ function disableShowDesktopMinimize(win: BrowserWindow): void {
   }
 }
 
+function applyCanvasMousePassthrough(): void {
+  const win = getCanvasWindow()
+  if (!win) return
+  const ignore = desktopOccluded || (!isEditing && rendererMousePassthrough)
+  if (ignore) {
+    win.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    win.setIgnoreMouseEvents(false)
+  }
+}
+
+function cancelCanvasZOrderRefresh(): void {
+  zOrderRefreshGeneration += 1
+  if (zOrderRefreshTimer) {
+    clearTimeout(zOrderRefreshTimer)
+    zOrderRefreshTimer = null
+  }
+  const win = getCanvasWindow()
+  if (win) win.setAlwaysOnTop(false)
+}
+
+function settleCanvasOnDesktop(win: BrowserWindow): void {
+  disableShowDesktopMinimize(win)
+  sendToBottom(win)
+}
+
+function commitDesktopOcclusion(occluded: boolean): void {
+  desktopOccluded = occluded
+  rendererMousePassthrough = true
+  if (occluded) cancelCanvasZOrderRefresh()
+  applyCanvasMousePassthrough()
+
+  const wp = getWallpaperWindow()
+  if (wp && !wp.isDestroyed() && !wp.webContents.isDestroyed()) {
+    wp.webContents.send(IPC.WALLPAPER_PAUSE_CAPTURE, occluded)
+  }
+  const canvas = getCanvasWindow()
+  if (canvas && !canvas.webContents.isDestroyed()) {
+    canvas.webContents.send(IPC.CANVAS_OCCLUSION_CHANGED, {
+      occluded,
+      cursor: screen.getCursorScreenPoint(),
+    })
+  }
+
+  if (!occluded) refreshCanvasZOrder()
+  console.log(`[canvas] desktop ${occluded ? 'occluded' : 'visible'}; interaction state reset`)
+}
+
 let canvasWindow: BrowserWindow | null = null
 let isEditing = false
+let rendererMousePassthrough = true
 let zOrderTimer: ReturnType<typeof setInterval> | null = null
+let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let zOrderRefreshGeneration = 0
 let boundsListenerRegistered = false
 
 function syncCanvasBoundsToPrimaryDisplay(): void {
@@ -230,7 +292,13 @@ export function createCanvasWindow(): BrowserWindow {
 
   canvasWindow.setMenu(null)
   secureWindowNavigation(canvasWindow)
-  canvasWindow.setIgnoreMouseEvents(true, { forward: true })
+  if (is.dev) {
+    canvasWindow.webContents.on('console-message', (details) => {
+      console.log(`[canvas:renderer] ${details.message}`)
+    })
+  }
+  rendererMousePassthrough = true
+  applyCanvasMousePassthrough()
   registerCanvasDisplayListener()
 
   // 允许画布窗口捕获系统音频（无需用户弹窗选择）
@@ -276,15 +344,11 @@ export function createCanvasWindow(): BrowserWindow {
             return
           }
           // 检测全屏遮挡状态变化
-          const occluded = checkDesktopOccluded()
-          if (occluded !== desktopOccluded) {
-            desktopOccluded = occluded
-            const wp = getWallpaperWindow()
-            if (wp && !wp.isDestroyed()) {
-              wp.webContents.send(IPC.WALLPAPER_PAUSE_CAPTURE, occluded)
-            }
-          }
+          const stableOcclusion = occlusionTransition.sample(checkDesktopOccluded())
+          if (stableOcclusion !== null) commitDesktopOcclusion(stableOcclusion)
           if (isEditing) return // 编辑模式需要在最前面
+          // 全屏遮挡期间不要持续改透明画布的 z-order；恢复时统一重建。
+          if (desktopOccluded || zOrderRefreshTimer) return
           if (canvasWindow.isMinimized()) return
           sendToBottom(canvasWindow)
         }, 300)
@@ -296,6 +360,7 @@ export function createCanvasWindow(): BrowserWindow {
 
   canvasWindow.on('closed', () => {
     if (zOrderTimer) { clearInterval(zOrderTimer); zOrderTimer = null }
+    cancelCanvasZOrderRefresh()
     canvasWindow = null
   })
 
@@ -317,12 +382,10 @@ export function isCanvasEditMode(): boolean {
 }
 
 export function setCanvasMousePassthrough(ignore: boolean): void {
-  if (!canvasWindow || canvasWindow.isDestroyed()) return
-  if (ignore) {
-    canvasWindow.setIgnoreMouseEvents(true, { forward: true })
-  } else {
-    canvasWindow.setIgnoreMouseEvents(false)
-  }
+  // 丢弃遮挡期间到达的旧 mouseenter 请求，避免恢复后整屏截获鼠标。
+  if (desktopOccluded && !ignore) return
+  rendererMousePassthrough = ignore
+  applyCanvasMousePassthrough()
 }
 
 /** 编辑模式下画布 blur/focus 处理：失焦时降低层级让开始菜单/通知栏正常弹出 */
@@ -347,13 +410,15 @@ export function setCanvasEditMode(on: boolean): void {
   if (on) {
     // 最小化其他所有普通窗口，露出桌面组件
     minimizeAllOtherWindows()
-    canvasWindow.setIgnoreMouseEvents(false)
+    rendererMousePassthrough = false
+    applyCanvasMousePassthrough()
     canvasWindow.setFocusable(true)
     canvasWindow.setAlwaysOnTop(true, 'screen-saver')
     canvasWindow.focus()
   } else {
+    rendererMousePassthrough = true
     canvasWindow.setFocusable(false)
-    canvasWindow.setIgnoreMouseEvents(true, { forward: true })
+    applyCanvasMousePassthrough()
     canvasWindow.setAlwaysOnTop(false)
     // 先设 owner 再推底层
     disableShowDesktopMinimize(canvasWindow)
@@ -430,13 +495,22 @@ export function minimizeAllOtherWindows(): void {
  * 重新做一次 alwaysOnTop → sendToBottom 来修复 z-order。
  */
 export function refreshCanvasZOrder(): void {
-  if (!canvasWindow || canvasWindow.isDestroyed()) return
-  canvasWindow.setAlwaysOnTop(true, 'screen-saver')
-  setTimeout(() => {
-    if (!canvasWindow || canvasWindow.isDestroyed()) return
-    canvasWindow.setAlwaysOnTop(false)
-    disableShowDesktopMinimize(canvasWindow)
-    sendToBottom(canvasWindow)
+  const win = getCanvasWindow()
+  if (!win || desktopOccluded || isEditing) return
+
+  const generation = ++zOrderRefreshGeneration
+  if (zOrderRefreshTimer) clearTimeout(zOrderRefreshTimer)
+  // Re-entering the top-level compositor briefly repairs transparent-window input
+  // after Chromium/Windows marks the canvas as fully occluded.
+  win.setAlwaysOnTop(true, 'screen-saver')
+  zOrderRefreshTimer = setTimeout(() => {
+    zOrderRefreshTimer = null
+    if (generation !== zOrderRefreshGeneration) return
+    const current = getCanvasWindow()
+    if (!current || desktopOccluded || isEditing) return
+    current.setAlwaysOnTop(false)
+    settleCanvasOnDesktop(current)
+    applyCanvasMousePassthrough()
   }, 150)
 }
 

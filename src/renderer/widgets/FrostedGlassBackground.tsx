@@ -1,6 +1,10 @@
 import { useContext, useSyncExternalStore } from 'react'
 import { WidgetPosCtx } from '../canvas/contexts'
-import { getWallpaperFrame, subscribeWallpaperFrame } from '../canvas/wallpaperFrameStore'
+import {
+  BASE_WALLPAPER_FRAME_BLUR_PX,
+  getWallpaperFrame,
+  subscribeWallpaperFrame,
+} from '../canvas/wallpaperFrameStore'
 
 /**
  * 毛玻璃背景层：采样壁纸抽帧，根据组件屏幕坐标偏移对齐，CSS 模糊。
@@ -23,6 +27,7 @@ export function FrostedGlassBackground({
   const screenY = window.screenY || 0
   const frameWidth = window.screen.width || window.innerWidth
   const frameHeight = window.screen.height || window.innerHeight
+  const extraBlurPx = Math.sqrt(Math.max(0, blurPx ** 2 - BASE_WALLPAPER_FRAME_BLUR_PX ** 2))
 
   return (
     <div
@@ -46,7 +51,8 @@ export function FrostedGlassBackground({
             height: frameHeight,
             maxWidth: 'none',
             maxHeight: 'none',
-            filter: `blur(${blurPx}px) saturate(1.14)`,
+            filter: `blur(${extraBlurPx}px) saturate(1.08)`,
+            willChange: 'filter',
             pointerEvents: 'none',
             objectFit: 'fill',
           }}
