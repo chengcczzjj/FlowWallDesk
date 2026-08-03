@@ -80,9 +80,9 @@ export function getApiRegistry(): ApiEndpointMeta[] {
       dataSchema: {
         code: 'string — 股票代码（如 600519）',
         name: 'string — 股票名称（如 贵州茅台）',
-        price: 'number — 最新价',
-        change: 'number — 涨跌额（正=涨, 负=跌）',
-        changePercent: 'number — 涨跌幅（%，正=涨, 负=跌）',
+        price: 'number | null — 最新价；停牌或暂无报价时为 null',
+        change: 'number | null — 涨跌额（正=涨, 负=跌）',
+        changePercent: 'number | null — 涨跌幅（%，正=涨, 负=跌）',
       },
       configurable: [
         {

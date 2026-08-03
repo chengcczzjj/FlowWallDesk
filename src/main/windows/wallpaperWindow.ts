@@ -8,6 +8,8 @@ let wallpaperWindow: BrowserWindow | null = null
 let attached = false
 let attachHint = ''
 let boundsListenerRegistered = false
+let compositionRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let compositionRefreshGeneration = 0
 
 export function isWallpaperAttached(): boolean {
   return attached && !!getWallpaperWindow()
@@ -50,6 +52,25 @@ function syncWallpaperBoundsToPrimaryDisplay(force = false): void {
     return
   }
   win.setBounds(bounds, false)
+}
+
+function refreshWallpaperComposition(win: BrowserWindow): void {
+  const generation = ++compositionRefreshGeneration
+  if (compositionRefreshTimer) clearTimeout(compositionRefreshTimer)
+
+  const repaint = (): void => {
+    if (generation !== compositionRefreshGeneration || win.isDestroyed()) return
+    syncWallpaperBoundsToPrimaryDisplay(true)
+    if (!win.webContents.isDestroyed()) win.webContents.invalidate()
+  }
+
+  repaint()
+  // Repaint once more after the WorkerW/Progman z-order has settled. This is
+  // bounded and does not activate or focus the wallpaper window.
+  compositionRefreshTimer = setTimeout(() => {
+    compositionRefreshTimer = null
+    repaint()
+  }, 240)
 }
 
 function registerDisplayBoundsListener(): void {
@@ -120,6 +141,11 @@ export function createWallpaperWindow(): BrowserWindow {
   })
 
   wallpaperWindow.on('closed', () => {
+    compositionRefreshGeneration += 1
+    if (compositionRefreshTimer) {
+      clearTimeout(compositionRefreshTimer)
+      compositionRefreshTimer = null
+    }
     wallpaperWindow = null
     attached = false
   })
@@ -153,6 +179,7 @@ export async function ensureWallpaperAttached(): Promise<boolean> {
     syncWallpaperBoundsToPrimaryDisplay()
     attached = true
     win.setOpacity(1)
+    refreshWallpaperComposition(win)
     console.log(`[wallpaper] 重新贴桌面成功 (${attachHint})`)
   } else {
     win.hide()
@@ -177,6 +204,7 @@ export function refreshWallpaperAttach(): void {
     if (typeof eaw.refresh === 'function') {
       eaw.refresh()
       syncWallpaperBoundsToPrimaryDisplay()
+      refreshWallpaperComposition(win)
       console.log('[wallpaper] 轻量刷新完成')
     }
   } catch {

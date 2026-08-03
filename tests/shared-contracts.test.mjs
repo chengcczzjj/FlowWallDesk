@@ -9,6 +9,21 @@ import { approvalMatchesRequest } from '../src/shared/approval-scope.ts'
 import { automationStatusFromChat } from '../src/shared/agent-runtime.ts'
 import { rectCoversDisplay, StableBooleanTransition } from '../src/shared/desktop-occlusion.ts'
 import { CanvasPointerGate } from '../src/shared/canvas-pointer-gate.ts'
+import {
+  DEEPSEEK_CONTEXT_TOKENS,
+  DEEPSEEK_LATEST_MODEL,
+  DEEPSEEK_MAX_OUTPUT_TOKENS,
+  isDeepSeekV4Model,
+  normalizeDeepSeekBaseURL,
+  normalizeDeepSeekModel,
+} from '../src/shared/model-defaults.ts'
+import { normalizeStockSymbols } from '../src/shared/stock-symbols.ts'
+import { findSmartWidgetPlacement } from '../src/shared/widget-placement.ts'
+import {
+  DOCK_BOUNCE_DURATION_SECONDS,
+  DOCK_BOUNCE_TIMES,
+  getDockBounceKeyframes,
+} from '../src/shared/dock-motion.ts'
 
 test('asset URLs preserve Windows paths and packaged public assets', () => {
   assert.equal(
@@ -135,4 +150,48 @@ test('canvas mouse passthrough stays locked until an active pointer gesture ends
   gate.reset()
   assert.equal(gate.shouldIgnoreMouse(false, false), true)
   assert.equal(gate.shouldIgnoreMouse(false, true), false)
+})
+
+test('legacy DeepSeek aliases migrate to the current V4 Flash API contract', () => {
+  assert.equal(DEEPSEEK_LATEST_MODEL, 'deepseek-v4-flash')
+  assert.equal(normalizeDeepSeekModel('deepseek-chat'), DEEPSEEK_LATEST_MODEL)
+  assert.equal(normalizeDeepSeekModel('deepseek-reasoner'), DEEPSEEK_LATEST_MODEL)
+  assert.equal(normalizeDeepSeekModel('deepseek-v4-pro'), 'deepseek-v4-pro')
+  assert.equal(normalizeDeepSeekBaseURL('https://api.deepseek.com/v1'), 'https://api.deepseek.com')
+  assert.equal(isDeepSeekV4Model(DEEPSEEK_LATEST_MODEL), true)
+  assert.equal(DEEPSEEK_CONTEXT_TOKENS, 1_000_000)
+  assert.equal(DEEPSEEK_MAX_OUTPUT_TOKENS, 384_000)
+})
+
+test('conversation stock inputs normalize into fetchable A-share symbols', () => {
+  assert.deepEqual(normalizeStockSymbols([
+    '贵州茅台',
+    { code: '0.000858', name: '五粮液' },
+    { symbol: '600519.SH' },
+    'AAPL',
+  ]), [
+    { code: '600519', name: '贵州茅台', market: '1' },
+    { code: '000858', name: '五粮液', market: '0' },
+  ])
+})
+
+test('new widgets continue an aligned group instead of defaulting to the upper-left', () => {
+  const area = { x: 0, y: 0, width: 1600, height: 900 }
+  const emptyPlacement = findSmartWidgetPlacement(320, 200, [], area)
+  assert.ok(emptyPlacement.x > area.width / 2)
+
+  const existing = [{ x: 1008, y: 32, width: 320, height: 200, enabled: true, type: 'generated-widget' }]
+  const groupedPlacement = findSmartWidgetPlacement(320, 200, existing, area)
+  assert.equal(groupedPlacement.x, 1008)
+  assert.ok(groupedPlacement.y >= existing[0].y + existing[0].height + 16)
+})
+
+test('Dock launch motion uses a slower damped ballistic curve', () => {
+  const downward = getDockBounceKeyframes(true)
+  const upward = getDockBounceKeyframes(false)
+  assert.ok(DOCK_BOUNCE_DURATION_SECONDS >= 1.2)
+  assert.equal(DOCK_BOUNCE_TIMES.length, downward.length)
+  assert.deepEqual(upward, downward.map((value) => value === 0 ? 0 : -value))
+  assert.ok(Math.max(...downward) >= 70)
+  assert.equal(downward.at(-1), 0)
 })

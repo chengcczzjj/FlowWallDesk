@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { WidgetInstance } from '@shared/types'
 import { DEFAULT_WIDGET_SIZE_BY_TYPE, WIDGET_TYPES, type WidgetTypeId } from '@shared/desktop-scene'
 import { GENERATED_WIDGET_THEMES, type GeneratedWidgetBlock, type GeneratedWidgetDefinition } from '@shared/generated-widget'
+import { normalizeStockSymbols } from '@shared/stock-symbols'
 import {
   addWidgetForTool,
   listWidgetsForTool,
@@ -52,13 +53,39 @@ export const listWidgetsTool = tool({
 })
 
 export const addWidgetTool = tool({
-  description: '把一个桌面组件添加到桌面上。用于用户说“放一个天气组件”“加个便签/文字组件”“添加日历/时钟/白噪音”等请求。',
+  description: '把一个内置桌面组件添加到桌面。实时股票必须使用 type=stocks，并在 stockSymbols 中传入 A 股代码；不要用 generated-widget 伪造静态行情。',
   inputSchema: z.object({
-    type: z.enum(WIDGET_TYPES).describe('要添加的组件类型。便签、文字、贴纸通常用 text；天气卡片用 weather；日历用 calendar。'),
-    config: z.record(z.string(), z.unknown()).optional().describe('组件配置。text 组件可传 { text, author }。news 可传 { source, maxItems, refreshInterval }。'),
+    type: z.enum(WIDGET_TYPES).describe('组件类型。股票/行情/自选股用 stocks；便签和文字用 text；天气用 weather；日历用 calendar。'),
+    config: z.record(z.string(), z.unknown()).optional().describe('通用配置。text 可传 { text, author }；news 可传 { source, maxItems, refreshInterval }。'),
+    stockSymbols: z.array(z.object({
+      code: z.string().regex(/^\d{6}$/).describe('六位 A 股或指数代码，例如 600519。'),
+      name: z.string().min(1).max(40).optional(),
+      market: z.enum(['0', '1']).optional().describe('可省略；1=沪市，0=深市。'),
+    })).min(1).max(6).optional().describe('仅 type=stocks 使用。必须根据用户指定的股票填写，不确定股票时先询问，不要猜。'),
   }),
-  execute: async ({ type, config }) => {
-    const result = addWidgetForTool(createWidget(type, config))
+  execute: async ({ type, config, stockSymbols }) => {
+    let normalizedConfig = config ?? {}
+    if (type === 'stocks') {
+      const legacyCandidates = normalizedConfig.symbols
+        ?? normalizedConfig.stocks
+        ?? normalizedConfig.stockCodes
+        ?? normalizedConfig.symbol
+      const symbols = normalizeStockSymbols(stockSymbols ?? legacyCandidates)
+      if (symbols.length === 0) {
+        return {
+          ok: false,
+          added: false,
+          reason: 'stock-symbols-required',
+          message: '请先询问用户要添加的 A 股名称或六位代码，再重试创建股票组件。',
+        }
+      }
+      const refreshInterval = typeof normalizedConfig.refreshInterval === 'number'
+        ? Math.max(10, Math.min(3600, Math.round(normalizedConfig.refreshInterval)))
+        : 30
+      normalizedConfig = { ...normalizedConfig, symbols, refreshInterval }
+    }
+
+    const result = addWidgetForTool(createWidget(type, normalizedConfig))
     return {
       ok: result.ok,
       added: result.added,
@@ -80,7 +107,7 @@ const generatedBlockSchema = z.discriminatedUnion('type', [
 ])
 
 export const createGeneratedWidgetTool = tool({
-  description: '直接生成并放置一个可用的个性化桌面组件。适用于内置组件无法表达的清单、目标进度、倒计时、信息卡、个人仪表盘和组合式小组件。使用安全声明式积木，不生成或执行 JavaScript。',
+  description: '生成静态或本地交互的个性化组件，适用于清单、目标进度、倒计时和组合信息卡。不得用于股票、天气、新闻等实时数据；这些场景必须使用对应内置组件。',
   inputSchema: z.object({
     name: z.string().min(1).max(60).describe('组件内部名称。'),
     title: z.string().min(1).max(80).describe('显示在组件顶部的标题。'),

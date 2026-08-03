@@ -41,7 +41,7 @@ function formatCountdown(targetAt: string, now: number, completedText = '已完�
     : `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-export function GeneratedWidget({ widget }: { widget: WidgetInstance }) {
+export function GeneratedWidget({ widget, entering = false }: { widget: WidgetInstance; entering?: boolean }) {
   const definition = isGeneratedWidgetDefinition(widget.config?.definition)
     ? widget.config.definition
     : FALLBACK_DEFINITION
@@ -90,7 +90,10 @@ export function GeneratedWidget({ widget }: { widget: WidgetInstance }) {
     >
       {definition.theme === 'glass' && <FrostedGlassBackground overlayColor="rgba(15,21,24,.52)" blurPx={24} />}
       <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <header>
+        <header
+          className={entering ? 'widget-content-step' : undefined}
+          style={{ animationDelay: entering ? '230ms' : undefined }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <span style={{ width: 9, height: 9, borderRadius: 99, background: definition.accent, boxShadow: `0 0 16px ${definition.accent}` }} />
             <h2 style={{ margin: 0, fontSize: 17, lineHeight: 1.2, fontWeight: 720, letterSpacing: '.02em' }}>{definition.title}</h2>
@@ -99,14 +102,19 @@ export function GeneratedWidget({ widget }: { widget: WidgetInstance }) {
         </header>
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10, overflow: 'auto' }}>
           {definition.blocks.map((block, index) => (
-            <GeneratedBlock
+            <div
               key={`${block.type}-${index}`}
-              block={block}
-              now={now}
-              accent={definition.accent}
-              dateFormatter={formatter}
-              onToggle={(itemId) => toggleListItem(index, itemId)}
-            />
+              className={entering ? 'widget-content-step' : undefined}
+              style={{ animationDelay: entering ? `${320 + index * 105}ms` : undefined }}
+            >
+              <GeneratedBlock
+                block={block}
+                now={now}
+                accent={definition.accent}
+                dateFormatter={formatter}
+                onToggle={(itemId) => toggleListItem(index, itemId)}
+              />
+            </div>
           ))}
         </div>
       </div>

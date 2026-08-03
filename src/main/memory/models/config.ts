@@ -1,5 +1,6 @@
 import { store } from '../../store'
 import { safeStorage } from 'electron'
+import { normalizeDeepSeekBaseURL, normalizeDeepSeekModel } from '@shared/model-defaults'
 
 export type ModelProvider = 'openai-compatible' | 'google' | 'deepseek'
 
@@ -48,15 +49,20 @@ function decryptApiKey(apiKey: string): string {
 
 function getSettings(): ModelSettings {
   const raw = store.get(STORE_KEY) as ModelSettings
-  // 向后兼容：旧 profile 可能没有 provider 字段
-  if (raw?.profiles) {
-    for (const p of raw.profiles) {
-      if (!p.provider) p.provider = 'openai-compatible'
-    }
-  }
   return {
     ...raw,
-    profiles: raw.profiles.map((profile) => ({ ...profile, apiKey: decryptApiKey(profile.apiKey) })),
+    profiles: raw.profiles.map((profile) => {
+      const provider = profile.provider || 'openai-compatible'
+      return {
+        ...profile,
+        provider,
+        baseURL: provider === 'deepseek'
+          ? normalizeDeepSeekBaseURL(profile.baseURL)
+          : profile.baseURL,
+        model: provider === 'deepseek' ? normalizeDeepSeekModel(profile.model) : profile.model,
+        apiKey: decryptApiKey(profile.apiKey),
+      }
+    }),
   }
 }
 

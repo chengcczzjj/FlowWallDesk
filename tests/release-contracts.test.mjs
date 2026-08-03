@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.0.3')
+  assert.equal(packageJson.version, '1.0.4')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)

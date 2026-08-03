@@ -4,20 +4,10 @@
  */
 import { net } from 'electron'
 import type { StockItem } from '@shared/types'
+import { detectAStockMarket, POPULAR_A_SHARE_SYMBOLS } from '@shared/stock-symbols'
 
 /** 常用股票/指数预设（供 UI 快捷添加） */
-export const POPULAR_STOCKS = [
-  { code: '000001', name: '上证指数', market: '1' },
-  { code: '399001', name: '深证成指', market: '0' },
-  { code: '399006', name: '创业板指', market: '0' },
-  { code: '600519', name: '贵州茅台', market: '1' },
-  { code: '000858', name: '五粮液',   market: '0' },
-  { code: '601318', name: '中国平安', market: '1' },
-  { code: '000333', name: '美的集团', market: '0' },
-  { code: '002594', name: '比亚迪',   market: '0' },
-  { code: '600036', name: '招商银行', market: '1' },
-  { code: '601012', name: '隆基绿能', market: '1' },
-]
+export const POPULAR_STOCKS = POPULAR_A_SHARE_SYMBOLS
 
 interface CachedResult {
   data: StockItem[]
@@ -38,8 +28,14 @@ export const stocksUsage = { fetchCount: 0, lastFetchTime: null as number | null
  * 0/2/3/4 开头 → 深市 (market=0)
  */
 export function detectMarket(code: string): string {
-  if (/^[659]/.test(code)) return '1'
-  return '0'
+  return detectAStockMarket(code)
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string' || !value.trim() || value.trim() === '-') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 /**
@@ -73,7 +69,7 @@ export async function fetchStocks(
     const json = (await res.json()) as {
       rc: number
       data?: {
-        diff?: { f2: number; f3: number; f4: number; f12: string; f14: string }[]
+        diff?: { f2: unknown; f3: unknown; f4: unknown; f12: string; f14: string }[]
       }
     }
 
@@ -84,9 +80,9 @@ export async function fetchStocks(
     const items: StockItem[] = json.data.diff.map((d) => ({
       code: d.f12,
       name: d.f14,
-      price: d.f2,
-      change: d.f4,
-      changePercent: d.f3,
+      price: toNullableNumber(d.f2),
+      change: toNullableNumber(d.f4),
+      changePercent: toNullableNumber(d.f3),
     }))
 
     cache.set(secids, { data: items, timestamp: Date.now() })

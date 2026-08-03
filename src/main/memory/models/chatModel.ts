@@ -4,21 +4,22 @@ import { streamText, generateText, stepCountIs } from 'ai'
 import { streamDeepSeekToolChat, type DeepSeekToolChatResult } from './deepseekToolChat'
 import type { FinishReason, ModelMessage, ToolSet } from 'ai'
 import type { ModelCapabilities, ModelProfile } from './config'
-
-const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
+import {
+  DEEPSEEK_CONTEXT_TOKENS,
+  DEEPSEEK_MAX_OUTPUT_TOKENS,
+  isDeepSeekV4Model,
+  normalizeDeepSeekBaseURL,
+} from '@shared/model-defaults'
 
 function getOpenAICompatibleBaseURL(profile: ModelProfile): string {
   const baseURL = profile.baseURL?.trim()
-  if (profile.provider === 'deepseek') return baseURL || DEEPSEEK_BASE_URL
+  if (profile.provider === 'deepseek') return normalizeDeepSeekBaseURL(baseURL)
   return baseURL
 }
 
 function validateProfileApiKey(profile: ModelProfile): string | null {
   const apiKey = profile.apiKey.trim()
   if (!apiKey) return '请填写 API Key'
-  if (profile.provider === 'deepseek' && !/^sk-[0-9a-f]{32}$/i.test(apiKey)) {
-    return 'DeepSeek API Key 格式不正确：应为 sk- 开头后接 32 位字符，请检查是否多复制或少复制。'
-  }
   return null
 }
 
@@ -31,12 +32,20 @@ export interface ResolvedModelCapabilities {
 
 export function getModelCapabilities(profile: Pick<ModelProfile, 'provider' | 'model' | 'capabilities'>): ResolvedModelCapabilities {
   const configured: ModelCapabilities = profile.capabilities ?? {}
-  const reasoningModel = /(^|[-_.])(reasoner|reasoning|r1|o1|o3|o4)([-_.]|$)/i.test(profile.model)
+  const deepSeekV4 = profile.provider === 'deepseek' && isDeepSeekV4Model(profile.model)
+  const reasoningModel = deepSeekV4 || /(^|[-_.])(reasoner|reasoning|r1|o1|o3|o4)([-_.]|$)/i.test(profile.model)
   return {
     toolCalling: configured.toolCalling !== 'disabled',
     reasoning: configured.reasoning ?? reasoningModel,
-    maxContextTokens: Math.max(4_096, configured.maxContextTokens ?? (profile.provider === 'google' ? 1_000_000 : 64_000)),
-    maxOutputTokens: Math.max(256, configured.maxOutputTokens ?? 16_384),
+    maxContextTokens: Math.max(
+      4_096,
+      configured.maxContextTokens
+        ?? (profile.provider === 'google' || deepSeekV4 ? DEEPSEEK_CONTEXT_TOKENS : 64_000),
+    ),
+    maxOutputTokens: Math.max(
+      256,
+      configured.maxOutputTokens ?? (deepSeekV4 ? DEEPSEEK_MAX_OUTPUT_TOKENS : 16_384),
+    ),
   }
 }
 
@@ -61,7 +70,7 @@ export function createModel(profile: ModelProfile) {
     })
     return google(profile.model)
   }
-  // DeepSeek/OpenAI 兼容：使用 .chat() 调用 /chat/completions（v3 默认 /responses 不被第三方支持）
+  // Chat Completions remains supported by DeepSeek V4 and third-party gateways.
   const baseURL = getOpenAICompatibleBaseURL(profile)
   const openai = createOpenAI({
     baseURL,
@@ -110,6 +119,8 @@ export async function streamChat(
       messages,
       tools: availableTools,
       maxSteps,
+      thinkingEnabled: capabilities.reasoning,
+      maxOutputTokens: capabilities.maxOutputTokens,
       abortSignal,
       toolCallbacks,
     })

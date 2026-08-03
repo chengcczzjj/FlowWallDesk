@@ -7,6 +7,12 @@ import type { DesktopIconItem, WidgetInstance } from '@shared/types'
 import { DesktopInteractionEpochCtx, WidgetPosCtx } from '../../canvas/contexts'
 import { FrostedGlassBackground } from '../FrostedGlassBackground'
 import { toRendererPublicUrl } from '@shared/asset-url'
+import {
+  DOCK_BOUNCE_DURATION_SECONDS,
+  DOCK_BOUNCE_RESET_MS,
+  DOCK_BOUNCE_TIMES,
+  getDockBounceKeyframes,
+} from '@shared/dock-motion'
 
 type DesktopIconVariant = 'vertical' | 'horizontal' | 'adaptive' | 'dock'
 type StorageVariant = Exclude<DesktopIconVariant, 'dock'>
@@ -363,7 +369,7 @@ function DesktopIconsWidget({
         void window.canvasBridge.launchDesktopIcon(widget.id, item).then((result) => {
           if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
         })
-        window.setTimeout(() => setBouncingId(null), 980)
+        window.setTimeout(() => setBouncingId(null), DOCK_BOUNCE_RESET_MS)
       } else {
         setBouncingId(item.id)
         void window.canvasBridge.launchDesktopIcon(widget.id, item).then((result) => {
@@ -1072,7 +1078,7 @@ function DockSystemButton({
 
   const triggerBounce = useCallback(() => {
     setBouncing(true)
-    window.setTimeout(() => setBouncing(false), 980)
+    window.setTimeout(() => setBouncing(false), DOCK_BOUNCE_RESET_MS)
   }, [])
 
   return (
@@ -1105,7 +1111,7 @@ function DockSystemButton({
       }
       transition={{
         y: bouncing
-          ? { duration: 0.85, times: [0, 0.035, 0.17, 0.27, 0.38, 0.46, 1], ease: ['easeOut', 'easeIn', 'easeOut', 'easeIn', 'easeOut', 'easeIn'] }
+          ? { duration: DOCK_BOUNCE_DURATION_SECONDS, times: DOCK_BOUNCE_TIMES, ease: 'linear' }
           : {},
       }}
       style={{
@@ -1348,7 +1354,7 @@ function DockIconButton({
         layout: { type: 'spring', stiffness: 520, damping: 32 },
         scale: { type: 'spring', stiffness: 420, damping: 26 },
         y: bouncing
-          ? { duration: 0.85, times: [0, 0.035, 0.17, 0.27, 0.38, 0.46, 1], ease: ['easeOut', 'easeIn', 'easeOut', 'easeIn', 'easeOut', 'easeIn'] }
+          ? { duration: DOCK_BOUNCE_DURATION_SECONDS, times: DOCK_BOUNCE_TIMES, ease: 'linear' }
           : { type: 'spring', stiffness: 520, damping: 32 },
       }}
       style={{
@@ -1943,11 +1949,6 @@ function getDockTargetIndex(clientX: number, rect: DOMRect, length: number): num
 
 function getDockIconSize(height: number): number {
   return Math.max(ICON_SIZE, Math.min(56, height - 34))
-}
-
-function getDockBounceKeyframes(flipped: boolean): number[] {
-  const direction = flipped ? 1 : -1
-  return [0, direction * 84, 0, direction * 36, 0, direction * 12, 0]
 }
 
 function getDockInteractionInsets(iconSize: number, hoverScale: number): { inline: number; liftSide: number; anchorSide: number } {

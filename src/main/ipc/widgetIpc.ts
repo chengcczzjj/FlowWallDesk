@@ -6,6 +6,7 @@ import { IPC } from '@shared/ipc-channels'
 import { z } from 'zod'
 import type { DesktopIconItem, WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan } from '@shared/desktop-scene-layout'
+import { findSmartWidgetPlacement } from '@shared/widget-placement'
 import {
   DEFAULT_WIDGET_SIZE_BY_TYPE,
   WIDGET_TYPES,
@@ -238,31 +239,18 @@ function findPlacement(
   existing: WidgetInstance[]
 ): { x: number; y: number } {
   const display = screen.getPrimaryDisplay()
-  const area = display.bounds
-
-  const maxX = area.width - EDGE_PADDING - w
-  const maxY = area.height - BOTTOM_EDGE_PADDING - h
-
-  // 检查 (x,y) 是否与已有组件重叠
-  const overlaps = (x: number, y: number): boolean =>
-    existing.some(
-      (e) =>
-        e.enabled &&
-        x < e.x + e.width + GRID_GAP &&
-        x + w + GRID_GAP > e.x &&
-        y < e.y + e.height + GRID_GAP &&
-        y + h + GRID_GAP > e.y
-    )
-
-  // 从左上角开始，按网格步进查找第一个空位
-  for (let y = EDGE_PADDING; y <= maxY; y += GRID_GAP) {
-    for (let x = EDGE_PADDING; x <= maxX; x += GRID_GAP) {
-      if (!overlaps(x, y)) return { x, y }
-    }
-  }
-
-  // 全满了就放到右下角
-  return { x: Math.max(EDGE_PADDING, maxX), y: Math.max(EDGE_PADDING, maxY) }
+  const bounds = display.bounds
+  const workArea = display.workArea
+  return findSmartWidgetPlacement(w, h, existing, {
+    x: workArea.x - bounds.x,
+    y: workArea.y - bounds.y,
+    width: workArea.width,
+    height: workArea.height,
+  }, {
+    gap: GRID_GAP,
+    edgePadding: EDGE_PADDING,
+    grid: GRID_GAP,
+  })
 }
 
 function getDockPlacement(width: number, height: number): { x: number; y: number } {

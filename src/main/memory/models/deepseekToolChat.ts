@@ -130,17 +130,32 @@ async function streamDeepSeekChatCompletion(params: {
   baseURL: string
   messages: DeepSeekMessage[]
   tools?: Awaited<ReturnType<typeof toDeepSeekTools>>
+  thinkingEnabled: boolean
+  maxOutputTokens: number
   abortSignal?: AbortSignal
   onContentDelta?: (delta: string) => void
 }): Promise<DeepSeekStreamMessage> {
-  const { profile, baseURL, messages, tools, abortSignal, onContentDelta } = params
+  const {
+    profile,
+    baseURL,
+    messages,
+    tools,
+    thinkingEnabled,
+    maxOutputTokens,
+    abortSignal,
+    onContentDelta,
+  } = params
   const body = removeUndefined({
     model: profile.model,
     messages,
     tools,
     tool_choice: tools ? 'auto' : undefined,
-    temperature: profile.temperature,
-    max_tokens: profile.maxTokens,
+    thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' },
+    reasoning_effort: thinkingEnabled ? 'high' : undefined,
+    temperature: thinkingEnabled ? undefined : profile.temperature,
+    max_tokens: profile.maxTokens == null
+      ? undefined
+      : Math.min(profile.maxTokens, maxOutputTokens),
     stream: true,
   })
 
@@ -344,10 +359,23 @@ export async function streamDeepSeekToolChat(params: {
   messages: ModelMessage[]
   tools?: ToolSet
   maxSteps?: number
+  thinkingEnabled: boolean
+  maxOutputTokens: number
   abortSignal?: AbortSignal
   toolCallbacks?: ToolCallbacks
 }): Promise<DeepSeekToolChatResult> {
-  const { profile, baseURL, system, messages, tools, maxSteps = 8, abortSignal, toolCallbacks } = params
+  const {
+    profile,
+    baseURL,
+    system,
+    messages,
+    tools,
+    maxSteps = 8,
+    thinkingEnabled,
+    maxOutputTokens,
+    abortSignal,
+    toolCallbacks,
+  } = params
   const deepSeekTools = await toDeepSeekTools(tools)
   const requestMessages = toDeepSeekMessages(system, messages)
   let visibleText = ''
@@ -368,6 +396,8 @@ export async function streamDeepSeekToolChat(params: {
       baseURL,
       messages: requestMessages,
       tools: deepSeekTools,
+      thinkingEnabled,
+      maxOutputTokens,
       abortSignal,
       onContentDelta: emitTextDelta,
     })

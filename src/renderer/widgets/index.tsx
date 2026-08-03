@@ -17,7 +17,7 @@ import { DesktopIconAdaptive, DesktopIconBox, DesktopIconDock, DesktopIconHorizo
 import { GeneratedWidget } from './GeneratedWidget/GeneratedWidget'
 
 /** 组件类型 → 组件实现 的注册表 */
-export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; resizing?: boolean }) {
+export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; resizing?: boolean; entering?: boolean }) {
   switch (w.type) {
     case 'clock':
       return <Clock config={w.config} />
@@ -28,7 +28,7 @@ export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; r
     case 'graphicdatetime':
       return <GraphicDateTime config={w.config} />
     case 'generated-widget':
-      return <GeneratedWidget widget={w} />
+      return <GeneratedWidget widget={w} entering={Boolean(options?.entering)} />
     case 'desktop-icons-box':
       return <DesktopIconBox widget={w} editing={Boolean(options?.editing)} resizing={Boolean(options?.resizing)} />
     case 'desktop-icons-horizontal':
@@ -46,7 +46,7 @@ export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; r
     case 'weather':
       return <WeatherWidget config={w.config} />
     case 'stocks':
-      return <StocksWidget config={w.config} />
+      return <StocksWidget config={w.config} entering={Boolean(options?.entering)} />
     case 'news':
       return <NewsWidget config={w.config} />
     case 'quicktools':

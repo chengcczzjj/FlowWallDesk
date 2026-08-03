@@ -112,9 +112,9 @@ export interface NewsItem {
 export interface StockItem {
   code: string
   name: string
-  price: number
-  change: number
-  changePercent: number
+  price: number | null
+  change: number | null
+  changePercent: number | null
 }
 
 /** 股票代码配置 */

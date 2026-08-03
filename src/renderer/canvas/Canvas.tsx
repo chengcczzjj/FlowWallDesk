@@ -19,8 +19,8 @@ const ICON_GAP_X = 12
 const ICON_GAP_Y = 16
 const ICON_GAP_Y_COMPACT = 8
 const ICON_PADDING = 22
-const LONG_PRESS_WIDGET_DRAG_MS = 1000
-const LONG_PRESS_WIDGET_CANCEL_PX = 8
+const LONG_PRESS_WIDGET_DRAG_MS = 520
+const LONG_PRESS_WIDGET_CANCEL_PX = 10
 const ICON_STORAGE_SCALE_MIN = 0.65
 const ICON_STORAGE_SCALE_MAX = 1.8
 const ICON_STORAGE_TITLE_HEIGHT = 38
@@ -80,8 +80,10 @@ function needsWidgetUpdate(prev: WidgetInstance, next: WidgetInstance): boolean 
   return prev.x !== next.x || prev.y !== next.y || prev.width !== next.width || prev.height !== next.height
 }
 
-function isDesktopIconWidgetType(type: string): boolean {
-  return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock'].includes(type)
+function isWidgetInteractionTarget(target: HTMLElement): boolean {
+  return Boolean(target.closest(
+    'button, a, input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"], [role="button"], [data-widget-interactive], [data-desktop-icon-action]'
+  ))
 }
 
 function snapIconStorageWidth(width: number, scale: number, hideLabels = false): number {
@@ -343,6 +345,10 @@ export function Canvas() {
   editingRef.current = editing
   const [interactionEpoch, setInteractionEpoch] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [enteringIds, setEnteringIds] = useState<Set<string>>(() => new Set())
+  const hydratedWidgetsRef = useRef(false)
+  const knownWidgetIdsRef = useRef(new Set<string>())
+  const entryTimersRef = useRef(new Map<string, number>())
   const [scenePreview, setScenePreview] = useState<DesktopSceneLayoutPlan | null>(null)
   const [snapPreviews, setSnapPreviews] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>(
     []
@@ -370,9 +376,37 @@ export function Canvas() {
     reconcileMousePassthrough(point.x, point.y, force)
   }, [reconcileMousePassthrough])
 
+  const syncWidgets = useCallback((list: WidgetInstance[]) => {
+    const nextIds = new Set(list.map((widget) => widget.id))
+    if (!hydratedWidgetsRef.current) {
+      hydratedWidgetsRef.current = true
+    } else {
+      const addedIds = [...nextIds].filter((id) => !knownWidgetIdsRef.current.has(id))
+      if (addedIds.length > 0) {
+        setEnteringIds((current) => new Set([...current, ...addedIds]))
+        for (const id of addedIds) {
+          const previousTimer = entryTimersRef.current.get(id)
+          if (previousTimer) window.clearTimeout(previousTimer)
+          const timer = window.setTimeout(() => {
+            entryTimersRef.current.delete(id)
+            setEnteringIds((current) => {
+              const next = new Set(current)
+              next.delete(id)
+              return next
+            })
+          }, 1_650)
+          entryTimersRef.current.set(id, timer)
+        }
+      }
+    }
+    knownWidgetIdsRef.current = nextIds
+    setWidgets(list)
+  }, [])
+
   useEffect(() => {
-    window.canvasBridge?.getWidgets().then((list) => setWidgets(list))
-    const offSync = window.canvasBridge?.onSync((list) => setWidgets(list))
+    const entryTimers = entryTimersRef.current
+    window.canvasBridge?.getWidgets().then(syncWidgets)
+    const offSync = window.canvasBridge?.onSync(syncWidgets)
     const offFrame = window.canvasBridge?.onFrame(setWallpaperFrame)
     const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
     const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
@@ -399,8 +433,10 @@ export function Canvas() {
       offScenePreview?.()
       offScenePreviewClear?.()
       offOcclusion?.()
+      for (const timer of entryTimers.values()) window.clearTimeout(timer)
+      entryTimers.clear()
     }
-  }, [reconcileMousePassthrough])
+  }, [reconcileMousePassthrough, syncWidgets])
 
   useEffect(() => {
     const releaseFrames = new Map<number, number>()
@@ -587,6 +623,7 @@ export function Canvas() {
               widget={w}
               editing={editing}
               selected={selectedId === w.id}
+              entering={enteringIds.has(w.id)}
               previewDimmed={previewHiddenIds.has(w.id)}
               onSelect={() => {
                 if (editing) setSelectedId(w.id)
@@ -723,6 +760,7 @@ function DraggableWidget({
   widget,
   editing,
   selected,
+  entering,
   previewDimmed,
   onSelect,
   onEnterEdit,
@@ -734,6 +772,7 @@ function DraggableWidget({
   widget: WidgetInstance
   editing: boolean
   selected: boolean
+  entering: boolean
   previewDimmed?: boolean
   onSelect: () => void
   onEnterEdit: () => void
@@ -755,6 +794,7 @@ function DraggableWidget({
   const [size, setSize] = useState({ w: widget.width, h: widget.height })
   const sizeRef = useRef(size)
   const [dragging, setDragging] = useState(false)
+  const [longPressArmed, setLongPressArmed] = useState(false)
   const [resizing, setResizing] = useState(false)
   const [pendingIconScale, setPendingIconScale] = useState<number | null>(null)
   const resizeRef = useRef<{
@@ -773,7 +813,7 @@ function DraggableWidget({
   const contentRef = useRef<HTMLDivElement>(null)
 
   const canResize = isFloatingType(widget.type)
-  const canLongPressDrag = isDesktopIconWidgetType(widget.type)
+  const canLongPressDrag = true
   /** stretch-fill 类型不走 naturalSize/scale 等比缩放 */
   const stretchFill = isStretchFillType(widget.type)
 
@@ -929,6 +969,7 @@ function DraggableWidget({
     const pending = longPressDragRef.current
     if (pending) window.clearTimeout(pending.timer)
     longPressDragRef.current = null
+    setLongPressArmed(false)
   }, [])
 
   useEffect(() => {
@@ -1020,9 +1061,10 @@ function DraggableWidget({
         return
       }
 
-      if (canLongPressDrag && (e.target as HTMLElement).closest('[data-desktop-icon-action]')) return
+      const target = e.target as HTMLElement
+      if (isWidgetInteractionTarget(target)) return
 
-      if (canLongPressDrag && (e.target as HTMLElement).closest('[data-widget-drag-handle]')) {
+      if (canLongPressDrag && target.closest('[data-widget-drag-handle]')) {
         e.preventDefault()
         elRef.current?.setPointerCapture(e.pointerId)
         window.canvasBridge?.setIgnoreMouse(false)
@@ -1041,6 +1083,7 @@ function DraggableWidget({
       if (canLongPressDrag) {
         e.preventDefault()
         elRef.current?.setPointerCapture(e.pointerId)
+        setLongPressArmed(true)
         const startX = e.clientX
         const startY = e.clientY
         const pointerId = e.pointerId
@@ -1048,6 +1091,7 @@ function DraggableWidget({
           const pending = longPressDragRef.current
           if (!pending || pending.pointerId !== pointerId) return
           longPressDragRef.current = null
+          setLongPressArmed(false)
           window.canvasBridge?.setIgnoreMouse(false)
           setDragging(true)
           hasDraggedRef.current = false
@@ -1246,6 +1290,7 @@ function DraggableWidget({
       onPointerCancel={onPointerCancel}
       onContextMenu={onContextMenu}
       onClick={(e) => e.stopPropagation()}
+      className={`${entering ? 'widget-create-entering' : ''} ${longPressArmed ? 'widget-long-press-armed' : ''} ${dragging ? 'widget-quick-dragging' : ''}`.trim()}
       style={{
         position: 'absolute',
         left: pos.x,
@@ -1255,7 +1300,7 @@ function DraggableWidget({
         overflow: 'visible',
         borderRadius: 16,
         pointerEvents: 'auto',
-        cursor: editing ? (dragging ? 'grabbing' : 'grab') : 'default',
+        cursor: editing || dragging ? (dragging ? 'grabbing' : 'grab') : 'default',
         opacity: previewDimmed ? 0.34 : 1,
         filter: previewDimmed ? 'saturate(0.65) blur(0.2px)' : undefined,
         transition:
@@ -1263,6 +1308,7 @@ function DraggableWidget({
         touchAction: 'none',
       }}
     >
+      {entering && <div className="widget-create-plate" aria-hidden />}
       {/* 选中边框 */}
       {editing && (
         <div
@@ -1347,6 +1393,7 @@ function DraggableWidget({
       <WidgetPosCtx.Provider value={posValue}>
         <div
           ref={contentRef}
+          className={entering ? 'widget-create-content' : undefined}
           style={{
             width: canResize && !stretchFill && naturalSizeRef.current ? naturalSizeRef.current.w : '100%',
             height: canResize && !stretchFill && naturalSizeRef.current ? naturalSizeRef.current.h : '100%',
@@ -1358,7 +1405,7 @@ function DraggableWidget({
             transformOrigin: 'top left',
           }}
         >
-          {renderWidget(renderWidgetInstance, { editing, resizing })}
+          {renderWidget(renderWidgetInstance, { editing, resizing, entering })}
         </div>
       </WidgetPosCtx.Provider>
     </div>

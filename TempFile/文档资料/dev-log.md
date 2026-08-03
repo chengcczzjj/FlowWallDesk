@@ -1,5 +1,25 @@
 # 灵月桌面 开发日志
 
+## [2026-08-04 00:55] 发布 1.0.4 智能组件与 DeepSeek V4 适配版
+
+**变更摘要**: 修复对话创建股票组件、壁纸冷启动合成和组件左上角堆放问题，补齐智能落位、创建动效、长按移动、Dock 物理弹跳及 DeepSeek V4 Flash 适配。
+
+**涉及模块**:
+- `src/main/memory/` / `src/shared/stock-symbols.ts`: 股票意图进入组件工具，使用明确的 A 股代码契约；实时数据禁止由生成组件伪造，并补齐 DeepSeek V4 thinking 参数、上下文能力和澄清策略。
+- `src/main/ipc/widgetIpc.ts` / `src/shared/widget-placement.ts`: 新组件延续已有组件组的行列关系，空桌面从右上安全区落位并避开任务栏、Dock 和已有组件。
+- `src/renderer/canvas/` / `src/renderer/widgets/`: 创建过程按“底板展开 → 标题 → 内容逐项出现”呈现；非交互区域长按可直接移动，Dock 使用较慢的重力上抛与衰减回弹。
+- `src/main/services/stocks-service.ts` / `src/renderer/widgets/Stocks/`: 行情字段容错、无数据原因反馈、股票卡片逐项显现和共享预设规范化。
+- `src/main/windows/wallpaperWindow.ts` / `src/renderer/wallpaper/Wallpaper.tsx`: READY 延迟到可见帧提交后并主动触发有界重绘，消除首次点击桌面才显示壁纸的竞态。
+- `package.json` / `tests/`: 版本升级至 1.0.4，增加 DeepSeek、股票、智能落位与 Dock 动画回归契约。
+
+**遇到的问题**:
+- 股票组件虽然创建成功但没有可靠内容 → Agent 未获得 `symbols` 结构约束且行情接口可能返回 `-` → 增加 typed stockSymbols、名称/代码规范化与 nullable 数值渲染。
+- 长按移动容易吞掉组件正常点击 → 只在非按钮、非输入、非图标动作区域启动 520ms 长按，移动超过阈值前可取消，释放后仍走统一碰撞落位。
+
+**Git Commit**: 已提交 — `feat(release): publish LingyueDesk 1.0.4`
+
+---
+
 ## [2026-08-03 23:06] 发布 1.0.3 桌面交互与侧栏更新修复版
 
 **变更摘要**: 修复 Dock 与图标收纳反复失去启动能力的问题，分离 Dock 悬停与启动动画，并将自动更新改为左侧栏按需下载、下载后重启安装。

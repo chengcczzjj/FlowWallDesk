@@ -577,6 +577,13 @@
   line-height: 1.35;
 }
 
+.form-field__hint {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 /* ── Editor Footer ── */
 .profile-editor__footer {
   display: flex;

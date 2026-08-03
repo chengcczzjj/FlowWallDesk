@@ -49,7 +49,7 @@ function includesAny(text: string, pattern: RegExp): boolean {
 }
 
 function isWidgetIntent(text: string): boolean {
-  return includesAny(text, /组件|小组件|挂件|桌面组件|桌面文字|便签|贴纸|天气卡片|天气组件|日历组件|时钟组件|白噪音|快捷工具|桌宠|萌宠|清单|倒计时|进度卡|目标卡|信息卡|仪表盘|放到桌面|加到桌面|摆到桌面|调整.*桌面|改.*组件/i)
+  return includesAny(text, /组件|小组件|挂件|桌面组件|桌面文字|便签|贴纸|天气卡片|天气组件|日历组件|时钟组件|白噪音|快捷工具|桌宠|萌宠|股票|行情|自选股|看盘|清单|倒计时|进度卡|目标卡|信息卡|仪表盘|放到桌面|加到桌面|摆到桌面|调整.*桌面|改.*组件/i)
 }
 
 function isDesktopSceneIntent(text: string): boolean {
@@ -128,7 +128,7 @@ export function buildToolRouterPrompt(params: { workspace?: ChatProject | null; 
   ]
 
   if (route.usesWidgets) {
-    blocks.push(`【桌面组件操作】\n用户要求添加、查看、调整或移除桌面组件时，优先使用组件工具完成真实操作。组件操作是轻量桌面陪伴能力，不要把它说成文件任务、项目任务或工作区任务。\n内置组件类型包括：clock、elegantclock、pixelclock、graphicdatetime、audio、weather、whitenoise、text、stocks、news、calendar、quicktools、pet、sysmonitor、desktop-icons-box、desktop-icons-horizontal、desktop-icons-adaptive、desktop-icons-dock。\n如果用户描述的是便签、天气、日历等现成能力，优先使用内置组件；如果用户希望制作个性化清单、进度、倒计时、组合信息卡或明确说“帮我生成一个组件”，调用 create_generated_widget，直接生成安全声明式组件并放到桌面。`)
+    blocks.push(`【桌面组件操作】\n用户要求添加、查看、调整或移除桌面组件时，优先使用组件工具完成真实操作。组件操作是轻量桌面陪伴能力，不要把它说成文件任务、项目任务或工作区任务。\n内置组件类型包括：clock、elegantclock、pixelclock、graphicdatetime、audio、weather、whitenoise、text、stocks、news、calendar、quicktools、pet、sysmonitor、desktop-icons-box、desktop-icons-horizontal、desktop-icons-adaptive、desktop-icons-dock。\n实时股票、天气、新闻必须使用对应内置组件，绝不能用生成式组件编造静态数据。创建 stocks 时把用户指定的六位 A 股代码放进 stockSymbols；用户没说具体股票时只问一次名称或代码，不要先创建空卡片。便签、天气、日历等现成能力同样优先使用内置组件；只有个性化清单、进度、倒计时、组合静态信息卡才调用 create_generated_widget。`)
   }
 
   if (route.usesDesktopScene) {

@@ -15,6 +15,7 @@ import {
   MapPin,
 } from 'lucide-react'
 import type { ModelProfile, ModelProvider } from '@shared/types'
+import { DEEPSEEK_API_BASE_URL, DEEPSEEK_LATEST_MODEL } from '@shared/model-defaults'
 import './settings.css'
 
 const PROVIDER_LABELS: Record<ModelProvider, string> = {
@@ -135,9 +136,9 @@ export function SettingsGeneralPage() {
       id: `profile-${Date.now()}`,
       name: 'DeepSeek',
       provider: 'deepseek',
-      baseURL: 'https://api.deepseek.com',
+      baseURL: DEEPSEEK_API_BASE_URL,
       apiKey: '',
-      model: 'deepseek-chat',
+      model: DEEPSEEK_LATEST_MODEL,
     })
     setTestStatus('idle')
     setModels([])
@@ -451,7 +452,7 @@ export function SettingsGeneralPage() {
                       type="text"
                       value={editingProfile.name}
                       onChange={(e) => updateField('name', e.target.value)}
-                      placeholder="DeepSeek-V3"
+                      placeholder="DeepSeek V4 Flash"
                     />
                   </div>
                   <div className="form-field">
@@ -467,9 +468,9 @@ export function SettingsGeneralPage() {
                         setEditingProfile({
                           ...editingProfile,
                           provider,
-                          baseURL: provider === 'deepseek' ? 'https://api.deepseek.com' : '',
+                          baseURL: provider === 'deepseek' ? DEEPSEEK_API_BASE_URL : '',
                           name: provider === 'google' ? 'Gemini' : provider === 'deepseek' ? 'DeepSeek' : editingProfile.name,
-                          model: provider === 'google' ? 'gemini-2.5-flash' : provider === 'deepseek' ? 'deepseek-chat' : editingProfile.model,
+                          model: provider === 'google' ? 'gemini-2.5-flash' : provider === 'deepseek' ? DEEPSEEK_LATEST_MODEL : editingProfile.model,
                           availableModels: undefined,
                         })
                       }}
@@ -531,7 +532,7 @@ export function SettingsGeneralPage() {
                     onChange={(e) => updateField('model', e.target.value)}
                     onFocus={() => { if (models.length > 0) setShowModelDropdown(true) }}
                     onClick={() => { if (models.length > 0) setShowModelDropdown(true) }}
-                    placeholder={editingProfile.provider === 'google' ? 'gemini-2.5-flash' : editingProfile.provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o'}
+                    placeholder={editingProfile.provider === 'google' ? 'gemini-2.5-flash' : editingProfile.provider === 'deepseek' ? DEEPSEEK_LATEST_MODEL : 'gpt-4o'}
                   />
                   <button
                     className="model-fetch-btn"
@@ -553,6 +554,11 @@ export function SettingsGeneralPage() {
                 </div>
                 {modelListError && (
                   <div className="model-error">{modelListError}</div>
+                )}
+                {editingProfile.provider === 'deepseek' && (
+                  <div className="form-field__hint">
+                    deepseek-v4-flash 自动使用当前官方 V4 Flash 版本；旧 deepseek-chat / deepseek-reasoner 已停止服务。
+                  </div>
                 )}
               </div>
             </div>

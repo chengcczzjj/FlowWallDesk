@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { WidgetInstance, StockSymbol } from '@shared/types'
+import type { StockItem, StockSymbol, WidgetInstance } from '@shared/types'
 import { isGeneratedWidgetDefinition } from '@shared/generated-widget'
+import { POPULAR_A_SHARE_SYMBOLS } from '@shared/stock-symbols'
 import {
   Clock as ClockIcon,
   Calendar,
@@ -124,17 +125,7 @@ const NEWS_SOURCE_OPTIONS = [
 ]
 
 /** 常用股票/指数快捷添加 */
-const POPULAR_STOCKS: StockSymbol[] = [
-  { code: '000001', name: '上证指数', market: '1' },
-  { code: '399001', name: '深证成指', market: '0' },
-  { code: '399006', name: '创业板指', market: '0' },
-  { code: '600519', name: '贵州茅台', market: '1' },
-  { code: '000858', name: '五粮液', market: '0' },
-  { code: '601318', name: '中国平安', market: '1' },
-  { code: '000333', name: '美的集团', market: '0' },
-  { code: '002594', name: '比亚迪', market: '0' },
-  { code: '600036', name: '招商银行', market: '1' },
-]
+const POPULAR_STOCKS: StockSymbol[] = [...POPULAR_A_SHARE_SYMBOLS]
 
 export function WidgetsPage({ subPage }: { subPage: string }) {
   const [instances, setInstances] = useState<WidgetInstance[]>([])
@@ -156,9 +147,7 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
 
   // 预览数据
   const [newsPreview, setNewsPreview] = useState<{ title: string }[]>([])
-  const [stocksPreview, setStocksPreview] = useState<
-    { code: string; name: string; price: number; changePercent: number; change: number }[]
-  >([])
+  const [stocksPreview, setStocksPreview] = useState<StockItem[]>([])
   const [newsLoading, setNewsLoading] = useState(false)
   const [stocksLoading, setStocksLoading] = useState(false)
 
@@ -411,7 +400,7 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
                             {stock.name}
                           </div>
                           <div style={{ fontSize: 18, fontWeight: 'bold', margin: '2px 0' }}>
-                            {stock.price.toLocaleString('zh-CN', {
+                            {stock.price == null ? '--' : stock.price.toLocaleString('zh-CN', {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}
@@ -419,11 +408,11 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
                           <div
                             style={{
                               fontSize: 11,
-                              color: stock.changePercent > 0 ? '#c42b1c' : stock.changePercent < 0 ? '#0f7b0f' : '#666',
+                              color: (stock.changePercent ?? 0) > 0 ? '#c42b1c' : (stock.changePercent ?? 0) < 0 ? '#0f7b0f' : '#666',
                             }}
                           >
-                            {stock.changePercent > 0 ? '+' : ''}
-                            {stock.changePercent.toFixed(2)}%
+                            {(stock.changePercent ?? 0) > 0 ? '+' : ''}
+                            {stock.changePercent == null ? '--' : stock.changePercent.toFixed(2)}%
                           </div>
                         </div>
                       ))}

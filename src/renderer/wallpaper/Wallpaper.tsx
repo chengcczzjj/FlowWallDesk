@@ -117,10 +117,6 @@ export function Wallpaper() {
   const markMediaReady = useCallback(() => {
     if (!item) return
     setMediaReady(true)
-    const readyKey = `${item.id}:${item.source}`
-    if (readyReportedRef.current === readyKey) return
-    readyReportedRef.current = readyKey
-    window.wallpaperBridge?.notifyReady?.(item.id, item.source)
   }, [item])
 
   const playVideo = useCallback(
@@ -185,6 +181,27 @@ export function Wallpaper() {
     playRequestGenerationRef.current += 1
     clearPlayRetry()
   }, [clearPlayRetry, item?.id, item?.source])
+
+  useEffect(() => {
+    if (!mediaReady || !item) return
+    const readyKey = `${item.id}:${item.source}`
+    if (readyReportedRef.current === readyKey) return
+
+    // READY must be sent after React commits the visible media frame. Attaching the
+    // hidden window before the initial opacity transition finishes can leave DWM
+    // waiting for the first desktop input before it composites the wallpaper.
+    let timer: number | null = null
+    const frame = window.requestAnimationFrame(() => {
+      timer = window.setTimeout(() => {
+        readyReportedRef.current = readyKey
+        window.wallpaperBridge?.notifyReady?.(item.id, item.source)
+      }, 140)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [item, mediaReady])
 
   const captureFrame = useCallback(() => {
     if (!captureDemandRef.current || pausedRef.current) return
