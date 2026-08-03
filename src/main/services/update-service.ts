@@ -10,6 +10,7 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 let initialized = false
 let checkingPromise: Promise<void> | null = null
+let downloadPromise: Promise<void> | null = null
 let initialCheckTimer: ReturnType<typeof setTimeout> | null = null
 let scheduledCheckTimer: ReturnType<typeof setInterval> | null = null
 
@@ -34,7 +35,7 @@ function onUpdateAvailable(info: UpdateInfo): void {
     phase: 'available',
     availableVersion: info.version,
     progressPercent: 0,
-    message: `发现新版本 ${info.version}，正在后台下载。`,
+    message: `发现新版本 ${info.version}，可从左侧更新按钮下载。`,
     canCheck: false,
     canInstall: false,
   })
@@ -91,7 +92,7 @@ export function initializeAutoUpdate(): void {
     return
   }
 
-  autoUpdater.autoDownload = true
+  autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.allowPrerelease = false
   autoUpdater.allowDowngrade = false
@@ -100,6 +101,8 @@ export function initializeAutoUpdate(): void {
   autoUpdater.on('checking-for-update', () => {
     publishStatus({
       phase: 'checking',
+      availableVersion: undefined,
+      progressPercent: undefined,
       message: '正在检查更新…',
       canCheck: false,
       canInstall: updateStatus.phase === 'downloaded',
@@ -110,11 +113,12 @@ export function initializeAutoUpdate(): void {
   autoUpdater.on('download-progress', onDownloadProgress)
   autoUpdater.on('update-downloaded', onUpdateDownloaded)
   autoUpdater.on('error', (error) => {
+    const downloadCanRetry = Boolean(updateStatus.availableVersion)
     publishStatus({
       phase: 'error',
       lastCheckedAt: Date.now(),
-      message: `更新检查失败：${toSafeUpdateErrorMessage(error)}`,
-      canCheck: true,
+      message: `${downloadCanRetry ? '更新下载' : '更新检查'}失败：${toSafeUpdateErrorMessage(error)}`,
+      canCheck: !downloadCanRetry,
       canInstall: false,
     })
   })
@@ -145,7 +149,12 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
     await checkingPromise
     return getAppUpdateStatus()
   }
-  if (updateStatus.phase === 'downloading' || updateStatus.phase === 'downloaded') {
+  if (
+    updateStatus.phase === 'available' ||
+    updateStatus.phase === 'downloading' ||
+    updateStatus.phase === 'downloaded' ||
+    (updateStatus.phase === 'error' && Boolean(updateStatus.availableVersion))
+  ) {
     return getAppUpdateStatus()
   }
 
@@ -154,6 +163,7 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
     .catch((error: unknown) => {
       publishStatus({
         phase: 'error',
+        availableVersion: undefined,
         lastCheckedAt: Date.now(),
         message: `更新检查失败：${toSafeUpdateErrorMessage(error)}`,
         canCheck: true,
@@ -169,16 +179,33 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
 
 export async function downloadAppUpdate(): Promise<AppUpdateStatus> {
   if (!app.isPackaged || updateStatus.phase === 'downloaded') return getAppUpdateStatus()
-  try {
-    await autoUpdater.downloadUpdate()
-  } catch (error) {
+  const canDownload = updateStatus.phase === 'available' || (
+    updateStatus.phase === 'error' && Boolean(updateStatus.availableVersion)
+  )
+  if (!canDownload && !downloadPromise) return getAppUpdateStatus()
+  if (!downloadPromise) {
     publishStatus({
-      phase: 'error',
-      message: `更新下载失败：${toSafeUpdateErrorMessage(error)}`,
-      canCheck: true,
+      phase: 'downloading',
+      progressPercent: 0,
+      message: '正在准备下载新版本…',
+      canCheck: false,
       canInstall: false,
     })
+    downloadPromise = autoUpdater.downloadUpdate()
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        publishStatus({
+          phase: 'error',
+          message: `更新下载失败：${toSafeUpdateErrorMessage(error)}`,
+          canCheck: false,
+          canInstall: false,
+        })
+      })
+      .finally(() => {
+        downloadPromise = null
+      })
   }
+  await downloadPromise
   return getAppUpdateStatus()
 }
 

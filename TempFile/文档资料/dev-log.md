@@ -1,5 +1,25 @@
 # 灵月桌面 开发日志
 
+## [2026-08-03 23:06] 发布 1.0.3 桌面交互与侧栏更新修复版
+
+**变更摘要**: 修复 Dock 与图标收纳反复失去启动能力的问题，分离 Dock 悬停与启动动画，并将自动更新改为左侧栏按需下载、下载后重启安装。
+
+**涉及模块**:
+
+- `src/renderer/canvas/` / `src/shared/canvas-pointer-gate.ts`: 用画布级指针门统一管理透明窗口鼠标穿透，确保点击完成前不会提前穿透。
+- `src/renderer/widgets/DesktopIcons/` / `src/main/ipc/desktopIconIpc.ts`: 按组件绑定持久化图标记录，并将 Dock 悬停缩放与启动弹跳拆到独立变换层。
+- `src/renderer/main-ui/` / `src/main/services/update-service.ts`: 设置页移除更新卡片，发现新版本时在左侧栏显示下载、进度和重启更新按钮。
+- `tests/` / `package.json` / `package-lock.json`: 增加交互与发布回归契约，并将版本升级到 1.0.3。
+
+**遇到的问题**:
+
+- 透明画布的组件级 `pointerup/mouseleave` 与全屏恢复状态机重复控制穿透，动画改变命中区域时会截断点击链路 → 改为画布级指针门，并把穿透恢复延迟到原生点击结束后的下一帧。
+- Dock 点击会清空鼠标距离值，且悬停 lift 与启动 bounce 同时写入纵向变换 → 保留悬停距离，并采用“内层缩放、外层弹跳”的独立动画层。
+
+**Git Commit**: 已提交 — `fix(release): publish LingyueDesk 1.0.3`
+
+---
+
 ## [2026-08-01 23:05] 发布 1.0.2 Dock 与毛玻璃稳定性修复版
 
 **变更摘要**: 修复反复全屏、最小化造成壁纸暂停/恢复后 Dock 与图标收纳悬停失效、图标无法点击的问题，并将组件背景升级为带抽帧兜底的真实毛玻璃效果。

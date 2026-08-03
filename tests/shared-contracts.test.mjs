@@ -8,6 +8,7 @@ import { TOOL_MANIFEST, getToolManifest } from '../src/shared/tool-manifest.ts'
 import { approvalMatchesRequest } from '../src/shared/approval-scope.ts'
 import { automationStatusFromChat } from '../src/shared/agent-runtime.ts'
 import { rectCoversDisplay, StableBooleanTransition } from '../src/shared/desktop-occlusion.ts'
+import { CanvasPointerGate } from '../src/shared/canvas-pointer-gate.ts'
 
 test('asset URLs preserve Windows paths and packaged public assets', () => {
   assert.equal(
@@ -118,4 +119,20 @@ test('desktop occlusion only commits stable coverage of the primary display', ()
   assert.equal(transition.sample(false), null)
   assert.equal(transition.sample(false), false)
   assert.equal(transition.value, false)
+})
+
+test('canvas mouse passthrough stays locked until an active pointer gesture ends', () => {
+  const gate = new CanvasPointerGate()
+  assert.equal(gate.shouldIgnoreMouse(false, false), true)
+  assert.equal(gate.shouldIgnoreMouse(true, false), false)
+
+  gate.begin(7)
+  assert.equal(gate.shouldIgnoreMouse(false, false), false)
+  gate.end(7)
+  assert.equal(gate.shouldIgnoreMouse(false, false), true)
+
+  gate.begin(8)
+  gate.reset()
+  assert.equal(gate.shouldIgnoreMouse(false, false), true)
+  assert.equal(gate.shouldIgnoreMouse(false, true), false)
 })

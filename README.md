@@ -45,15 +45,15 @@ npm run build:dir        # 仅生成未打包目录，便于本地调试
 
 ## 版本与自动更新
 
-正式版启动 15 秒后自动检查更新，之后每 6 小时检查一次；发现新版本会后台下载，用户退出应用时自动安装，也可以在“设置 → 通用 → 版本与更新”中立即重启安装。
+正式版启动 15 秒后自动检查更新，之后每 6 小时检查一次；发现新版本后，左侧活动栏会出现更新按钮。用户点击后开始下载，下载完成后同一按钮会变为“重启并更新”。
 
 发布新版本时按以下顺序执行：
 
 ```powershell
-npm version 1.0.2 --no-git-tag-version
+npm version 1.0.3 --no-git-tag-version
 npm test
 npm run build:win:signed  # 未配置证书时先用 build:win 做内部验证
-git tag -a v1.0.2 -m "LingyueDesk 1.0.2"
+git tag -a v1.0.3 -m "LingyueDesk 1.0.3"
 ```
 
 随后创建同版本 GitHub Release，并上传 `dist/latest.yml`、安装包和对应 `.blockmap`。`chengcczzjj/FlowWallDesk` 已设为公开仓库，客户端可直接发现公开 Release；如果后续改回私有仓库，需要同步切换到公共对象存储更新源。

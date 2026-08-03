@@ -510,7 +510,11 @@ function updateDesktopIconItems(
 }
 
 function findStoredDesktopIcon(itemId: string, widgetId?: string): DesktopIconItem | undefined {
-  const widgets = store.get('widgets')
+  const globalWidgets = store.get('globalIconWidgets')
+  const widgets = [
+    ...store.get('widgets'),
+    ...(Array.isArray(globalWidgets) ? globalWidgets : []),
+  ]
   const candidates = widgetId ? widgets.filter((widget) => widget.id === widgetId) : widgets
   for (const widget of candidates) {
     const item = getDesktopIconItems(widget).find((candidate) => candidate.id === itemId)
@@ -701,9 +705,11 @@ export function registerDesktopIconIpc(): void {
     return { ...result, ok: result.items.length > 0 }
   })
 
-  ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, (_event, item: DesktopIconItem) => {
+  ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, (_event, widgetId: string, item: DesktopIconItem) => {
     assertTrustedIpcSender(_event, ['canvas'])
-    const stored = isDesktopIconItem(item) ? findStoredDesktopIcon(item.id) : undefined
+    const stored = typeof widgetId === 'string' && isDesktopIconItem(item)
+      ? findStoredDesktopIcon(item.id, widgetId)
+      : undefined
     return stored ? launchDesktopIcon(stored) : { ok: false, error: '桌面图标记录不存在。' }
   })
 

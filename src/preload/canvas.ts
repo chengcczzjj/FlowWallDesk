@@ -64,8 +64,8 @@ const api = {
     ipcRenderer.invoke(IPC.WIDGET_CONFIG_SAVE),
   importDesktopIcons: (widgetId: string, filePaths: string[]): Promise<DesktopIconImportResult> =>
     ipcRenderer.invoke(IPC.DESKTOP_ICON_IMPORT, widgetId, filePaths),
-  launchDesktopIcon: (item: DesktopIconItem): Promise<DesktopIconLaunchResult> =>
-    ipcRenderer.invoke(IPC.DESKTOP_ICON_LAUNCH, item),
+  launchDesktopIcon: (widgetId: string, item: DesktopIconItem): Promise<DesktopIconLaunchResult> =>
+    ipcRenderer.invoke(IPC.DESKTOP_ICON_LAUNCH, widgetId, item),
   refreshDesktopIcons: (items: DesktopIconItem[]): Promise<DesktopIconItem[]> =>
     ipcRenderer.invoke(IPC.DESKTOP_ICON_REFRESH, items),
   showDesktopIconContextMenu: (widgetId: string, item: DesktopIconItem): Promise<DesktopIconContextMenuResult | null> =>

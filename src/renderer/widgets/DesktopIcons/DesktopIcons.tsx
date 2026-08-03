@@ -360,19 +360,19 @@ function DesktopIconsWidget({
       if (editing) return
       if (variant === 'dock') {
         setBouncingId(item.id)
-        void window.canvasBridge.launchDesktopIcon(item).then((result) => {
+        void window.canvasBridge.launchDesktopIcon(widget.id, item).then((result) => {
           if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
         })
         window.setTimeout(() => setBouncingId(null), 980)
       } else {
         setBouncingId(item.id)
-        void window.canvasBridge.launchDesktopIcon(item).then((result) => {
+        void window.canvasBridge.launchDesktopIcon(widget.id, item).then((result) => {
           if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
         })
         window.setTimeout(() => setBouncingId(null), 500)
       }
     },
-    [editing, variant]
+    [editing, variant, widget.id]
   )
 
   const requestActivateItem = useCallback(
@@ -763,7 +763,8 @@ function StorageSurface({
                 onHoverItemId(null)
                 onPointerCancel(event)
               }}
-              onDoubleClick={(event) => {
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
                 event.preventDefault()
                 event.stopPropagation()
                 onActivate(item)
@@ -1062,8 +1063,6 @@ function DockSystemButton({
     ]
   )
   const scale = useSpring(rawScale, { stiffness: 210, damping: 20, mass: 0.12 })
-  const safeHoverScale = Math.max(1.001, hoverScale)
-  const lift = useTransform(scale, [1, safeHoverScale], [0, (flipped ? 1 : -1) * iconSize * 0.24])
   const tooltipDistance = useTransform(scale, (value) => {
     const liftValue = hoverScale <= 1 ? 0 : ((value - 1) / (hoverScale - 1)) * iconSize * 0.24
     return `calc(50% + ${iconSize * (value - 0.5) + liftValue + 8}px)`
@@ -1085,15 +1084,23 @@ function DockSystemButton({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
+      onPointerUp={(event) => {
+        if (event.button !== 0) return
         event.preventDefault()
         event.stopPropagation()
         triggerBounce()
         onAction(action.id)
       }}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        if (event.detail !== 0) return
+        triggerBounce()
+        onAction(action.id)
+      }}
       animate={
         bouncing
-          ? { y: [0, -84, 0, -36, 0, -12, 0] }
+          ? { y: getDockBounceKeyframes(flipped) }
           : {}
       }
       transition={{
@@ -1109,7 +1116,7 @@ function DockSystemButton({
         overflow: 'visible',
         justifyContent: 'center',
         zIndex: hovered ? 5 : 2,
-        transformOrigin: 'bottom center',
+        transformOrigin: flipped ? 'top center' : 'bottom center',
       }}
     >
       <DockInteractionHitArea insets={hitInsets} flipped={flipped} />
@@ -1139,7 +1146,6 @@ function DockSystemButton({
           width: iconSize,
           height: iconSize,
           scale,
-          y: lift,
           display: 'flex',
           flex: '0 0 auto',
           alignItems: 'center',
@@ -1297,8 +1303,6 @@ function DockIconButton({
     ]
   )
   const scale = useSpring(rawScale, { stiffness: 210, damping: 20, mass: 0.12 })
-  const safeHoverScale = Math.max(1.001, hoverScale)
-  const lift = useTransform(scale, [1, safeHoverScale], [0, (flipped ? 1 : -1) * iconSize * 0.24])
   const tooltipDistance = useTransform(scale, (value) => {
     const liftValue = hoverScale <= 1 ? 0 : ((value - 1) / (hoverScale - 1)) * iconSize * 0.24
     return `calc(50% + ${iconSize * (value - 0.5) + liftValue + 8}px)`
@@ -1317,23 +1321,26 @@ function DockIconButton({
       onPointerDown={(event) => onPointerDown(item, event)}
       onPointerMove={onPointerMove}
       onPointerUp={(event) => {
-        mouseX.set(Number.POSITIVE_INFINITY)
         onPointerUp(item, event)
       }}
       onPointerCancel={(event) => {
-        mouseX.set(Number.POSITIVE_INFINITY)
         onPointerCancel(event)
       }}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
+        if (event.detail !== 0) return
         onActivate(item)
       }}
       onContextMenu={(event) => onContextMenu(item, event)}
       initial={{ opacity: 0, y: 14, scale: 0.9 }}
       animate={
         bouncing
-          ? { opacity: 1, y: [0, -84, 0, -36, 0, -12, 0], scale: dragging ? 1.08 : 1 }
+          ? {
+              opacity: 1,
+              y: getDockBounceKeyframes(flipped),
+              scale: dragging ? 1.08 : 1,
+            }
           : { opacity: 1, y: 0, scale: dragging ? 1.08 : 1 }
       }
       exit={{ opacity: 0, y: 12, scale: 0.86 }}
@@ -1382,7 +1389,6 @@ function DockIconButton({
           width: iconSize,
           height: iconSize,
           scale,
-          y: bouncing ? 0 : lift,
           display: 'flex',
           flex: '0 0 auto',
           position: 'relative',
@@ -1939,15 +1945,18 @@ function getDockIconSize(height: number): number {
   return Math.max(ICON_SIZE, Math.min(56, height - 34))
 }
 
+function getDockBounceKeyframes(flipped: boolean): number[] {
+  const direction = flipped ? 1 : -1
+  return [0, direction * 84, 0, direction * 36, 0, direction * 12, 0]
+}
+
 function getDockInteractionInsets(iconSize: number, hoverScale: number): { inline: number; liftSide: number; anchorSide: number } {
   const inlineOverflow = Math.max(0, iconSize * hoverScale - (iconSize + DOCK_SLOT_EXTRA)) / 2
-  const verticalSlotExtra = 21
-  const verticalOverflow = Math.max(0, iconSize * hoverScale - (iconSize + verticalSlotExtra)) / 2
-  const liftOverflow = Math.max(0, hoverScale - 1) * iconSize * 0.24
+  const scaleOverflow = Math.max(0, hoverScale - 1) * iconSize
   return {
     inline: Math.ceil(Math.max(8, inlineOverflow + 4)),
-    liftSide: Math.ceil(Math.max(14, verticalOverflow + liftOverflow + 6)),
-    anchorSide: Math.ceil(Math.max(8, verticalOverflow + 6)),
+    liftSide: Math.ceil(Math.max(14, scaleOverflow + 6)),
+    anchorSide: 8,
   }
 }
 

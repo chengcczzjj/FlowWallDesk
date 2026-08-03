@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.0.2')
+  assert.equal(packageJson.version, '1.0.3')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -58,4 +58,33 @@ test('update errors never expose response headers or cookies', () => {
   assert.equal(message, '更新服务尚未发布可用版本，请在正式版本发布后重试。')
   assert.doesNotMatch(message, /cookie|secret|Headers/i)
   assert.ok(toSafeUpdateErrorMessage(new Error('custom failure\nprivate details')).length <= 180)
+})
+
+test('updates are user-started from the activity sidebar and restart after download', async () => {
+  const updateService = await readFile(new URL('../src/main/services/update-service.ts', import.meta.url), 'utf8')
+  const appSource = await readFile(new URL('../src/renderer/main-ui/App.tsx', import.meta.url), 'utf8')
+  const settingsSource = await readFile(
+    new URL('../src/renderer/main-ui/pages/settings/SettingsGeneralPage.tsx', import.meta.url),
+    'utf8',
+  )
+  const sidebarUpdateSource = await readFile(
+    new URL('../src/renderer/main-ui/components/SidebarUpdateButton.tsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(updateService, /autoUpdater\.autoDownload = false/)
+  assert.match(appSource, /<SidebarUpdateButton \/>/)
+  assert.doesNotMatch(settingsSource, /版本与更新/)
+  assert.match(sidebarUpdateSource, /downloadUpdate\(\)/)
+  assert.match(sidebarUpdateSource, /installUpdate\(\)/)
+  assert.match(sidebarUpdateSource, /status\.phase === 'downloaded'/)
+})
+
+test('desktop icon launches stay bound to their persisted widget record', async () => {
+  const preloadSource = await readFile(new URL('../src/preload/canvas.ts', import.meta.url), 'utf8')
+  const ipcSource = await readFile(new URL('../src/main/ipc/desktopIconIpc.ts', import.meta.url), 'utf8')
+
+  assert.match(preloadSource, /launchDesktopIcon: \(widgetId: string, item: DesktopIconItem\)/)
+  assert.match(ipcSource, /findStoredDesktopIcon\(item\.id, widgetId\)/)
+  assert.match(ipcSource, /store\.get\('globalIconWidgets'\)/)
 })

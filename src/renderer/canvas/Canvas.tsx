@@ -5,6 +5,7 @@ import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } f
 import { FloatingToolbar } from '../widgets/FloatingToolbar'
 import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
 import { setWallpaperFrame } from './wallpaperFrameStore'
+import { CanvasPointerGate } from '@shared/canvas-pointer-gate'
 
 const GRID = 16
 const EDGE_PADDING = 24
@@ -338,12 +339,36 @@ export function Canvas() {
   const widgetsRef = useRef(widgets)
   widgetsRef.current = widgets
   const [editing, setEditing] = useState(false)
+  const editingRef = useRef(editing)
+  editingRef.current = editing
   const [interactionEpoch, setInteractionEpoch] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [scenePreview, setScenePreview] = useState<DesktopSceneLayoutPlan | null>(null)
   const [snapPreviews, setSnapPreviews] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>(
     []
   )
+  const pointerGateRef = useRef(new CanvasPointerGate())
+  const desktopOccludedRef = useRef(false)
+  const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
+  const lastMousePassthroughRef = useRef<boolean | null>(true)
+
+  const reconcileMousePassthrough = useCallback((clientX: number, clientY: number, force = false) => {
+    lastPointerPositionRef.current = { x: clientX, y: clientY }
+    if (desktopOccludedRef.current) return
+
+    const target = document.elementFromPoint(clientX, clientY) as Element | null
+    const overWidget = Boolean(target?.closest('[data-widget]'))
+    const ignore = pointerGateRef.current.shouldIgnoreMouse(overWidget, editingRef.current)
+    if (!force && lastMousePassthroughRef.current === ignore) return
+    lastMousePassthroughRef.current = ignore
+    window.canvasBridge?.setIgnoreMouse(ignore)
+  }, [])
+
+  const reconcileLastPointer = useCallback((force = false) => {
+    const point = lastPointerPositionRef.current
+    if (!point) return
+    reconcileMousePassthrough(point.x, point.y, force)
+  }, [reconcileMousePassthrough])
 
   useEffect(() => {
     window.canvasBridge?.getWidgets().then((list) => setWidgets(list))
@@ -352,6 +377,9 @@ export function Canvas() {
     const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
     const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
     const offOcclusion = window.canvasBridge?.onDesktopOcclusionChange((state) => {
+      desktopOccludedRef.current = state.occluded
+      pointerGateRef.current.reset()
+      lastMousePassthroughRef.current = null
       setInteractionEpoch((current) => current + 1)
       if (state.occluded) return
 
@@ -361,8 +389,7 @@ export function Canvas() {
         window.requestAnimationFrame(() => {
           const clientX = state.cursor.x - window.screenX
           const clientY = state.cursor.y - window.screenY
-          const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null
-          window.canvasBridge?.setIgnoreMouse(!target?.closest('[data-widget]'))
+          reconcileMousePassthrough(clientX, clientY, true)
         })
       })
     })
@@ -373,7 +400,57 @@ export function Canvas() {
       offScenePreviewClear?.()
       offOcclusion?.()
     }
-  }, [])
+  }, [reconcileMousePassthrough])
+
+  useEffect(() => {
+    const releaseFrames = new Map<number, number>()
+    const rememberPointer = (event: MouseEvent | PointerEvent) => {
+      lastPointerPositionRef.current = { x: event.clientX, y: event.clientY }
+    }
+    const handleMouseMove = (event: MouseEvent) => {
+      rememberPointer(event)
+      reconcileMousePassthrough(event.clientX, event.clientY)
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      rememberPointer(event)
+      const target = event.target as Element | null
+      if (!target?.closest('[data-widget]')) return
+      pointerGateRef.current.begin(event.pointerId)
+      reconcileMousePassthrough(event.clientX, event.clientY)
+    }
+    const releasePointer = (event: PointerEvent) => {
+      rememberPointer(event)
+      const pendingFrame = releaseFrames.get(event.pointerId)
+      if (pendingFrame) window.cancelAnimationFrame(pendingFrame)
+      // Native click/double-click must finish before the transparent window can pass through again.
+      const releaseFrame = window.requestAnimationFrame(() => {
+        releaseFrames.delete(event.pointerId)
+        pointerGateRef.current.end(event.pointerId)
+        reconcileMousePassthrough(event.clientX, event.clientY, true)
+      })
+      releaseFrames.set(event.pointerId, releaseFrame)
+    }
+    const resetPointers = () => {
+      for (const frame of releaseFrames.values()) window.cancelAnimationFrame(frame)
+      releaseFrames.clear()
+      pointerGateRef.current.reset()
+      reconcileLastPointer(true)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove, true)
+    window.addEventListener('pointerdown', handlePointerDown, true)
+    window.addEventListener('pointerup', releasePointer, true)
+    window.addEventListener('pointercancel', releasePointer, true)
+    window.addEventListener('blur', resetPointers)
+    return () => {
+      for (const frame of releaseFrames.values()) window.cancelAnimationFrame(frame)
+      window.removeEventListener('mousemove', handleMouseMove, true)
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+      window.removeEventListener('pointerup', releasePointer, true)
+      window.removeEventListener('pointercancel', releasePointer, true)
+      window.removeEventListener('blur', resetPointers)
+    }
+  }, [reconcileLastPointer, reconcileMousePassthrough])
 
   useEffect(() => {
     const glassTypes = new Set([
@@ -403,7 +480,12 @@ export function Canvas() {
       setSelectedId(null)
       setSnapPreviews([])
     }
-  }, [editing])
+    window.requestAnimationFrame(() => reconcileLastPointer(true))
+  }, [editing, reconcileLastPointer])
+
+  useEffect(() => {
+    window.requestAnimationFrame(() => reconcileLastPointer(true))
+  }, [widgets, reconcileLastPointer])
 
   const onBgClick = useCallback(() => {
     if (editing) {
@@ -513,7 +595,7 @@ export function Canvas() {
               onUpdateConfig={(cfg, options) => updateWidgetConfig(w.id, cfg, options)}
               onDelete={async () => {
                 await window.canvasBridge?.removeWidget(w.id)
-                if (!editing) window.canvasBridge?.setIgnoreMouse(true)
+                window.requestAnimationFrame(() => reconcileLastPointer(true))
               }}
               onResolveCollisions={resolveCollisions}
               onDragPreview={onDragPreview}
@@ -662,7 +744,6 @@ function DraggableWidget({
 }) {
   const interactionEpoch = useContext(DesktopInteractionEpochCtx)
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number; pointerId: number } | null>(null)
-  const interactivePointerRef = useRef<number | null>(null)
   const longPressDragRef = useRef<{
     startX: number
     startY: number
@@ -853,7 +934,6 @@ function DraggableWidget({
   useEffect(() => {
     const element = elRef.current
     const pointerIds = new Set<number>()
-    if (interactivePointerRef.current !== null) pointerIds.add(interactivePointerRef.current)
     if (longPressDragRef.current) pointerIds.add(longPressDragRef.current.pointerId)
     if (dragRef.current) pointerIds.add(dragRef.current.pointerId)
     if (resizeRef.current) pointerIds.add(resizeRef.current.pointerId)
@@ -862,7 +942,6 @@ function DraggableWidget({
     }
 
     clearLongPressDrag()
-    interactivePointerRef.current = null
     dragRef.current = null
     resizeRef.current = null
     hasDraggedRef.current = false
@@ -870,43 +949,6 @@ function DraggableWidget({
     setDragging(false)
     setResizing(false)
   }, [clearLongPressDrag, interactionEpoch])
-
-  const clearInteractivePointer = useCallback(
-    (pointerId: number) => {
-      if (interactivePointerRef.current !== pointerId) return
-      interactivePointerRef.current = null
-      window.setTimeout(() => {
-        if (!editing && !dragRef.current && !resizeRef.current && !longPressDragRef.current && !elRef.current?.matches(':hover')) {
-          window.canvasBridge?.setIgnoreMouse(true)
-        }
-      }, 0)
-    },
-    [editing]
-  )
-
-  const onPointerDownCapture = useCallback(
-    (e: React.PointerEvent) => {
-      if (editing || !canLongPressDrag) return
-      if (!(e.target as HTMLElement).closest('[data-desktop-icon-action]')) return
-      interactivePointerRef.current = e.pointerId
-      window.canvasBridge?.setIgnoreMouse(false)
-    },
-    [editing, canLongPressDrag]
-  )
-
-  const onPointerUpCapture = useCallback(
-    (e: React.PointerEvent) => {
-      clearInteractivePointer(e.pointerId)
-    },
-    [clearInteractivePointer]
-  )
-
-  const onPointerCancelCapture = useCallback(
-    (e: React.PointerEvent) => {
-      clearInteractivePointer(e.pointerId)
-    },
-    [clearInteractivePointer]
-  )
 
   /** 计算缩放比例 */
   const scaleRatio =
@@ -1104,7 +1146,6 @@ function DraggableWidget({
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       if (elRef.current?.hasPointerCapture(e.pointerId)) elRef.current.releasePointerCapture(e.pointerId)
-      clearInteractivePointer(e.pointerId)
       if (longPressDragRef.current && !dragRef.current) {
         clearLongPressDrag()
         return
@@ -1149,13 +1190,12 @@ function DraggableWidget({
         onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
       }
     },
-    [clearInteractivePointer, clearLongPressDrag, widget, onResolveCollisions, getActualSize]
+    [clearLongPressDrag, widget, onResolveCollisions, getActualSize]
   )
 
   const onPointerCancel = useCallback(
     (e: React.PointerEvent) => {
       if (elRef.current?.hasPointerCapture(e.pointerId)) elRef.current.releasePointerCapture(e.pointerId)
-      clearInteractivePointer(e.pointerId)
       clearLongPressDrag()
       dragRef.current = null
       resizeRef.current = null
@@ -1163,7 +1203,7 @@ function DraggableWidget({
       setDragging(false)
       setResizing(false)
     },
-    [clearInteractivePointer, clearLongPressDrag]
+    [clearLongPressDrag]
   )
 
   const onContextMenu = useCallback(
@@ -1172,9 +1212,8 @@ function DraggableWidget({
       e.stopPropagation()
       const action = await window.canvasBridge?.showContextMenu(widget.id)
       if (action === 'edit') onEnterEdit()
-      if (action === 'delete' && !editing) window.canvasBridge?.setIgnoreMouse(true)
     },
-    [widget.id, onEnterEdit, editing]
+    [widget.id, onEnterEdit]
   )
 
   const posValue = useMemo(() => ({ x: pos.x, y: pos.y }), [pos.x, pos.y])
@@ -1201,15 +1240,6 @@ function DraggableWidget({
     <div
       ref={elRef}
       data-widget={widget.id}
-      onMouseEnter={() => window.canvasBridge?.setIgnoreMouse(false)}
-      onMouseLeave={() => {
-        if (!dragRef.current && !resizeRef.current && !longPressDragRef.current && interactivePointerRef.current === null && !editing) {
-          window.canvasBridge?.setIgnoreMouse(true)
-        }
-      }}
-      onPointerDownCapture={onPointerDownCapture}
-      onPointerUpCapture={onPointerUpCapture}
-      onPointerCancelCapture={onPointerCancelCapture}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

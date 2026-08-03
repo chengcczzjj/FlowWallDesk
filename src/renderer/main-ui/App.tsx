@@ -21,6 +21,7 @@ import { PixelPetPage } from './pages/pet/PixelPetPage'
 import { ChatPage } from './pages/chat/ChatPage'
 import { SettingsGeneralPage } from './pages/settings/SettingsGeneralPage'
 import { AddWallpaperDialog } from './components/AddWallpaperDialog'
+import { SidebarUpdateButton } from './components/SidebarUpdateButton'
 import {
   PIXEL_PET_SETTINGS_KEY,
   PIXEL_PET_STORAGE_KEY,
@@ -246,6 +247,7 @@ export function App() {
             title="桌宠"
           />
           <div className="activity-bar__spacer" />
+          <SidebarUpdateButton />
           <ActivityItem
             icon={<Settings size={20} />}
             active={activity === 'settings'}
