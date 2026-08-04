@@ -65,6 +65,12 @@ export const IPC = {
   DESKTOP_SCENE_PREVIEW_CLEAR: 'desktop-scene:preview-clear',
   // 画布 → 主进程：鼠标穿透切换
   CANVAS_SET_IGNORE_MOUSE: 'canvas:set-ignore-mouse',
+  // 画布 → 主进程：指针手势生命周期，防止拖拽中途穿透
+  CANVAS_SET_POINTER_ACTIVE: 'canvas:set-pointer-active',
+  // 画布 → 主进程：Dock 交互链路持久化诊断事件
+  CANVAS_DIAGNOSTIC: 'canvas:diagnostic',
+  // 主进程 -> 画布：Windows 透明窗口丢失 pointerdown 时的 Dock 单击兜底
+  CANVAS_NATIVE_DOCK_CLICK: 'canvas:native-dock-click',
   // 画布 → 主进程：原生右键菜单
   CANVAS_CONTEXT_MENU: 'canvas:context-menu',
   // 画布 → 主进程：编辑模式（z-order + 穿透 + 焦点）

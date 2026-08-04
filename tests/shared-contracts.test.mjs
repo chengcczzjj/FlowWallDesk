@@ -24,6 +24,9 @@ import {
   DOCK_BOUNCE_TIMES,
   getDockBounceKeyframes,
 } from '../src/shared/dock-motion.ts'
+import { findInteractiveWidgetAtPoint, shouldIgnoreCanvasMouse } from '../src/shared/canvas-hit-test.ts'
+import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
+import { shouldFallbackNativeDockClick } from '../src/shared/native-dock-click.ts'
 
 test('asset URLs preserve Windows paths and packaged public assets', () => {
   assert.equal(
@@ -150,6 +153,79 @@ test('canvas mouse passthrough stays locked until an active pointer gesture ends
   gate.reset()
   assert.equal(gate.shouldIgnoreMouse(false, false), true)
   assert.equal(gate.shouldIgnoreMouse(false, true), false)
+})
+
+test('native canvas hit testing keeps Dock input alive without renderer mousemove events', () => {
+  const dock = {
+    id: 'dock-1', type: 'desktop-icons-dock', x: 800, y: 900, width: 600, height: 88, enabled: true, config: {},
+  }
+  const display = { x: 0, y: 0, width: 1920, height: 1080 }
+  assert.equal(findInteractiveWidgetAtPoint({ x: 810, y: 890 }, display, [dock])?.id, dock.id)
+  assert.equal(findInteractiveWidgetAtPoint({ x: 400, y: 400 }, display, [dock]), undefined)
+  assert.equal(shouldIgnoreCanvasMouse({
+    desktopOccluded: false, editing: false, pointerActive: false, widgetUnderCursor: true,
+  }), false)
+  assert.equal(shouldIgnoreCanvasMouse({
+    desktopOccluded: false, editing: false, pointerActive: true, widgetUnderCursor: false,
+  }), false)
+  assert.equal(shouldIgnoreCanvasMouse({
+    desktopOccluded: false, editing: false, pointerActive: false, widgetUnderCursor: false,
+  }), true)
+})
+
+test('native Dock click fallback only runs when the renderer missed a short stationary click', () => {
+  const base = {
+    startedAt: 1_000,
+    endedAt: 1_120,
+    start: { x: 900, y: 800 },
+    end: { x: 903, y: 802 },
+    widgetId: 'dock-1',
+    releaseWidgetId: 'dock-1',
+    rendererActionPointerDownAt: 0,
+  }
+  assert.equal(shouldFallbackNativeDockClick(base), true)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, rendererActionPointerDownAt: 1_050 }), false)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, rendererActionPointerDownAt: 950 }), false)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, rendererActionPointerDownAt: 900 }), true)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, end: { x: 930, y: 802 } }), false)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, endedAt: 1_900 }), false)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, releaseWidgetId: null }), false)
+})
+
+test('existing single-instance apps prefer a visible family window for reactivation', () => {
+  const candidates = [
+    {
+      hwnd: 5, processId: 99, processPath: 'G:\\STEAM\\steam.exe', title: 'GDI+ Window (steam.exe)', visible: true,
+      enabled: true, minimized: false, owned: false, toolWindow: false, zOrder: 1,
+      className: 'GDI+ Hook Window Class', rect: { left: 0, top: 0, right: 1, bottom: 1 },
+    },
+    {
+      hwnd: 10, processId: 100, processPath: 'G:\\STEAM\\steam.exe', title: '', visible: false,
+      enabled: true, minimized: false, owned: false, toolWindow: false, zOrder: 5,
+    },
+    {
+      hwnd: 20, processId: 101, processPath: 'G:\\STEAM\\bin\\cef\\steamwebhelper.exe', title: 'Steam', visible: true,
+      enabled: true, minimized: true, owned: false, toolWindow: false, zOrder: 2,
+    },
+    {
+      hwnd: 30, processId: 102, processPath: 'D:\\Other\\helper.exe', title: 'Other', visible: true,
+      enabled: true, minimized: false, owned: false, toolWindow: false, zOrder: 0,
+    },
+  ]
+  assert.equal(selectAppWindowCandidate('G:\\STEAM\\steam.exe', candidates)?.hwnd, 20)
+
+  const hiddenMainWindow = {
+    hwnd: 40, processId: 103, processPath: 'D:\\Apps\\Chat\\Chat.exe', title: 'Chat', visible: false,
+    enabled: true, minimized: false, owned: false, toolWindow: false, zOrder: 4,
+  }
+  assert.equal(selectAppWindowCandidate('D:\\Apps\\Chat\\Chat.exe', [hiddenMainWindow])?.hwnd, 40)
+
+  const nestedLauncherWindow = {
+    hwnd: 50, processId: 104, processPath: 'D:\\Apps\\Feishu\\app\\Feishu.exe', title: '飞书', visible: true,
+    enabled: true, minimized: false, owned: false, toolWindow: false, zOrder: 3,
+    className: 'Chrome_WidgetWin_1', rect: { left: 100, top: 100, right: 1400, bottom: 1000 },
+  }
+  assert.equal(selectAppWindowCandidate('D:\\Apps\\Feishu\\Feishu.exe', [nestedLauncherWindow])?.hwnd, 50)
 })
 
 test('legacy DeepSeek aliases migrate to the current V4 Flash API contract', () => {

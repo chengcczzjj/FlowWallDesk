@@ -2,6 +2,10 @@
 export class CanvasPointerGate {
   private readonly activePointers = new Set<number>()
 
+  get active(): boolean {
+    return this.activePointers.size > 0
+  }
+
   begin(pointerId: number): void {
     this.activePointers.add(pointerId)
   }

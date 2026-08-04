@@ -1,5 +1,23 @@
 # 灵月桌面 开发日志
 
+## [2026-08-05 00:15] 彻底修复 Dock 全屏恢复后点击与应用唤醒
+
+**变更摘要**: 根据持久化诊断日志定位透明 Canvas 在全屏恢复后丢失 `pointerdown`、以及单实例应用窗口误选问题，增加原生点击兜底、真实主窗口筛选和开发态自动回归。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts` / `src/renderer/canvas/Canvas.tsx`: 移除可见期间反复修改 z-order 的轮询，增加原生光标命中、物理左键监测、指针生命周期保护和仅在渲染层漏收按下时触发的 Dock 补偿点击。
+- `src/main/windows/foregroundAppWindow.ts` / `src/shared/window-activation.ts`: 支持启动器子目录进程和 Steam helper 主窗口，过滤 1x1 GDI、IME、托盘及电源消息等内部窗口，恢复隐藏或最小化的真实应用窗口。
+- `src/main/ipc/desktopIconIpc.ts` / `src/main/runtime/diagnosticLog.ts`: 持久记录命中、IPC、快捷方式启动、窗口类名/矩形、前台激活和全屏恢复链路，日志按 2 MB 轮转。
+- `src/main/runtime/dockLaunchSelfTest.ts` / `tests/`: 增加仅显式环境变量启用的开发自检器和原生兜底、窗口候选、稳定层级回归契约。
+
+**遇到的问题**:
+- 全屏退出后透明 Canvas 仍能收到 hover/`pointerup`，但 Windows/Chromium 偶发不再投递 `pointerdown` → 用 Win32 左键状态验证真实点击，只在渲染层没有确认收到图标按下时发送一次坐标级补偿点击。
+- 飞书快捷方式目标是外层启动器，真实窗口属于 `app/Feishu.exe`；Steam 的精确进程含可见 1x1 GDI 内部窗 → 按安装目录匹配候选，并以可见性、窗口尺寸、类名和标题筛选真实主窗口。
+
+**Git Commit**: 已提交 — `fix(dock): stabilize launches after fullscreen`
+
+---
+
 ## [2026-08-04 00:55] 发布 1.0.4 智能组件与 DeepSeek V4 适配版
 
 **变更摘要**: 修复对话创建股票组件、壁纸冷启动合成和组件左上角堆放问题，补齐智能落位、创建动效、长按移动、Dock 物理弹跳及 DeepSeek V4 Flash 适配。

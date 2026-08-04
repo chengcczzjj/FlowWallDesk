@@ -48,6 +48,13 @@ export interface CanvasOcclusionState {
   cursor: { x: number; y: number }
 }
 
+export interface NativeDockClickEvent {
+  widgetId: string
+  screenX: number
+  screenY: number
+  detectedAt: number
+}
+
 /** 桌面图标收纳条目 */
 export interface DesktopIconItem {
   id: string
@@ -80,6 +87,9 @@ export interface DesktopIconImportResult {
 export interface DesktopIconLaunchResult {
   ok: boolean
   error?: string
+  requestId?: string
+  method?: 'activate-existing' | 'external-url' | 'shortcut' | 'target-spawn' | 'target-shell' | 'fallback-shell'
+  activatedExisting?: boolean
 }
 
 export type DesktopIconContextMenuAction = 'open' | 'show-in-folder' | 'restore' | 'remove'

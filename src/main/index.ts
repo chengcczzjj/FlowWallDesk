@@ -18,6 +18,8 @@ import { initMemorySystem } from './memory'
 import { isPreciseLocationPermissionAllowed } from './memory/tools/definitions/user-location'
 import { applyLaunchAtLoginPreference } from './services/launch-at-login-service'
 import { initializeAutoUpdate } from './services/update-service'
+import { getDockDiagnosticLogPath, logDockDiagnostic } from './runtime/diagnosticLog'
+import { runDockLaunchSelfTest } from './runtime/dockLaunchSelfTest'
 
 // 必须在 app.ready 之前注册
 registerAssetSchemePrivileged()
@@ -58,6 +60,11 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.lingyue.desk')
+  logDockDiagnostic('app.started', {
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    logPath: getDockDiagnosticLogPath(),
+  })
   await allowAssetRoot(app.isPackaged
     ? join(process.resourcesPath, 'assets', 'wallpaper')
     : join(__dirname, '../../assets/wallpaper'))
@@ -105,6 +112,11 @@ app.whenReady().then(async () => {
   // 恢复上次状态
   await restoreWallpaper()
   await restoreWidgets()
+  if (is.dev && process.env.LINGYUE_DOCK_SELF_TEST) {
+    const rounds = Math.max(1, Math.min(10, Number(process.env.LINGYUE_DOCK_SELF_TEST_ROUNDS) || 3))
+    const initialDelayMs = Math.max(500, Math.min(60_000, Number(process.env.LINGYUE_DOCK_SELF_TEST_DELAY_MS) || 2_500))
+    void runDockLaunchSelfTest(process.env.LINGYUE_DOCK_SELF_TEST, rounds, initialDelayMs)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

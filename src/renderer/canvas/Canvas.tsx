@@ -357,6 +357,7 @@ export function Canvas() {
   const desktopOccludedRef = useRef(false)
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
   const lastMousePassthroughRef = useRef<boolean | null>(true)
+  const lastDockActionPointerDownAtRef = useRef(0)
 
   const reconcileMousePassthrough = useCallback((clientX: number, clientY: number, force = false) => {
     lastPointerPositionRef.current = { x: clientX, y: clientY }
@@ -368,6 +369,13 @@ export function Canvas() {
     if (!force && lastMousePassthroughRef.current === ignore) return
     lastMousePassthroughRef.current = ignore
     window.canvasBridge?.setIgnoreMouse(ignore)
+    window.canvasBridge?.logDiagnostic('canvas-hit-test', {
+      ignore,
+      overWidget,
+      pointerActive: pointerGateRef.current.active,
+      clientX: Math.round(clientX),
+      clientY: Math.round(clientY),
+    })
   }, [])
 
   const reconcileLastPointer = useCallback((force = false) => {
@@ -413,7 +421,9 @@ export function Canvas() {
     const offOcclusion = window.canvasBridge?.onDesktopOcclusionChange((state) => {
       desktopOccludedRef.current = state.occluded
       pointerGateRef.current.reset()
+      window.canvasBridge?.setPointerActive(false)
       lastMousePassthroughRef.current = null
+      window.canvasBridge?.logDiagnostic('occlusion', { occluded: state.occluded, cursor: state.cursor })
       setInteractionEpoch((current) => current + 1)
       if (state.occluded) return
 
@@ -439,6 +449,33 @@ export function Canvas() {
   }, [reconcileMousePassthrough, syncWidgets])
 
   useEffect(() => {
+    return window.canvasBridge?.onNativeDockClick((event) => {
+      const clientX = event.screenX - window.screenX
+      const clientY = event.screenY - window.screenY
+      const pointTarget = document.elementFromPoint(clientX, clientY)
+      const action = pointTarget?.closest<HTMLButtonElement>('button[data-desktop-icon-action]') ?? null
+      const widget = action?.closest<HTMLElement>('[data-widget]') ?? null
+      const normalPointerAgeMs = Date.now() - lastDockActionPointerDownAtRef.current
+      const valid = (
+        !editingRef.current &&
+        Date.now() - event.detectedAt <= 1_500 &&
+        widget?.dataset.widget === event.widgetId &&
+        normalPointerAgeMs > 80
+      )
+      window.canvasBridge?.logDiagnostic('native-dock-click-received', {
+        widgetId: event.widgetId,
+        clientX: Math.round(clientX),
+        clientY: Math.round(clientY),
+        targetTag: pointTarget?.tagName ?? null,
+        actionLabel: action?.getAttribute('aria-label') ?? null,
+        normalPointerAgeMs,
+        activated: valid,
+      })
+      if (valid && action) action.click()
+    })
+  }, [])
+
+  useEffect(() => {
     const releaseFrames = new Map<number, number>()
     const rememberPointer = (event: MouseEvent | PointerEvent) => {
       lastPointerPositionRef.current = { x: event.clientX, y: event.clientY }
@@ -450,9 +487,40 @@ export function Canvas() {
     const handlePointerDown = (event: PointerEvent) => {
       rememberPointer(event)
       const target = event.target as Element | null
-      if (!target?.closest('[data-widget]')) return
+      const widget = target?.closest('[data-widget]') as HTMLElement | null
+      const action = Boolean(target?.closest('[data-desktop-icon-action]'))
+      if (action) lastDockActionPointerDownAtRef.current = Date.now()
+      window.canvasBridge?.logDiagnostic('pointer-down-observed', {
+        pointerId: event.pointerId,
+        button: event.button,
+        clientX: Math.round(event.clientX),
+        clientY: Math.round(event.clientY),
+        tagName: target?.tagName ?? null,
+        widgetId: widget?.dataset.widget ?? null,
+        action,
+      })
+      if (!widget) return
       pointerGateRef.current.begin(event.pointerId)
+      window.canvasBridge?.setPointerActive(true)
+      window.canvasBridge?.logDiagnostic('pointer-down', {
+        pointerId: event.pointerId,
+        widgetId: widget.dataset.widget,
+        action: Boolean(target?.closest('[data-desktop-icon-action]')),
+      })
       reconcileMousePassthrough(event.clientX, event.clientY)
+    }
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      const pointTarget = document.elementFromPoint(event.clientX, event.clientY)
+      window.canvasBridge?.logDiagnostic('mouse-down-observed', {
+        button: event.button,
+        clientX: Math.round(event.clientX),
+        clientY: Math.round(event.clientY),
+        targetTag: target?.tagName ?? null,
+        pointTag: pointTarget?.tagName ?? null,
+        widgetId: target?.closest('[data-widget]')?.getAttribute('data-widget') ?? null,
+        action: Boolean(target?.closest('[data-desktop-icon-action]')),
+      })
     }
     const releasePointer = (event: PointerEvent) => {
       rememberPointer(event)
@@ -462,6 +530,12 @@ export function Canvas() {
       const releaseFrame = window.requestAnimationFrame(() => {
         releaseFrames.delete(event.pointerId)
         pointerGateRef.current.end(event.pointerId)
+        window.canvasBridge?.setPointerActive(pointerGateRef.current.active)
+        window.canvasBridge?.logDiagnostic('pointer-release', {
+          pointerId: event.pointerId,
+          type: event.type,
+          pointerActive: pointerGateRef.current.active,
+        })
         reconcileMousePassthrough(event.clientX, event.clientY, true)
       })
       releaseFrames.set(event.pointerId, releaseFrame)
@@ -470,10 +544,13 @@ export function Canvas() {
       for (const frame of releaseFrames.values()) window.cancelAnimationFrame(frame)
       releaseFrames.clear()
       pointerGateRef.current.reset()
+      window.canvasBridge?.setPointerActive(false)
+      window.canvasBridge?.logDiagnostic('pointer-reset')
       reconcileLastPointer(true)
     }
 
     window.addEventListener('mousemove', handleMouseMove, true)
+    window.addEventListener('mousedown', handleMouseDown, true)
     window.addEventListener('pointerdown', handlePointerDown, true)
     window.addEventListener('pointerup', releasePointer, true)
     window.addEventListener('pointercancel', releasePointer, true)
@@ -481,6 +558,7 @@ export function Canvas() {
     return () => {
       for (const frame of releaseFrames.values()) window.cancelAnimationFrame(frame)
       window.removeEventListener('mousemove', handleMouseMove, true)
+      window.removeEventListener('mousedown', handleMouseDown, true)
       window.removeEventListener('pointerdown', handlePointerDown, true)
       window.removeEventListener('pointerup', releasePointer, true)
       window.removeEventListener('pointercancel', releasePointer, true)

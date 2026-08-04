@@ -83,8 +83,22 @@ test('updates are user-started from the activity sidebar and restart after downl
 test('desktop icon launches stay bound to their persisted widget record', async () => {
   const preloadSource = await readFile(new URL('../src/preload/canvas.ts', import.meta.url), 'utf8')
   const ipcSource = await readFile(new URL('../src/main/ipc/desktopIconIpc.ts', import.meta.url), 'utf8')
+  const canvasSource = await readFile(new URL('../src/main/windows/canvasWindow.ts', import.meta.url), 'utf8')
+  const diagnosticSource = await readFile(new URL('../src/main/runtime/diagnosticLog.ts', import.meta.url), 'utf8')
 
-  assert.match(preloadSource, /launchDesktopIcon: \(widgetId: string, item: DesktopIconItem\)/)
+  assert.match(preloadSource, /launchDesktopIcon: \(widgetId: string, item: DesktopIconItem, requestId\?: string\)/)
   assert.match(ipcSource, /findStoredDesktopIcon\(item\.id, widgetId\)/)
   assert.match(ipcSource, /store\.get\('globalIconWidgets'\)/)
+  assert.match(ipcSource, /activateExistingAppWindow\(targetPath\)/)
+  assert.match(diagnosticSource, /dock-diagnostics\.jsonl/)
+  assert.match(diagnosticSource, /appendFile/)
+
+  const healthTimer = canvasSource.slice(
+    canvasSource.indexOf('canvasHealthTimer = setInterval'),
+    canvasSource.indexOf('}, 300)', canvasSource.indexOf('canvasHealthTimer = setInterval')),
+  )
+  assert.doesNotMatch(healthTimer, /sendToBottom/)
+  assert.match(canvasSource, /cursorHitTestTimer = setInterval\(refreshCanvasCursorHitTest, 25\)/)
+  assert.match(canvasSource, /CANVAS_NATIVE_DOCK_CLICK/)
+  assert.match(canvasSource, /shouldFallbackNativeDockClick/)
 })

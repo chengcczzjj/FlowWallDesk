@@ -16,7 +16,14 @@ import {
   type WidgetPatch,
 } from '@shared/desktop-scene'
 import { store } from '../store'
-import { getCanvasWindow, isCanvasEditMode, setCanvasEditMode, setCanvasMousePassthrough } from '../windows/canvasWindow'
+import {
+  getCanvasWindow,
+  isCanvasEditMode,
+  noteCanvasRendererActionPointerDown,
+  setCanvasEditMode,
+  setCanvasMousePassthrough,
+  setCanvasPointerActive,
+} from '../windows/canvasWindow'
 import {
   getUserWallpaperFolderName,
   getUserWallpapersRoot,
@@ -25,6 +32,7 @@ import {
 } from '../runtime/userDataPaths'
 import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIconIpc'
 import { assertTrustedIpcSender } from './ipcSecurity'
+import { logDockDiagnostic } from '../runtime/diagnosticLog'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
@@ -674,6 +682,30 @@ export function registerWidgetIpc(): void {
     assertTrustedIpcSender(_e, ['canvas'])
     if (typeof ignore !== 'boolean') return
     setCanvasMousePassthrough(ignore)
+  })
+
+  ipcMain.on(IPC.CANVAS_SET_POINTER_ACTIVE, (_e, active: boolean) => {
+    assertTrustedIpcSender(_e, ['canvas'])
+    if (typeof active !== 'boolean') return
+    setCanvasPointerActive(active)
+  })
+
+  ipcMain.on(IPC.CANVAS_DIAGNOSTIC, (_e, event: string, details: Record<string, unknown>) => {
+    assertTrustedIpcSender(_e, ['canvas'])
+    if (typeof event !== 'string' || event.length === 0 || event.length > 100) return
+    const safeDetails = details && typeof details === 'object' ? details : {}
+    try {
+      if (JSON.stringify(safeDetails).length > 4_096) return
+    } catch {
+      return
+    }
+    if (
+      event === 'dock-icon-pointer-down' ||
+      (event === 'pointer-down-observed' && safeDetails.action === true)
+    ) {
+      noteCanvasRendererActionPointerDown()
+    }
+    logDockDiagnostic(`renderer.${event}`, safeDetails)
   })
 
   // 原生右键菜单（避免 setIgnoreMouseEvents 冲突）

@@ -1,6 +1,6 @@
 import { app, ipcMain, Menu, nativeImage, shell } from 'electron'
 import { promises as fs } from 'fs'
-import { dirname, extname, join, normalize, parse } from 'path'
+import { basename, dirname, extname, join, normalize, parse } from 'path'
 import { randomUUID } from 'crypto'
 import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
@@ -15,6 +15,8 @@ import type {
 } from '@shared/types'
 import { store } from '../store'
 import { getCanvasWindow } from '../windows/canvasWindow'
+import { activateExistingAppWindow } from '../windows/foregroundAppWindow'
+import { logDockDiagnostic } from '../runtime/diagnosticLog'
 
 const ICON_WIDGET_TYPES = new Set([
   'desktop-icons-box',
@@ -23,6 +25,7 @@ const ICON_WIDGET_TYPES = new Set([
   'desktop-icons-dock',
 ])
 const IMPORT_CONCURRENCY = 4
+const postLaunchActivationGeneration = new Map<string, number>()
 
 export function isDesktopIconWidgetType(type: string): boolean {
   return ICON_WIDGET_TYPES.has(type)
@@ -272,40 +275,91 @@ function splitShortcutArgs(args?: string): string[] {
   return result
 }
 
-function launchTarget(targetPath: string, args?: string, cwd?: string): boolean {
-  try {
-    const child = spawn(targetPath, splitShortcutArgs(args), {
-      cwd: cwd || dirname(targetPath),
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-    })
-    child.unref()
-    return true
-  } catch {
-    return false
-  }
+function launchTarget(targetPath: string, args?: string, cwd?: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (ok: boolean): void => {
+      if (settled) return
+      settled = true
+      resolve(ok)
+    }
+    try {
+      const child = spawn(targetPath, splitShortcutArgs(args), {
+        cwd: cwd || dirname(targetPath),
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      })
+      child.once('spawn', () => finish(true))
+      child.once('error', () => finish(false))
+      child.unref()
+    } catch {
+      finish(false)
+    }
+  })
 }
 
-function launchWithShellStart(filePath: string): boolean {
-  try {
-    const escaped = filePath.replace(/"/g, '""')
-    const child = spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${escaped}"`], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    child.unref()
-    return true
-  } catch {
-    return false
-  }
+function launchWithShellStart(filePath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (ok: boolean): void => {
+      if (settled) return
+      settled = true
+      resolve(ok)
+    }
+    try {
+      const escaped = filePath.replace(/"/g, '""')
+      const child = spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${escaped}"`], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+      child.once('spawn', () => finish(true))
+      child.once('error', () => finish(false))
+      child.unref()
+    } catch {
+      finish(false)
+    }
+  })
 }
 
-async function launchExistingPath(filePath: string): Promise<boolean> {
+async function launchExistingPath(filePath: string, requestId: string): Promise<'shortcut' | 'fallback-shell' | null> {
   const error = await shell.openPath(filePath)
-  if (!error) return true
-  return launchWithShellStart(filePath)
+  logDockDiagnostic('launch.shell-open-path-result', {
+    requestId,
+    fileName: basename(filePath),
+    ok: !error,
+    error: error || null,
+  })
+  if (!error) return 'shortcut'
+  return await launchWithShellStart(filePath) ? 'fallback-shell' : null
+}
+
+function schedulePostLaunchActivation(targetPath: string, requestId: string): void {
+  const key = normalize(targetPath).toLowerCase()
+  const generation = (postLaunchActivationGeneration.get(key) ?? 0) + 1
+  postLaunchActivationGeneration.set(key, generation)
+
+  for (const delayMs of [800, 3_000, 7_000]) {
+    const timer = setTimeout(() => {
+      if (postLaunchActivationGeneration.get(key) !== generation) return
+      const result = activateExistingAppWindow(targetPath)
+      logDockDiagnostic('launch.post-activation-result', {
+        requestId,
+        targetFile: basename(targetPath),
+        delayMs,
+        found: result.found,
+        activated: result.activated,
+        processId: result.processId ?? null,
+        windowTitle: result.title ?? null,
+        windowClass: result.className ?? null,
+        windowRect: result.rect ?? null,
+        error: result.error ?? null,
+      })
+      if (result.activated || delayMs === 7_000) postLaunchActivationGeneration.delete(key)
+    }, delayMs)
+    timer.unref()
+  }
 }
 
 async function importOneDesktopIcon(widgetId: string, sourcePath: string): Promise<DesktopIconItem> {
@@ -635,19 +689,62 @@ function removeDesktopIconReference(widgetId: string, item: DesktopIconItem): De
   return { ok: true, action: 'remove' }
 }
 
-export async function launchDesktopIcon(item: DesktopIconItem): Promise<DesktopIconLaunchResult> {
+export async function launchDesktopIcon(
+  item: DesktopIconItem,
+  context: { requestId?: string; widgetId?: string } = {},
+): Promise<DesktopIconLaunchResult> {
+  const requestId = context.requestId ?? randomUUID()
+  const startedAt = Date.now()
   const hydrated = await hydrateDesktopIconItem(item)
+  const targetPath = expandWindowsEnv(hydrated.targetPath)
+  logDockDiagnostic('launch.hydrated', {
+    requestId,
+    widgetId: context.widgetId ?? null,
+    itemId: hydrated.id,
+    itemName: hydrated.name,
+    managedFile: basename(hydrated.managedPath),
+    targetFile: targetPath ? basename(targetPath) : null,
+    hasExternalUrl: Boolean(hydrated.externalUrl),
+  })
 
   if (hydrated.externalUrl) {
     try {
       await shell.openExternal(hydrated.externalUrl)
-      return { ok: true }
+      return { ok: true, requestId, method: 'external-url' }
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      return { ok: false, requestId, error: error instanceof Error ? error.message : String(error) }
     }
   }
 
   let lastError = '文件不存在或无法启动'
+
+  if (
+    targetPath &&
+    !hydrated.targetArgs?.trim() &&
+    extname(targetPath).toLowerCase() === '.exe' &&
+    (await pathExists(targetPath))
+  ) {
+    const activation = activateExistingAppWindow(targetPath)
+    logDockDiagnostic('launch.activate-existing-result', {
+      requestId,
+      targetFile: basename(targetPath),
+      found: activation.found,
+      activated: activation.activated,
+      processId: activation.processId ?? null,
+      windowTitle: activation.title ?? null,
+      windowClass: activation.className ?? null,
+      windowRect: activation.rect ?? null,
+      error: activation.error ?? null,
+    })
+    if (activation.activated) {
+      return {
+        ok: true,
+        requestId,
+        method: 'activate-existing',
+        activatedExisting: true,
+      }
+    }
+  }
 
   const shortcutCandidates = [hydrated.managedPath, hydrated.originalPath].filter(
     (filePath) => filePath && isShortcutLikePath(filePath)
@@ -655,14 +752,34 @@ export async function launchDesktopIcon(item: DesktopIconItem): Promise<DesktopI
 
   for (const filePath of shortcutCandidates) {
     if (!(await pathExists(filePath))) continue
-    if (await launchExistingPath(filePath)) return { ok: true }
+    const method = await launchExistingPath(filePath, requestId)
+    if (method) {
+      if (targetPath && !hydrated.targetArgs?.trim() && extname(targetPath).toLowerCase() === '.exe') {
+        schedulePostLaunchActivation(targetPath, requestId)
+      }
+      return { ok: true, requestId, method }
+    }
   }
 
-  const targetPath = expandWindowsEnv(hydrated.targetPath)
   if (targetPath && (await pathExists(targetPath))) {
-    if (launchTarget(targetPath, hydrated.targetArgs, hydrated.workingDirectory)) return { ok: true }
+    if (await launchTarget(targetPath, hydrated.targetArgs, hydrated.workingDirectory)) {
+      logDockDiagnostic('launch.target-spawned', {
+        requestId,
+        targetFile: basename(targetPath),
+        elapsedMs: Date.now() - startedAt,
+      })
+      if (!hydrated.targetArgs?.trim() && extname(targetPath).toLowerCase() === '.exe') {
+        schedulePostLaunchActivation(targetPath, requestId)
+      }
+      return { ok: true, requestId, method: 'target-spawn' }
+    }
     const error = await shell.openPath(targetPath)
-    if (!error) return { ok: true }
+    if (!error) {
+      if (!hydrated.targetArgs?.trim() && extname(targetPath).toLowerCase() === '.exe') {
+        schedulePostLaunchActivation(targetPath, requestId)
+      }
+      return { ok: true, requestId, method: 'target-shell' }
+    }
     lastError = error
   }
 
@@ -670,11 +787,12 @@ export async function launchDesktopIcon(item: DesktopIconItem): Promise<DesktopI
 
   for (const filePath of candidates) {
     if (!(await pathExists(filePath))) continue
-    if (await launchExistingPath(filePath)) return { ok: true }
+    const method = await launchExistingPath(filePath, requestId)
+    if (method) return { ok: true, requestId, method }
     lastError = 'Shell 启动失败'
   }
 
-  return { ok: false, error: lastError }
+  return { ok: false, requestId, error: lastError }
 }
 
 export function registerDesktopIconIpc(): void {
@@ -705,12 +823,34 @@ export function registerDesktopIconIpc(): void {
     return { ...result, ok: result.items.length > 0 }
   })
 
-  ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, (_event, widgetId: string, item: DesktopIconItem) => {
+  ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, async (_event, widgetId: string, item: DesktopIconItem, suppliedRequestId?: string) => {
     assertTrustedIpcSender(_event, ['canvas'])
+    const requestId = typeof suppliedRequestId === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(suppliedRequestId)
+      ? suppliedRequestId
+      : randomUUID()
+    logDockDiagnostic('launch.ipc-received', {
+      requestId,
+      widgetId: typeof widgetId === 'string' ? widgetId : null,
+      itemId: isDesktopIconItem(item) ? item.id : null,
+    })
     const stored = typeof widgetId === 'string' && isDesktopIconItem(item)
       ? findStoredDesktopIcon(item.id, widgetId)
       : undefined
-    return stored ? launchDesktopIcon(stored) : { ok: false, error: '桌面图标记录不存在。' }
+    if (!stored) {
+      logDockDiagnostic('launch.stored-item-missing', { requestId, widgetId })
+      return { ok: false, requestId, error: '桌面图标记录不存在。' }
+    }
+    const result = await launchDesktopIcon(stored, { requestId, widgetId })
+    logDockDiagnostic('launch.completed', {
+      requestId,
+      widgetId,
+      itemId: stored.id,
+      ok: result.ok,
+      method: result.method ?? null,
+      activatedExisting: result.activatedExisting ?? false,
+      error: result.error ?? null,
+    })
+    return result
   })
 
   ipcMain.handle(IPC.DESKTOP_ICON_REFRESH, async (_event, items: DesktopIconItem[]) => {

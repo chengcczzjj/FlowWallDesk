@@ -13,6 +13,7 @@ import type {
   DesktopIconItem,
   DesktopIconLaunchResult,
   CanvasOcclusionState,
+  NativeDockClickEvent,
 } from '@shared/types'
 
 const api = {
@@ -47,6 +48,17 @@ const api = {
   setIgnoreMouse: (ignore: boolean): void => {
     ipcRenderer.send(IPC.CANVAS_SET_IGNORE_MOUSE, ignore)
   },
+  onNativeDockClick: (cb: (event: NativeDockClickEvent) => void): (() => void) => {
+    const handler = (_: unknown, event: NativeDockClickEvent) => cb(event)
+    ipcRenderer.on(IPC.CANVAS_NATIVE_DOCK_CLICK, handler)
+    return () => ipcRenderer.off(IPC.CANVAS_NATIVE_DOCK_CLICK, handler)
+  },
+  setPointerActive: (active: boolean): void => {
+    ipcRenderer.send(IPC.CANVAS_SET_POINTER_ACTIVE, active)
+  },
+  logDiagnostic: (event: string, details: Record<string, unknown> = {}): void => {
+    ipcRenderer.send(IPC.CANVAS_DIAGNOSTIC, event, details)
+  },
   updateWidget: (w: WidgetInstance) => ipcRenderer.invoke(IPC.WIDGET_UPDATE, w),
   /** 仅更新组件 config（不触发位置吸附） */
   updateWidgetConfig: (id: string, config: Record<string, unknown>) =>
@@ -64,8 +76,8 @@ const api = {
     ipcRenderer.invoke(IPC.WIDGET_CONFIG_SAVE),
   importDesktopIcons: (widgetId: string, filePaths: string[]): Promise<DesktopIconImportResult> =>
     ipcRenderer.invoke(IPC.DESKTOP_ICON_IMPORT, widgetId, filePaths),
-  launchDesktopIcon: (widgetId: string, item: DesktopIconItem): Promise<DesktopIconLaunchResult> =>
-    ipcRenderer.invoke(IPC.DESKTOP_ICON_LAUNCH, widgetId, item),
+  launchDesktopIcon: (widgetId: string, item: DesktopIconItem, requestId?: string): Promise<DesktopIconLaunchResult> =>
+    ipcRenderer.invoke(IPC.DESKTOP_ICON_LAUNCH, widgetId, item, requestId),
   refreshDesktopIcons: (items: DesktopIconItem[]): Promise<DesktopIconItem[]> =>
     ipcRenderer.invoke(IPC.DESKTOP_ICON_REFRESH, items),
   showDesktopIconContextMenu: (widgetId: string, item: DesktopIconItem): Promise<DesktopIconContextMenuResult | null> =>

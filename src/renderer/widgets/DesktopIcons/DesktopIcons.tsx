@@ -364,17 +364,45 @@ function DesktopIconsWidget({
   const activateItem = useCallback(
     (item: DesktopIconItem) => {
       if (editing) return
+      const requestId = crypto.randomUUID()
+      const startedAt = performance.now()
+      window.canvasBridge.logDiagnostic('dock-launch-dispatched', {
+        requestId,
+        widgetId: widget.id,
+        itemId: item.id,
+        itemName: item.name,
+        variant,
+      })
+      const launch = () => {
+        void window.canvasBridge.launchDesktopIcon(widget.id, item, requestId).then((result) => {
+          window.canvasBridge.logDiagnostic('dock-launch-result', {
+            requestId,
+            widgetId: widget.id,
+            itemId: item.id,
+            ok: result.ok,
+            method: result.method ?? null,
+            activatedExisting: result.activatedExisting ?? false,
+            error: result.error ?? null,
+            elapsedMs: Math.round(performance.now() - startedAt),
+          })
+          if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
+        }).catch((error) => {
+          window.canvasBridge.logDiagnostic('dock-launch-rejected', {
+            requestId,
+            widgetId: widget.id,
+            itemId: item.id,
+            error: error instanceof Error ? error.message : String(error),
+            elapsedMs: Math.round(performance.now() - startedAt),
+          })
+        })
+      }
       if (variant === 'dock') {
         setBouncingId(item.id)
-        void window.canvasBridge.launchDesktopIcon(widget.id, item).then((result) => {
-          if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
-        })
+        launch()
         window.setTimeout(() => setBouncingId(null), DOCK_BOUNCE_RESET_MS)
       } else {
         setBouncingId(item.id)
-        void window.canvasBridge.launchDesktopIcon(widget.id, item).then((result) => {
-          if (!result.ok && result.error) console.warn('[desktop-icons] launch failed:', result.error)
-        })
+        launch()
         window.setTimeout(() => setBouncingId(null), 500)
       }
     },
@@ -385,15 +413,31 @@ function DesktopIconsWidget({
     (item: DesktopIconItem) => {
       const now = Date.now()
       const suppressed = suppressActivationRef.current
-      if (suppressed && suppressed.id === item.id && now <= suppressed.until) return
+      if (suppressed && suppressed.id === item.id && now <= suppressed.until) {
+        window.canvasBridge.logDiagnostic('dock-launch-suppressed', {
+          widgetId: widget.id,
+          itemId: item.id,
+          reason: 'post-drag',
+          remainingMs: suppressed.until - now,
+        })
+        return
+      }
 
       const lastActivation = lastActivationRef.current
-      if (lastActivation?.id === item.id && now - lastActivation.at < 350) return
+      if (lastActivation?.id === item.id && now - lastActivation.at < 350) {
+        window.canvasBridge.logDiagnostic('dock-launch-suppressed', {
+          widgetId: widget.id,
+          itemId: item.id,
+          reason: 'debounce',
+          elapsedMs: now - lastActivation.at,
+        })
+        return
+      }
 
       lastActivationRef.current = { id: item.id, at: now }
       activateItem(item)
     },
-    [activateItem]
+    [activateItem, widget.id]
   )
 
   const activateDockSystemAction = useCallback(
@@ -464,6 +508,12 @@ function DesktopIconsWidget({
       event.stopPropagation()
       if (resizing) return
       event.currentTarget.setPointerCapture(event.pointerId)
+      window.canvasBridge.logDiagnostic('dock-icon-pointer-down', {
+        widgetId: widget.id,
+        itemId: item.id,
+        pointerId: event.pointerId,
+        variant,
+      })
       const currentItems = variant === 'dock' ? dockItems : renderedItems
       const nextDrag: DragState = {
         id: item.id,
@@ -486,7 +536,7 @@ function DesktopIconsWidget({
       }, LONG_PRESS_REORDER_MS)
       dragRef.current = nextDrag
     },
-    [dockItems, editing, renderedItems, resizing, setDraft, variant]
+    [dockItems, editing, renderedItems, resizing, setDraft, variant, widget.id]
   )
 
   const handleIconPointerMove = useCallback(
@@ -545,6 +595,15 @@ function DesktopIconsWidget({
       setDraft(null)
 
       if (!drag.active) {
+        window.canvasBridge.logDiagnostic('dock-icon-pointer-up', {
+          widgetId: widget.id,
+          itemId: item.id,
+          pointerId: event.pointerId,
+          active: false,
+          cancelled: drag.cancelled,
+          moved: drag.moved,
+          willActivate: !drag.cancelled && !drag.moved && drag.variant === 'dock',
+        })
         if (!drag.cancelled && !drag.moved) {
           if (drag.variant === 'dock') {
             requestActivateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
@@ -562,11 +621,20 @@ function DesktopIconsWidget({
         return
       }
 
+      window.canvasBridge.logDiagnostic('dock-icon-pointer-up', {
+        widgetId: widget.id,
+        itemId: item.id,
+        pointerId: event.pointerId,
+        active: true,
+        cancelled: drag.cancelled,
+        moved: drag.moved,
+        willActivate: false,
+      })
       if (!drag.moved) return
       await saveItems(finalDraft)
       suppressActivationRef.current = { id: item.id, until: Date.now() + 520 }
     },
-    [requestActivateItem, saveItems, setDraft]
+    [requestActivateItem, saveItems, setDraft, widget.id]
   )
 
   const handleIconPointerCancel = useCallback(

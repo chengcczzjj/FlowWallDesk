@@ -4,7 +4,11 @@ import { is } from '@electron-toolkit/utils'
 import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
 import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occlusion'
+import { findInteractiveWidgetAtPoint, shouldIgnoreCanvasMouse } from '@shared/canvas-hit-test'
+import { shouldFallbackNativeDockClick } from '@shared/native-dock-click'
 import { secureWindowNavigation } from './navigationSecurity'
+import { store } from '../store'
+import { logDockDiagnostic } from '../runtime/diagnosticLog'
 
 
 let koffi: any
@@ -42,6 +46,9 @@ function loadUser32Fns() {
       GetForegroundWindow: lib.func('__stdcall', 'GetForegroundWindow', 'intptr', []),
       GetWindowRect: lib.func('__stdcall', 'GetWindowRect', 'int', ['intptr', koffi.out(koffi.pointer(RECT))]),
       GetClassNameA: lib.func('__stdcall', 'GetClassNameA', 'int', ['intptr', 'void*', 'int']),
+      GetWindowTextA: lib.func('__stdcall', 'GetWindowTextA', 'int', ['intptr', 'void*', 'int']),
+      GetWindowThreadProcessId: lib.func('__stdcall', 'GetWindowThreadProcessId', 'uint', ['intptr', 'void*']),
+      GetAsyncKeyState: lib.func('__stdcall', 'GetAsyncKeyState', 'short', ['int']),
     }
   } catch {
     // ignore
@@ -68,6 +75,28 @@ let defViewHwnd = 0
 /** 桌面是否被全屏窗口遮挡 */
 let desktopOccluded = false
 const occlusionTransition = new StableBooleanTransition(false, 2)
+let lastOcclusionDiagnostic: Record<string, unknown> = { reason: 'not-sampled' }
+
+function describeNativeWindow(hwnd: number): Record<string, unknown> {
+  if (!u32 || !hwnd) return { hwnd }
+  const rect = { left: 0, top: 0, right: 0, bottom: 0 }
+  const classBuffer = Buffer.alloc(256)
+  const titleBuffer = Buffer.alloc(512)
+  const processBuffer = Buffer.alloc(4)
+  const classLength = Number(u32.GetClassNameA(hwnd, classBuffer, classBuffer.length))
+  const titleLength = Number(u32.GetWindowTextA(hwnd, titleBuffer, titleBuffer.length))
+  u32.GetWindowThreadProcessId(hwnd, processBuffer)
+  u32.GetWindowRect(hwnd, rect)
+  return {
+    hwnd,
+    processId: processBuffer.readUInt32LE(0),
+    className: classLength > 0 ? classBuffer.toString('utf8', 0, classLength) : '',
+    title: titleLength > 0 ? titleBuffer.toString('utf8', 0, titleLength) : '',
+    rect,
+    style: Number(u32.GetWindowLongPtrA(hwnd, GWL_STYLE)),
+    exStyle: Number(u32.GetWindowLongPtrA(hwnd, GWL_EXSTYLE)),
+  }
+}
 
 /**
  * 检测前台窗口是否全屏覆盖整个屏幕。
@@ -75,26 +104,33 @@ const occlusionTransition = new StableBooleanTransition(false, 2)
  */
 function checkDesktopOccluded(): boolean {
   loadUser32Fns()
-  if (!u32) return false
+  if (!u32) {
+    lastOcclusionDiagnostic = { reason: 'native-api-unavailable' }
+    return false
+  }
   try {
     const fgHwnd = Number(u32.GetForegroundWindow())
-    if (!fgHwnd) return false
+    const finish = (occluded: boolean, reason: string, details: Record<string, unknown> = {}): boolean => {
+      lastOcclusionDiagnostic = { ...describeNativeWindow(fgHwnd), reason, ...details }
+      return occluded
+    }
+    if (!fgHwnd) return finish(false, 'no-foreground-window')
     // 跳过桌面 shell 窗口（Progman、WorkerW、任务栏）
     const progman = Number(u32.FindWindowExA(0, 0, 'Progman', 0))
-    if (fgHwnd === progman) return false
+    if (fgHwnd === progman) return finish(false, 'desktop-progman')
     const tray = Number(u32.FindWindowExA(0, 0, 'Shell_TrayWnd', 0))
-    if (fgHwnd === tray) return false
+    if (fgHwnd === tray) return finish(false, 'desktop-taskbar')
     // 跳过 DefView 的父 WorkerW
     const dv = findDefView()
     if (dv) {
       const desktopRoot = Number(u32.GetAncestor(dv, GA_ROOT))
-      if (desktopRoot && fgHwnd === desktopRoot) return false
+      if (desktopRoot && fgHwnd === desktopRoot) return finish(false, 'desktop-root')
     }
     // 不计算 Electron 自身窗口
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) {
         try {
-          if (Number(w.getNativeWindowHandle().readBigInt64LE(0)) === fgHwnd) return false
+          if (Number(w.getNativeWindowHandle().readBigInt64LE(0)) === fgHwnd) return finish(false, 'lingyue-window')
         } catch { /* ignore */ }
       }
     }
@@ -102,14 +138,26 @@ function checkDesktopOccluded(): boolean {
     // 但任务栏仍可见，桌面并未被真正遮挡，不应暂停
     const WS_MAXIMIZE = 0x01000000
     const style = Number(u32.GetWindowLongPtrA(fgHwnd, GWL_STYLE))
-    if (style & WS_MAXIMIZE) return false
+    if (style & WS_MAXIMIZE) return finish(false, 'maximized-with-taskbar')
 
     const rect = { left: 0, top: 0, right: 0, bottom: 0 }
     u32.GetWindowRect(fgHwnd, rect)
     const primary = screen.getPrimaryDisplay()
+    const dipRect = screen.screenToDipRect(null, {
+      x: rect.left,
+      y: rect.top,
+      width: rect.right - rect.left,
+      height: rect.bottom - rect.top,
+    })
     // 只在窗口真正覆盖主屏时暂停，避免副屏全屏误伤主屏 Dock。
-    return rectCoversDisplay(rect, primary.bounds)
+    return finish(rectCoversDisplay({
+      left: dipRect.x,
+      top: dipRect.y,
+      right: dipRect.x + dipRect.width,
+      bottom: dipRect.y + dipRect.height,
+    }, primary.bounds), 'display-coverage', { dipRect })
   } catch {
+    lastOcclusionDiagnostic = { reason: 'occlusion-check-failed' }
     return false
   }
 }
@@ -180,12 +228,76 @@ function disableShowDesktopMinimize(win: BrowserWindow): void {
 function applyCanvasMousePassthrough(): void {
   const win = getCanvasWindow()
   if (!win) return
-  const ignore = desktopOccluded || (!isEditing && rendererMousePassthrough)
+  const rendererHoverHint = !rendererMousePassthrough && Date.now() - rendererMousePassthroughAt < 250
+  const ignore = shouldIgnoreCanvasMouse({
+    desktopOccluded,
+    editing: isEditing,
+    pointerActive: rendererPointerActive,
+    widgetUnderCursor: Boolean(cursorWidgetId) || rendererHoverHint,
+  })
+  if (nativeMousePassthrough === ignore) return
+  nativeMousePassthrough = ignore
   if (ignore) {
     win.setIgnoreMouseEvents(true, { forward: true })
   } else {
     win.setIgnoreMouseEvents(false)
   }
+  logDockDiagnostic('canvas.mouse-passthrough-changed', {
+    ignore,
+    desktopOccluded,
+    editing: isEditing,
+    pointerActive: rendererPointerActive,
+    cursorWidgetId,
+    rendererHoverHint,
+  })
+}
+
+function refreshCanvasCursorHitTest(): void {
+  const display = screen.getPrimaryDisplay()
+  const cursor = screen.getCursorScreenPoint()
+  const widgets = store.get('widgets')
+  const widget = findInteractiveWidgetAtPoint(cursor, display.bounds, widgets)
+  const nextWidgetId = widget?.id ?? null
+  if (nextWidgetId !== cursorWidgetId) {
+    cursorWidgetId = nextWidgetId
+    logDockDiagnostic('canvas.cursor-region-changed', {
+      widgetId: cursorWidgetId,
+      widgetType: widget?.type ?? null,
+      cursor,
+    })
+  }
+  loadUser32Fns()
+  if (u32) {
+    const now = Date.now()
+    const state = Number(u32.GetAsyncKeyState(0x01))
+    const currentlyDown = (state & 0x8000) !== 0
+    const pressedSinceLastSample = (state & 0x0001) !== 0
+    if (currentlyDown !== nativeLeftButtonDown || pressedSinceLastSample) {
+      logDockDiagnostic('canvas.native-left-button', {
+        phase: currentlyDown ? 'down' : pressedSinceLastSample ? 'tap' : 'up',
+        cursor,
+        cursorWidgetId,
+        nativeMousePassthrough,
+        desktopOccluded,
+      })
+    }
+
+    if (currentlyDown && !nativeLeftButtonDown) {
+      nativeDockGesture = !desktopOccluded && !isEditing && widget?.type === 'desktop-icons-dock'
+        ? { widgetId: widget.id, startedAt: now, start: cursor }
+        : null
+    } else if (!currentlyDown && nativeLeftButtonDown) {
+      finishNativeDockGesture(cursor, nextWidgetId, now)
+    } else if (!currentlyDown && pressedSinceLastSample && !nativeLeftButtonDown) {
+      // A complete fast click can happen between two polling samples.
+      if (!desktopOccluded && !isEditing && widget?.type === 'desktop-icons-dock') {
+        nativeDockGesture = { widgetId: widget.id, startedAt: now, start: cursor }
+        finishNativeDockGesture(cursor, widget.id, now)
+      }
+    }
+    nativeLeftButtonDown = currentlyDown
+  }
+  applyCanvasMousePassthrough()
 }
 
 function cancelCanvasZOrderRefresh(): void {
@@ -205,7 +317,10 @@ function settleCanvasOnDesktop(win: BrowserWindow): void {
 
 function commitDesktopOcclusion(occluded: boolean): void {
   desktopOccluded = occluded
+  nativeDockGesture = null
   rendererMousePassthrough = true
+  rendererMousePassthroughAt = Date.now()
+  rendererPointerActive = false
   if (occluded) cancelCanvasZOrderRefresh()
   applyCanvasMousePassthrough()
 
@@ -223,15 +338,64 @@ function commitDesktopOcclusion(occluded: boolean): void {
 
   if (!occluded) refreshCanvasZOrder()
   console.log(`[canvas] desktop ${occluded ? 'occluded' : 'visible'}; interaction state reset`)
+  logDockDiagnostic('canvas.occlusion-changed', { occluded, foreground: lastOcclusionDiagnostic })
 }
 
 let canvasWindow: BrowserWindow | null = null
 let isEditing = false
 let rendererMousePassthrough = true
-let zOrderTimer: ReturnType<typeof setInterval> | null = null
+let rendererMousePassthroughAt = 0
+let rendererPointerActive = false
+let nativeMousePassthrough: boolean | null = null
+let cursorWidgetId: string | null = null
+let nativeLeftButtonDown = false
+let lastRendererActionPointerDownAt = 0
+let nativeDockGesture: { widgetId: string; startedAt: number; start: { x: number; y: number } } | null = null
+let canvasHealthTimer: ReturnType<typeof setInterval> | null = null
+let cursorHitTestTimer: ReturnType<typeof setInterval> | null = null
 let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let zOrderRefreshGeneration = 0
 let boundsListenerRegistered = false
+
+function finishNativeDockGesture(
+  cursor: { x: number; y: number },
+  releaseWidgetId: string | null,
+  endedAt: number,
+): void {
+  const gesture = nativeDockGesture
+  nativeDockGesture = null
+  if (!gesture) return
+
+  const fallback = !desktopOccluded && !isEditing && shouldFallbackNativeDockClick({
+    ...gesture,
+    endedAt,
+    end: cursor,
+    releaseWidgetId,
+    rendererActionPointerDownAt: lastRendererActionPointerDownAt,
+  })
+  logDockDiagnostic('canvas.native-dock-click-decision', {
+    widgetId: gesture.widgetId,
+    fallback,
+    durationMs: endedAt - gesture.startedAt,
+    movementPx: Math.round(Math.hypot(cursor.x - gesture.start.x, cursor.y - gesture.start.y)),
+    rendererAckAgeMs: endedAt - lastRendererActionPointerDownAt,
+    releaseWidgetId,
+  })
+  if (!fallback) return
+
+  const win = getCanvasWindow()
+  if (!win || win.webContents.isDestroyed()) return
+  win.webContents.send(IPC.CANVAS_NATIVE_DOCK_CLICK, {
+    widgetId: gesture.widgetId,
+    screenX: cursor.x,
+    screenY: cursor.y,
+    detectedAt: endedAt,
+  })
+  logDockDiagnostic('canvas.native-dock-click-sent', {
+    widgetId: gesture.widgetId,
+    cursor,
+  })
+}
 
 function syncCanvasBoundsToPrimaryDisplay(): void {
   const win = getCanvasWindow()
@@ -298,6 +462,13 @@ export function createCanvasWindow(): BrowserWindow {
     })
   }
   rendererMousePassthrough = true
+  rendererMousePassthroughAt = Date.now()
+  rendererPointerActive = false
+  nativeMousePassthrough = null
+  cursorWidgetId = null
+  nativeLeftButtonDown = false
+  nativeDockGesture = null
+  lastRendererActionPointerDownAt = 0
   applyCanvasMousePassthrough()
   registerCanvasDisplayListener()
 
@@ -335,32 +506,38 @@ export function createCanvasWindow(): BrowserWindow {
       // Restore visibility after window is behind other windows
       canvasWindow.setOpacity(1)
 
-      // 低频轮询：每 300ms 推一次底层，确保画布始终在应用窗口下方
-      // 同时检测全屏遮挡，暂停/恢复壁纸帧捕获
-      if (!zOrderTimer) {
-        zOrderTimer = setInterval(() => {
+      // Z-order 只在明确的窗口生命周期边界重建。反复 SetWindowPos
+      // 会让 Windows/Chromium 在长时间运行后丢失透明窗口的命中状态。
+      if (!canvasHealthTimer) {
+        canvasHealthTimer = setInterval(() => {
           if (!canvasWindow || canvasWindow.isDestroyed()) {
-            if (zOrderTimer) { clearInterval(zOrderTimer); zOrderTimer = null }
+            if (canvasHealthTimer) { clearInterval(canvasHealthTimer); canvasHealthTimer = null }
             return
           }
-          // 检测全屏遮挡状态变化
           const stableOcclusion = occlusionTransition.sample(checkDesktopOccluded())
           if (stableOcclusion !== null) commitDesktopOcclusion(stableOcclusion)
-          if (isEditing) return // 编辑模式需要在最前面
-          // 全屏遮挡期间不要持续改透明画布的 z-order；恢复时统一重建。
-          if (desktopOccluded || zOrderRefreshTimer) return
-          if (canvasWindow.isMinimized()) return
-          sendToBottom(canvasWindow)
         }, 300)
       }
+      if (!cursorHitTestTimer) {
+        cursorHitTestTimer = setInterval(refreshCanvasCursorHitTest, 25)
+      }
+      refreshCanvasCursorHitTest()
+      logDockDiagnostic('canvas.ready', { bounds: canvasWindow.getBounds() })
     }, 300)
   })
   // 编辑模式下 blur/focus 切换层级，允许开始菜单/通知中心弹出
   setupEditBlurFocus()
 
   canvasWindow.on('closed', () => {
-    if (zOrderTimer) { clearInterval(zOrderTimer); zOrderTimer = null }
+    if (canvasHealthTimer) { clearInterval(canvasHealthTimer); canvasHealthTimer = null }
+    if (cursorHitTestTimer) { clearInterval(cursorHitTestTimer); cursorHitTestTimer = null }
     cancelCanvasZOrderRefresh()
+    rendererPointerActive = false
+    nativeMousePassthrough = null
+    cursorWidgetId = null
+    nativeLeftButtonDown = false
+    nativeDockGesture = null
+    lastRendererActionPointerDownAt = 0
     canvasWindow = null
   })
 
@@ -385,7 +562,20 @@ export function setCanvasMousePassthrough(ignore: boolean): void {
   // 丢弃遮挡期间到达的旧 mouseenter 请求，避免恢复后整屏截获鼠标。
   if (desktopOccluded && !ignore) return
   rendererMousePassthrough = ignore
+  rendererMousePassthroughAt = Date.now()
   applyCanvasMousePassthrough()
+}
+
+export function setCanvasPointerActive(active: boolean): void {
+  if (desktopOccluded && active) return
+  if (rendererPointerActive === active) return
+  rendererPointerActive = active
+  logDockDiagnostic('canvas.pointer-active-changed', { active, cursorWidgetId })
+  applyCanvasMousePassthrough()
+}
+
+export function noteCanvasRendererActionPointerDown(): void {
+  lastRendererActionPointerDownAt = Date.now()
 }
 
 /** 编辑模式下画布 blur/focus 处理：失焦时降低层级让开始菜单/通知栏正常弹出 */
@@ -503,6 +693,7 @@ export function refreshCanvasZOrder(): void {
   // Re-entering the top-level compositor briefly repairs transparent-window input
   // after Chromium/Windows marks the canvas as fully occluded.
   win.setAlwaysOnTop(true, 'screen-saver')
+  logDockDiagnostic('canvas.z-order-refresh-started')
   zOrderRefreshTimer = setTimeout(() => {
     zOrderRefreshTimer = null
     if (generation !== zOrderRefreshGeneration) return
@@ -511,6 +702,7 @@ export function refreshCanvasZOrder(): void {
     current.setAlwaysOnTop(false)
     settleCanvasOnDesktop(current)
     applyCanvasMousePassthrough()
+    logDockDiagnostic('canvas.z-order-refresh-completed')
   }, 150)
 }
 
