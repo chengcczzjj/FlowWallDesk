@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-05 00:25] 发布 1.0.5 Dock 全屏恢复稳定性修复版
+
+**变更摘要**: 将 Dock 全屏恢复点击兜底、持久诊断和真实应用窗口唤醒修复升级为 1.0.5，并发布 Windows 安装包与自动更新元数据。
+
+**涉及模块**:
+- `src/main/windows/` / `src/renderer/canvas/`: 全屏恢复后重建 Canvas 层级，以 Win32 左键状态兜底透明窗口漏失的 `pointerdown`。
+- `src/main/ipc/desktopIconIpc.ts` / `src/shared/window-activation.ts`: 飞书支持启动器子目录进程，Steam 优先真实 helper 主窗口并过滤内部工具 HWND。
+- `src/main/runtime/diagnosticLog.ts` / `src/main/runtime/dockLaunchSelfTest.ts`: 持久化完整启动链路，并支持开发态多轮正常点击与原生兜底自检。
+- `package.json` / `package-lock.json` / `README.md` / `tests/`: 版本和发布契约同步升级至 1.0.5。
+
+**遇到的问题**:
+- 本地修复提交完成但未推送和发布 → 按用户约定补齐发布分支、版本标签、GitHub Release、安装包、blockmap 与 `latest.yml`。
+
+**Git Commit**: 已提交 — `fix(release): publish LingyueDesk 1.0.5`
+
+---
+
 ## [2026-08-05 00:15] 彻底修复 Dock 全屏恢复后点击与应用唤醒
 
 **变更摘要**: 根据持久化诊断日志定位透明 Canvas 在全屏恢复后丢失 `pointerdown`、以及单实例应用窗口误选问题，增加原生点击兜底、真实主窗口筛选和开发态自动回归。
