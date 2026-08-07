@@ -1,18 +1,27 @@
 import { app } from 'electron'
+import { spawn } from 'child_process'
+import { statSync } from 'fs'
+import { constants as osConstants, setPriority } from 'os'
+import { extname, isAbsolute } from 'path'
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater'
 import { IPC } from '@shared/ipc-channels'
 import type { AppUpdateStatus } from '@shared/types'
 import { toSafeUpdateErrorMessage } from '@shared/update-error'
+import { logUpdateDiagnostic } from '../runtime/diagnosticLog'
 import { getMainWindow } from '../windows/mainWindow'
 
 const INITIAL_CHECK_DELAY_MS = 15_000
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+const INSTALLER_QUIT_DELAY_MS = 450
+const INSTALLER_ARGS = ['--updated', '/S', '--force-run'] as const
 
 let initialized = false
 let checkingPromise: Promise<void> | null = null
 let downloadPromise: Promise<void> | null = null
+let installPromise: Promise<boolean> | null = null
 let initialCheckTimer: ReturnType<typeof setTimeout> | null = null
 let scheduledCheckTimer: ReturnType<typeof setInterval> | null = null
+let downloadedInstallerPath: string | null = null
 
 let updateStatus: AppUpdateStatus = {
   phase: app.isPackaged ? 'idle' : 'unsupported',
@@ -31,6 +40,11 @@ function publishStatus(patch: Partial<AppUpdateStatus>): void {
 }
 
 function onUpdateAvailable(info: UpdateInfo): void {
+  downloadedInstallerPath = null
+  logUpdateDiagnostic('update.available', {
+    currentVersion: app.getVersion(),
+    availableVersion: info.version,
+  })
   publishStatus({
     phase: 'available',
     availableVersion: info.version,
@@ -67,12 +81,16 @@ function onDownloadProgress(progress: ProgressInfo): void {
 }
 
 function onUpdateDownloaded(info: UpdateInfo): void {
+  logUpdateDiagnostic('update.downloaded', {
+    availableVersion: info.version,
+    installerPath: downloadedInstallerPath,
+  })
   publishStatus({
     phase: 'downloaded',
     availableVersion: info.version,
     progressPercent: 100,
     lastCheckedAt: Date.now(),
-    message: `版本 ${info.version} 已下载。退出应用时会自动安装，也可以立即重启安装。`,
+    message: `版本 ${info.version} 已下载。点击左侧按钮后会以低占用模式安装并自动重启。`,
     canCheck: true,
     canInstall: true,
   })
@@ -93,7 +111,8 @@ export function initializeAutoUpdate(): void {
   }
 
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.autoRunAppAfterInstall = true
   autoUpdater.allowPrerelease = false
   autoUpdater.allowDowngrade = false
   autoUpdater.logger = null
@@ -184,6 +203,7 @@ export async function downloadAppUpdate(): Promise<AppUpdateStatus> {
   )
   if (!canDownload && !downloadPromise) return getAppUpdateStatus()
   if (!downloadPromise) {
+    downloadedInstallerPath = null
     publishStatus({
       phase: 'downloading',
       progressPercent: 0,
@@ -192,7 +212,15 @@ export async function downloadAppUpdate(): Promise<AppUpdateStatus> {
       canInstall: false,
     })
     downloadPromise = autoUpdater.downloadUpdate()
-      .then(() => undefined)
+      .then((downloadedFiles) => {
+        downloadedInstallerPath = downloadedFiles.find((filePath) => (
+          isAbsolute(filePath) && extname(filePath).toLowerCase() === '.exe'
+        )) ?? null
+        logUpdateDiagnostic('update.download.complete', {
+          installerPath: downloadedInstallerPath,
+          installerSizeBytes: getFileSize(downloadedInstallerPath),
+        })
+      })
       .catch((error: unknown) => {
         publishStatus({
           phase: 'error',
@@ -210,7 +238,99 @@ export async function downloadAppUpdate(): Promise<AppUpdateStatus> {
 }
 
 export function installDownloadedUpdate(): boolean {
-  if (!app.isPackaged || updateStatus.phase !== 'downloaded') return false
-  setImmediate(() => autoUpdater.quitAndInstall(false, true))
+  if (!app.isPackaged) return false
+  if (updateStatus.phase === 'installing' || installPromise) return true
+  if (updateStatus.phase !== 'downloaded') return false
+
+  publishStatus({
+    phase: 'installing',
+    message: '正在准备重启安装，安装过程会保持低系统占用。',
+    canCheck: false,
+    canInstall: false,
+  })
+
+  installPromise = launchDownloadedInstaller()
+    .catch((error: unknown) => {
+      logUpdateDiagnostic('update.install.failed', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+      publishStatus({
+        phase: 'downloaded',
+        message: `启动更新安装失败：${toSafeUpdateErrorMessage(error)}`,
+        canCheck: false,
+        canInstall: true,
+      })
+      return false
+    })
+    .finally(() => {
+      installPromise = null
+    })
   return true
+}
+
+async function launchDownloadedInstaller(): Promise<boolean> {
+  if (downloadPromise) await downloadPromise
+  const installerPath = downloadedInstallerPath
+  if (!installerPath) {
+    logUpdateDiagnostic('update.install.fallback', { reason: 'downloaded installer path unavailable' })
+    autoUpdater.quitAndInstall(true, true)
+    return true
+  }
+
+  const installerSizeBytes = getFileSize(installerPath)
+  logUpdateDiagnostic('update.install.requested', {
+    installerPath,
+    installerSizeBytes,
+    args: INSTALLER_ARGS,
+  })
+
+  const installerPid = await spawnLowPriorityInstaller(installerPath)
+  logUpdateDiagnostic('update.install.started', {
+    installerPath,
+    installerPid,
+    installerSizeBytes,
+    priority: 'below-normal',
+  })
+
+  const quitTimer = setTimeout(() => app.quit(), INSTALLER_QUIT_DELAY_MS)
+  quitTimer.unref()
+  return true
+}
+
+function spawnLowPriorityInstaller(installerPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(installerPath, [...INSTALLER_ARGS], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+
+    child.once('error', reject)
+    child.once('spawn', () => {
+      const pid = child.pid
+      if (!pid) {
+        reject(new Error('更新安装器未返回进程标识。'))
+        return
+      }
+      try {
+        setPriority(pid, osConstants.priority.PRIORITY_BELOW_NORMAL)
+      } catch (error) {
+        logUpdateDiagnostic('update.install.priority.failed', {
+          installerPid: pid,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+      child.unref()
+      resolve(pid)
+    })
+  })
+}
+
+function getFileSize(filePath: string | null): number | null {
+  if (!filePath) return null
+  try {
+    return statSync(filePath).size
+  } catch {
+    return null
+  }
 }

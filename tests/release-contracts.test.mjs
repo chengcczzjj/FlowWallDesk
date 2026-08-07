@@ -18,6 +18,10 @@ test('stable release metadata and updater publishing stay wired together', async
   assert.match(builderConfig, /owner: chengcczzjj/)
   assert.match(builderConfig, /repo: FlowWallDesk/)
   assert.match(builderConfig, /artifactName: \$\{name\}-\$\{version\}-setup\.\$\{ext\}/)
+  assert.match(builderConfig, /- out\/main\/\*\*\/\*/)
+  assert.match(builderConfig, /- out\/preload\/\*\*\/\*/)
+  assert.match(builderConfig, /- out\/renderer\/\*\*\/\*/)
+  assert.doesNotMatch(builderConfig, /- out\/\*\*\/\*/)
 })
 
 test('update and launch-at-login IPC channels are unique and complete', () => {
@@ -71,13 +75,26 @@ test('updates are user-started from the activity sidebar and restart after downl
     new URL('../src/renderer/main-ui/components/SidebarUpdateButton.tsx', import.meta.url),
     'utf8',
   )
+  const mainUiStyles = await readFile(new URL('../src/renderer/main-ui/styles.css', import.meta.url), 'utf8')
 
   assert.match(updateService, /autoUpdater\.autoDownload = false/)
+  assert.match(updateService, /autoUpdater\.autoInstallOnAppQuit = false/)
+  assert.match(updateService, /\['--updated', '\/S', '--force-run'\]/)
+  assert.match(updateService, /PRIORITY_BELOW_NORMAL/)
+  assert.match(updateService, /spawnLowPriorityInstaller/)
   assert.match(appSource, /<SidebarUpdateButton \/>/)
   assert.doesNotMatch(settingsSource, /版本与更新/)
   assert.match(sidebarUpdateSource, /downloadUpdate\(\)/)
   assert.match(sidebarUpdateSource, /installUpdate\(\)/)
   assert.match(sidebarUpdateSource, /status\.phase === 'downloaded'/)
+  assert.match(sidebarUpdateSource, /status\.phase === 'installing'/)
+  const updateButtonStyles = mainUiStyles.slice(
+    mainUiStyles.indexOf('.sidebar-update {'),
+    mainUiStyles.indexOf('.sidebar-update:hover'),
+  )
+  assert.match(updateButtonStyles, /position: absolute/)
+  assert.match(updateButtonStyles, /width: 34px/)
+  assert.match(updateButtonStyles, /height: 34px/)
 })
 
 test('desktop icon launches stay bound to their persisted widget record', async () => {

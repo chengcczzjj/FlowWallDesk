@@ -407,6 +407,7 @@ export type AppUpdatePhase =
   | 'available'
   | 'downloading'
   | 'downloaded'
+  | 'installing'
   | 'not-available'
   | 'error'
 

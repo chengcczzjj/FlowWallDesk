@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-08 00:24] 收紧发布包输入并降低更新安装占用
+
+**变更摘要**: 将 Windows 更新安装器改为显式低优先级启动，补齐安装中状态与独立诊断日志，并限制发布包只收录实际生产输出目录。
+
+**涉及模块**:
+- `src/main/services/update-service.ts` / `src/main/runtime/diagnosticLog.ts`: 记录更新下载与安装路径，以低于正常优先级启动 NSIS 安装器，并在启动成功后有界退出应用。
+- `src/renderer/main-ui/components/SidebarUpdateButton.tsx` / `src/renderer/main-ui/styles.css` / `src/shared/types.ts`: 增加 `installing` 状态，缩小并固定侧栏更新按钮位置，避免安装阶段重复触发。
+- `electron-builder.yml` / `tests/release-contracts.test.mjs`: 发布包仅收录 main、preload、renderer 三类生产输出，并补齐更新和打包契约。
+
+**遇到的问题**:
+- 默认退出安装会让安装进程继承普通优先级且缺少独立诊断 → 显式启动已校验的下载文件、下调进程优先级，并保留 `quitAndInstall` 兜底。
+
+**Git Commit**: 已提交 — `fix(update): reduce installer load and package scope`
+
+---
+
 ## [2026-08-05 00:25] 发布 1.0.5 Dock 全屏恢复稳定性修复版
 
 **变更摘要**: 将 Dock 全屏恢复点击兜底、持久诊断和真实应用窗口唤醒修复升级为 1.0.5，并发布 Windows 安装包与自动更新元数据。

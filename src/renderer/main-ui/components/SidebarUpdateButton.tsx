@@ -27,7 +27,7 @@ export function SidebarUpdateButton() {
   if (!status || !presentation) return null
 
   const handleClick = async () => {
-    if (busy || status.phase === 'downloading') return
+    if (busy || status.phase === 'downloading' || status.phase === 'installing') return
     setBusy(true)
     try {
       if (status.phase === 'downloaded') {
@@ -41,27 +41,28 @@ export function SidebarUpdateButton() {
   }
 
   const progress = Math.max(0, Math.min(100, status.progressPercent || 0))
+  const isWorking = busy || status.phase === 'downloading' || status.phase === 'installing'
   return (
     <button
       type="button"
       className={`activity-bar__item sidebar-update sidebar-update--${presentation.kind}`}
       title={presentation.title}
       aria-label={presentation.title}
-      disabled={busy || status.phase === 'downloading'}
+      disabled={isWorking}
       onClick={handleClick}
     >
-      {status.phase === 'downloading' || busy ? (
-        <LoaderCircle size={20} className="spin" />
+      {isWorking ? (
+        <LoaderCircle size={17} className="spin" />
       ) : status.phase === 'downloaded' ? (
-        <RotateCcw size={20} />
+        <RotateCcw size={17} />
       ) : (
-        <Download size={20} />
+        <Download size={17} />
       )}
       {status.phase === 'downloading' ? (
         <span className="sidebar-update__progress">{Math.round(progress)}</span>
-      ) : (
+      ) : status.phase !== 'installing' ? (
         <span className="sidebar-update__dot" aria-hidden="true" />
-      )}
+      ) : null}
     </button>
   )
 }
@@ -71,6 +72,7 @@ function getUpdatePresentation(status: AppUpdateStatus | null): { kind: 'ready' 
   const version = status.availableVersion ? ` v${status.availableVersion}` : ''
   if (status.phase === 'available') return { kind: 'ready', title: `下载并更新到${version}` }
   if (status.phase === 'downloading') return { kind: 'downloading', title: `正在下载${version}：${Math.round(status.progressPercent || 0)}%` }
+  if (status.phase === 'installing') return { kind: 'downloading', title: `正在重启并安装${version}` }
   if (status.phase === 'downloaded') return { kind: 'restart', title: `重启并更新到${version}` }
   if (status.phase === 'error' && status.availableVersion) return { kind: 'error', title: `更新下载失败，点击重试${version}` }
   return null

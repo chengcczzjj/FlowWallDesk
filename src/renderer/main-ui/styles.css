@@ -271,6 +271,7 @@ textarea,
 
 /* ===== Activity Bar ===== */
 .activity-bar {
+  position: relative;
   width: 64px;
   display: flex;
   flex-direction: column;
@@ -335,6 +336,12 @@ textarea,
 }
 
 .sidebar-update {
+  position: absolute;
+  left: 15px;
+  bottom: 128px;
+  width: 34px;
+  height: 34px;
+  z-index: 2;
   color: #087b5c;
   background: linear-gradient(145deg, rgba(214, 255, 239, 0.92), rgba(171, 239, 215, 0.72));
   border: 1px solid rgba(8, 123, 92, 0.2);
@@ -366,10 +373,10 @@ textarea,
 
 .sidebar-update__dot {
   position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 7px;
-  height: 7px;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: currentColor;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.72);
@@ -377,14 +384,14 @@ textarea,
 
 .sidebar-update__progress {
   position: absolute;
-  right: 3px;
-  bottom: 2px;
-  min-width: 19px;
-  padding: 1px 3px;
+  right: 2px;
+  bottom: 1px;
+  min-width: 17px;
+  padding: 1px 2px;
   border-radius: 6px;
   color: #ffffff;
   background: #087b5c;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 750;
   line-height: 1.25;
   text-align: center;

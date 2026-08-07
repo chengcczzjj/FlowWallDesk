@@ -4,7 +4,9 @@ asar: true
 directories:
   buildResources: resources/build
 files:
-  - out/**/*
+  - out/main/**/*
+  - out/preload/**/*
+  - out/renderer/**/*
   - package.json
 extraResources:
   - from: resources/build

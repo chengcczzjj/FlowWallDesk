@@ -3,13 +3,17 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 
 const MAX_LOG_BYTES = 2 * 1024 * 1024
-let writeQueue: Promise<void> = Promise.resolve()
+const writeQueues = new Map<string, Promise<void>>()
 
 export function getDockDiagnosticLogPath(): string {
   return join(app.getPath('userData'), 'logs', 'dock-diagnostics.jsonl')
 }
 
-export function logDockDiagnostic(event: string, details: Record<string, unknown> = {}): void {
+export function getUpdateDiagnosticLogPath(): string {
+  return join(app.getPath('userData'), 'logs', 'update-diagnostics.jsonl')
+}
+
+function logDiagnostic(logPath: string, consoleScope: string, event: string, details: Record<string, unknown>): void {
   const entry = {
     at: new Date().toISOString(),
     pid: process.pid,
@@ -17,11 +21,11 @@ export function logDockDiagnostic(event: string, details: Record<string, unknown
     ...details,
   }
   const line = `${JSON.stringify(entry)}\n`
-  console.log(`[dock-diagnostic] ${event}`, details)
+  console.log(`[${consoleScope}-diagnostic] ${event}`, details)
 
-  writeQueue = writeQueue
+  const writeQueue = writeQueues.get(logPath) ?? Promise.resolve()
+  writeQueues.set(logPath, writeQueue
     .then(async () => {
-      const logPath = getDockDiagnosticLogPath()
       await fs.mkdir(join(app.getPath('userData'), 'logs'), { recursive: true })
       try {
         const stat = await fs.stat(logPath)
@@ -36,6 +40,14 @@ export function logDockDiagnostic(event: string, details: Record<string, unknown
       await fs.appendFile(logPath, line, 'utf8')
     })
     .catch((error) => {
-      console.warn('[dock-diagnostic] failed to persist log:', error)
-    })
+      console.warn(`[${consoleScope}-diagnostic] failed to persist log:`, error)
+    }))
+}
+
+export function logDockDiagnostic(event: string, details: Record<string, unknown> = {}): void {
+  logDiagnostic(getDockDiagnosticLogPath(), 'dock', event, details)
+}
+
+export function logUpdateDiagnostic(event: string, details: Record<string, unknown> = {}): void {
+  logDiagnostic(getUpdateDiagnosticLogPath(), 'update', event, details)
 }
