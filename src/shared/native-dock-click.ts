@@ -10,9 +10,12 @@ export interface NativeDockClickDecisionInput {
   widgetId: string
   releaseWidgetId: string | null
   rendererActionPointerDownAt: number
+  canvasTopmostAtStart: boolean
+  canvasTopmostAtEnd: boolean
 }
 
 export function shouldFallbackNativeDockClick(input: NativeDockClickDecisionInput): boolean {
+  if (!input.canvasTopmostAtStart || !input.canvasTopmostAtEnd) return false
   if (!input.widgetId || input.releaseWidgetId !== input.widgetId) return false
   const durationMs = input.endedAt - input.startedAt
   if (durationMs < 0 || durationMs > NATIVE_DOCK_CLICK_MAX_DURATION_MS) return false
@@ -24,4 +27,13 @@ export function shouldFallbackNativeDockClick(input: NativeDockClickDecisionInpu
 
   const distance = Math.hypot(input.end.x - input.start.x, input.end.y - input.start.y)
   return distance <= NATIVE_DOCK_CLICK_MAX_MOVEMENT_PX
+}
+
+export function isNativeCanvasSurfaceHit(input: {
+  hitHwnd: number
+  rootHwnd: number
+  canvasHwnd: number
+}): boolean {
+  if (!input.canvasHwnd) return false
+  return input.hitHwnd === input.canvasHwnd || input.rootHwnd === input.canvasHwnd
 }

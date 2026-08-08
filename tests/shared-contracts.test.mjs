@@ -26,7 +26,7 @@ import {
 } from '../src/shared/dock-motion.ts'
 import { findInteractiveWidgetAtPoint, shouldIgnoreCanvasMouse } from '../src/shared/canvas-hit-test.ts'
 import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
-import { shouldFallbackNativeDockClick } from '../src/shared/native-dock-click.ts'
+import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '../src/shared/native-dock-click.ts'
 
 test('asset URLs preserve Windows paths and packaged public assets', () => {
   assert.equal(
@@ -171,6 +171,9 @@ test('native canvas hit testing keeps Dock input alive without renderer mousemov
   assert.equal(shouldIgnoreCanvasMouse({
     desktopOccluded: false, editing: false, pointerActive: false, widgetUnderCursor: false,
   }), true)
+  assert.equal(shouldIgnoreCanvasMouse({
+    desktopOccluded: false, recompositing: true, editing: false, pointerActive: false, widgetUnderCursor: true,
+  }), true)
 })
 
 test('native Dock click fallback only runs when the renderer missed a short stationary click', () => {
@@ -182,6 +185,8 @@ test('native Dock click fallback only runs when the renderer missed a short stat
     widgetId: 'dock-1',
     releaseWidgetId: 'dock-1',
     rendererActionPointerDownAt: 0,
+    canvasTopmostAtStart: true,
+    canvasTopmostAtEnd: true,
   }
   assert.equal(shouldFallbackNativeDockClick(base), true)
   assert.equal(shouldFallbackNativeDockClick({ ...base, rendererActionPointerDownAt: 1_050 }), false)
@@ -190,6 +195,13 @@ test('native Dock click fallback only runs when the renderer missed a short stat
   assert.equal(shouldFallbackNativeDockClick({ ...base, end: { x: 930, y: 802 } }), false)
   assert.equal(shouldFallbackNativeDockClick({ ...base, endedAt: 1_900 }), false)
   assert.equal(shouldFallbackNativeDockClick({ ...base, releaseWidgetId: null }), false)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, canvasTopmostAtStart: false }), false)
+  assert.equal(shouldFallbackNativeDockClick({ ...base, canvasTopmostAtEnd: false }), false)
+
+  assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 11, rootHwnd: 10, canvasHwnd: 10 }), true)
+  assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 10, rootHwnd: 10, canvasHwnd: 10 }), true)
+  assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 21, rootHwnd: 20, canvasHwnd: 10 }), false)
+  assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 0, rootHwnd: 0, canvasHwnd: 0 }), false)
 })
 
 test('existing single-instance apps prefer a visible family window for reactivation', () => {

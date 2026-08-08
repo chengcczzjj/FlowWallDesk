@@ -34,11 +34,12 @@ export function findInteractiveWidgetAtPoint(
 
 export function shouldIgnoreCanvasMouse(options: {
   desktopOccluded: boolean
+  recompositing?: boolean
   editing: boolean
   pointerActive: boolean
   widgetUnderCursor: boolean
 }): boolean {
-  if (options.desktopOccluded) return true
+  if (options.desktopOccluded || options.recompositing) return true
   if (options.editing || options.pointerActive || options.widgetUnderCursor) return false
   return true
 }

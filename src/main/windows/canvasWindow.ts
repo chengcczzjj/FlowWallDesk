@@ -5,7 +5,7 @@ import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
 import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occlusion'
 import { findInteractiveWidgetAtPoint, shouldIgnoreCanvasMouse } from '@shared/canvas-hit-test'
-import { shouldFallbackNativeDockClick } from '@shared/native-dock-click'
+import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared/native-dock-click'
 import { secureWindowNavigation } from './navigationSecurity'
 import { store } from '../store'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
@@ -29,6 +29,7 @@ function loadUser32Fns() {
     const lib = koffi.load('user32.dll')
     const enumCb = koffi.proto('__stdcall', 'EnumWindowsProc', 'int', ['intptr', 'intptr'])
     const RECT = koffi.struct('RECT', { left: 'long', top: 'long', right: 'long', bottom: 'long' })
+    const POINT = koffi.struct('POINT', { x: 'long', y: 'long' })
     u32 = {
       SetWindowPos: lib.func('__stdcall', 'SetWindowPos', 'int', [
         'intptr', 'intptr', 'int', 'int', 'int', 'int', 'uint',
@@ -49,6 +50,8 @@ function loadUser32Fns() {
       GetWindowTextA: lib.func('__stdcall', 'GetWindowTextA', 'int', ['intptr', 'void*', 'int']),
       GetWindowThreadProcessId: lib.func('__stdcall', 'GetWindowThreadProcessId', 'uint', ['intptr', 'void*']),
       GetAsyncKeyState: lib.func('__stdcall', 'GetAsyncKeyState', 'short', ['int']),
+      GetCursorPos: lib.func('__stdcall', 'GetCursorPos', 'int', [koffi.out(koffi.pointer(POINT))]),
+      WindowFromPoint: lib.func('__stdcall', 'WindowFromPoint', 'intptr', [POINT]),
     }
   } catch {
     // ignore
@@ -231,6 +234,7 @@ function applyCanvasMousePassthrough(): void {
   const rendererHoverHint = !rendererMousePassthrough && Date.now() - rendererMousePassthroughAt < 250
   const ignore = shouldIgnoreCanvasMouse({
     desktopOccluded,
+    recompositing: canvasRecompositing,
     editing: isEditing,
     pointerActive: rendererPointerActive,
     widgetUnderCursor: Boolean(cursorWidgetId) || rendererHoverHint,
@@ -245,6 +249,7 @@ function applyCanvasMousePassthrough(): void {
   logDockDiagnostic('canvas.mouse-passthrough-changed', {
     ignore,
     desktopOccluded,
+    recompositing: canvasRecompositing,
     editing: isEditing,
     pointerActive: rendererPointerActive,
     cursorWidgetId,
@@ -252,11 +257,52 @@ function applyCanvasMousePassthrough(): void {
   })
 }
 
+interface NativeCursorSurface {
+  hitHwnd: number
+  rootHwnd: number
+  canvasHwnd: number
+  canvasTopmost: boolean
+  reason: string
+}
+
+function inspectNativeCursorSurface(): NativeCursorSurface {
+  loadUser32Fns()
+  const unavailable = (reason: string): NativeCursorSurface => ({
+    hitHwnd: 0,
+    rootHwnd: 0,
+    canvasHwnd: 0,
+    canvasTopmost: false,
+    reason,
+  })
+  if (!u32) return unavailable('native-api-unavailable')
+  const win = getCanvasWindow()
+  if (!win) return unavailable('canvas-unavailable')
+
+  try {
+    const point = { x: 0, y: 0 }
+    if (!u32.GetCursorPos(point)) return unavailable('cursor-unavailable')
+    const hitHwnd = Number(u32.WindowFromPoint(point))
+    const rootHwnd = hitHwnd ? Number(u32.GetAncestor(hitHwnd, GA_ROOT)) : 0
+    const canvasHwnd = Number(win.getNativeWindowHandle().readBigInt64LE(0))
+    return {
+      hitHwnd,
+      rootHwnd,
+      canvasHwnd,
+      canvasTopmost: isNativeCanvasSurfaceHit({ hitHwnd, rootHwnd, canvasHwnd }),
+      reason: hitHwnd ? 'window-from-point' : 'no-window-at-cursor',
+    }
+  } catch {
+    return unavailable('surface-check-failed')
+  }
+}
+
 function refreshCanvasCursorHitTest(): void {
   const display = screen.getPrimaryDisplay()
   const cursor = screen.getCursorScreenPoint()
   const widgets = store.get('widgets')
   const widget = findInteractiveWidgetAtPoint(cursor, display.bounds, widgets)
+  const dockSurface = widget?.type === 'desktop-icons-dock' ? inspectNativeCursorSurface() : null
+  const previousDockSurface = lastNativeDockSurfaceSample
   const nextWidgetId = widget?.id ?? null
   if (nextWidgetId !== cursorWidgetId) {
     cursorWidgetId = nextWidgetId
@@ -284,19 +330,40 @@ function refreshCanvasCursorHitTest(): void {
 
     if (currentlyDown && !nativeLeftButtonDown) {
       nativeDockGesture = !desktopOccluded && !isEditing && widget?.type === 'desktop-icons-dock'
-        ? { widgetId: widget.id, startedAt: now, start: cursor }
+        ? {
+            widgetId: widget.id,
+            startedAt: now,
+            start: cursor,
+            canvasTopmostAtStart: Boolean(dockSurface?.canvasTopmost),
+            startSurface: dockSurface,
+          }
         : null
     } else if (!currentlyDown && nativeLeftButtonDown) {
-      finishNativeDockGesture(cursor, nextWidgetId, now)
+      finishNativeDockGesture(cursor, nextWidgetId, now, dockSurface)
     } else if (!currentlyDown && pressedSinceLastSample && !nativeLeftButtonDown) {
       // A complete fast click can happen between two polling samples.
       if (!desktopOccluded && !isEditing && widget?.type === 'desktop-icons-dock') {
-        nativeDockGesture = { widgetId: widget.id, startedAt: now, start: cursor }
-        finishNativeDockGesture(cursor, widget.id, now)
+        const priorSurfaceMatches = Boolean(
+          previousDockSurface &&
+          previousDockSurface.widgetId === widget.id &&
+          now - previousDockSurface.sampledAt <= 100 &&
+          previousDockSurface.surface.canvasTopmost
+        )
+        nativeDockGesture = {
+          widgetId: widget.id,
+          startedAt: now,
+          start: cursor,
+          canvasTopmostAtStart: priorSurfaceMatches,
+          startSurface: previousDockSurface?.surface ?? null,
+        }
+        finishNativeDockGesture(cursor, widget.id, now, dockSurface)
       }
     }
     nativeLeftButtonDown = currentlyDown
   }
+  lastNativeDockSurfaceSample = dockSurface && widget
+    ? { widgetId: widget.id, sampledAt: Date.now(), surface: dockSurface }
+    : null
   applyCanvasMousePassthrough()
 }
 
@@ -308,6 +375,7 @@ function cancelCanvasZOrderRefresh(): void {
   }
   const win = getCanvasWindow()
   if (win) win.setAlwaysOnTop(false)
+  canvasRecompositing = false
 }
 
 function settleCanvasOnDesktop(win: BrowserWindow): void {
@@ -350,7 +418,19 @@ let nativeMousePassthrough: boolean | null = null
 let cursorWidgetId: string | null = null
 let nativeLeftButtonDown = false
 let lastRendererActionPointerDownAt = 0
-let nativeDockGesture: { widgetId: string; startedAt: number; start: { x: number; y: number } } | null = null
+let canvasRecompositing = false
+let nativeDockGesture: {
+  widgetId: string
+  startedAt: number
+  start: { x: number; y: number }
+  canvasTopmostAtStart: boolean
+  startSurface: NativeCursorSurface | null
+} | null = null
+let lastNativeDockSurfaceSample: {
+  widgetId: string
+  sampledAt: number
+  surface: NativeCursorSurface
+} | null = null
 let canvasHealthTimer: ReturnType<typeof setInterval> | null = null
 let cursorHitTestTimer: ReturnType<typeof setInterval> | null = null
 let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -361,17 +441,19 @@ function finishNativeDockGesture(
   cursor: { x: number; y: number },
   releaseWidgetId: string | null,
   endedAt: number,
+  endSurface: NativeCursorSurface | null = inspectNativeCursorSurface(),
 ): void {
   const gesture = nativeDockGesture
   nativeDockGesture = null
   if (!gesture) return
 
-  const fallback = !desktopOccluded && !isEditing && shouldFallbackNativeDockClick({
+  const fallback = !desktopOccluded && !isEditing && !canvasRecompositing && shouldFallbackNativeDockClick({
     ...gesture,
     endedAt,
     end: cursor,
     releaseWidgetId,
     rendererActionPointerDownAt: lastRendererActionPointerDownAt,
+    canvasTopmostAtEnd: Boolean(endSurface?.canvasTopmost),
   })
   logDockDiagnostic('canvas.native-dock-click-decision', {
     widgetId: gesture.widgetId,
@@ -380,6 +462,11 @@ function finishNativeDockGesture(
     movementPx: Math.round(Math.hypot(cursor.x - gesture.start.x, cursor.y - gesture.start.y)),
     rendererAckAgeMs: endedAt - lastRendererActionPointerDownAt,
     releaseWidgetId,
+    canvasTopmostAtStart: gesture.canvasTopmostAtStart,
+    canvasTopmostAtEnd: Boolean(endSurface?.canvasTopmost),
+    startSurface: gesture.startSurface,
+    endSurface,
+    recompositing: canvasRecompositing,
   })
   if (!fallback) return
 
@@ -467,7 +554,9 @@ export function createCanvasWindow(): BrowserWindow {
   nativeMousePassthrough = null
   cursorWidgetId = null
   nativeLeftButtonDown = false
+  canvasRecompositing = true
   nativeDockGesture = null
+  lastNativeDockSurfaceSample = null
   lastRendererActionPointerDownAt = 0
   applyCanvasMousePassthrough()
   registerCanvasDisplayListener()
@@ -505,6 +594,8 @@ export function createCanvasWindow(): BrowserWindow {
       sendToBottom(canvasWindow)
       // Restore visibility after window is behind other windows
       canvasWindow.setOpacity(1)
+      canvasRecompositing = false
+      applyCanvasMousePassthrough()
 
       // Z-order 只在明确的窗口生命周期边界重建。反复 SetWindowPos
       // 会让 Windows/Chromium 在长时间运行后丢失透明窗口的命中状态。
@@ -536,7 +627,9 @@ export function createCanvasWindow(): BrowserWindow {
     nativeMousePassthrough = null
     cursorWidgetId = null
     nativeLeftButtonDown = false
+    canvasRecompositing = false
     nativeDockGesture = null
+    lastNativeDockSurfaceSample = null
     lastRendererActionPointerDownAt = 0
     canvasWindow = null
   })
@@ -596,6 +689,7 @@ function setupEditBlurFocus(): void {
 /** 编辑模式：拉到最前 + 可焦点 + 不穿透；可选最小化其他窗口 */
 export function setCanvasEditMode(on: boolean): void {
   if (!canvasWindow || canvasWindow.isDestroyed()) return
+  cancelCanvasZOrderRefresh()
   isEditing = on
   if (on) {
     // 最小化其他所有普通窗口，露出桌面组件
@@ -690,6 +784,10 @@ export function refreshCanvasZOrder(): void {
 
   const generation = ++zOrderRefreshGeneration
   if (zOrderRefreshTimer) clearTimeout(zOrderRefreshTimer)
+  canvasRecompositing = true
+  nativeDockGesture = null
+  lastNativeDockSurfaceSample = null
+  applyCanvasMousePassthrough()
   // Re-entering the top-level compositor briefly repairs transparent-window input
   // after Chromium/Windows marks the canvas as fully occluded.
   win.setAlwaysOnTop(true, 'screen-saver')
@@ -698,9 +796,18 @@ export function refreshCanvasZOrder(): void {
     zOrderRefreshTimer = null
     if (generation !== zOrderRefreshGeneration) return
     const current = getCanvasWindow()
-    if (!current || desktopOccluded || isEditing) return
+    if (!current) {
+      canvasRecompositing = false
+      return
+    }
+    if (desktopOccluded || isEditing) {
+      canvasRecompositing = false
+      applyCanvasMousePassthrough()
+      return
+    }
     current.setAlwaysOnTop(false)
     settleCanvasOnDesktop(current)
+    canvasRecompositing = false
     applyCanvasMousePassthrough()
     logDockDiagnostic('canvas.z-order-refresh-completed')
   }, 150)

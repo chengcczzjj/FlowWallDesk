@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-08 09:50] 发布 1.0.6 Dock 前台误触安全修复版
+
+**变更摘要**: 修复点击覆盖 Dock 的其他前台窗口时错误闪动 Dock 并启动下方应用的严重输入穿透问题，同时发布低占用更新安装改进。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts` / `src/shared/native-dock-click.ts`: 原生左键兜底在按下和释放两端校验 `WindowFromPoint` 根 HWND，只允许 Canvas 真实位于光标最上层时补偿点击。
+- `src/shared/canvas-hit-test.ts`: Canvas 临时置顶重组期间强制全鼠标穿透，避免 150ms 合成修复窗口截获前台输入。
+- `src/main/services/update-service.ts` / `electron-builder.yml`: 更新安装器以低于正常优先级启动，发布包仅收录生产输出目录。
+- `package.json` / `package-lock.json` / `README.md` / `tests/`: 版本和发布契约同步升级到 1.0.6，并覆盖普通点击、极快点击和前台窗口隔离。
+
+**遇到的问题**:
+- 1.0.5 的物理左键兜底只按屏幕坐标命中 Dock，前台窗口导致渲染层无 `pointerdown` 时反而会触发补偿 → 增加最上层 HWND 双端门禁，并在无法确认归属时安全拒绝。
+
+**Git Commit**: 已提交 — `fix(release): publish LingyueDesk 1.0.6`
+
+---
+
 ## [2026-08-08 00:24] 收紧发布包输入并降低更新安装占用
 
 **变更摘要**: 将 Windows 更新安装器改为显式低优先级启动，补齐安装中状态与独立诊断日志，并限制发布包只收录实际生产输出目录。
