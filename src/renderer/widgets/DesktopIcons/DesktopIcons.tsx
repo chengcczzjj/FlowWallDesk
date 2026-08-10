@@ -440,6 +440,25 @@ function DesktopIconsWidget({
     [activateItem, widget.id]
   )
 
+  const handleItemClick = useCallback(
+    (item: DesktopIconItem) => {
+      if (variant === 'dock') {
+        requestActivateItem(item)
+        return
+      }
+
+      const now = Date.now()
+      const lastClick = lastClickRef.current
+      if (lastClick?.id === item.id && now - lastClick.at <= DOUBLE_CLICK_MS) {
+        lastClickRef.current = null
+        requestActivateItem(item)
+      } else {
+        lastClickRef.current = { id: item.id, at: now }
+      }
+    },
+    [requestActivateItem, variant]
+  )
+
   const activateDockSystemAction = useCallback(
     (action: DockSystemActionId) => {
       if (editing) return
@@ -605,18 +624,7 @@ function DesktopIconsWidget({
           willActivate: !drag.cancelled && !drag.moved && drag.variant === 'dock',
         })
         if (!drag.cancelled && !drag.moved) {
-          if (drag.variant === 'dock') {
-            requestActivateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
-          } else {
-            const now = Date.now()
-            const lastClick = lastClickRef.current
-            if (lastClick?.id === item.id && now - lastClick.at <= DOUBLE_CLICK_MS) {
-              lastClickRef.current = null
-              requestActivateItem(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
-            } else {
-              lastClickRef.current = { id: item.id, at: now }
-            }
-          }
+          handleItemClick(finalDraft.find((candidate) => candidate.id === item.id) ?? item)
         }
         return
       }
@@ -634,7 +642,7 @@ function DesktopIconsWidget({
       await saveItems(finalDraft)
       suppressActivationRef.current = { id: item.id, until: Date.now() + 520 }
     },
-    [requestActivateItem, saveItems, setDraft, widget.id]
+    [handleItemClick, saveItems, setDraft, widget.id]
   )
 
   const handleIconPointerCancel = useCallback(
@@ -735,6 +743,7 @@ function DesktopIconsWidget({
               onPointerUp={handleIconPointerUp}
               onPointerCancel={handleIconPointerCancel}
               onContextMenu={handleIconContextMenu}
+              onItemClick={handleItemClick}
               onActivate={requestActivateItem}
             />
             {storageHideLabels && hoveredStorageId && !draggingId && storageLayout && (
@@ -770,6 +779,7 @@ function StorageSurface({
   onPointerUp,
   onPointerCancel,
   onContextMenu,
+  onItemClick,
   onActivate,
 }: {
   refEl: React.RefObject<HTMLDivElement | null>
@@ -788,6 +798,7 @@ function StorageSurface({
   onPointerUp: (item: DesktopIconItem, event: React.PointerEvent<HTMLElement>) => void
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void
   onContextMenu: (item: DesktopIconItem, event: React.MouseEvent<HTMLElement>) => void
+  onItemClick: (item: DesktopIconItem) => void
   onActivate: (item: DesktopIconItem) => void
 }) {
   return (
@@ -842,6 +853,12 @@ function StorageSurface({
                 event.preventDefault()
                 event.stopPropagation()
                 onActivate(item)
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                if (event.detail !== 0 || event.currentTarget.dataset.nativeIconClick !== 'true') return
+                onItemClick(item)
               }}
               onContextMenu={(event) => onContextMenu(item, event)}
               initial={{ opacity: 0, scale: 0.82 }}

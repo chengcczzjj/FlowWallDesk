@@ -1,5 +1,12 @@
 import type { WidgetInstance } from './types'
 
+const DESKTOP_ICON_WIDGET_TYPES = new Set([
+  'desktop-icons-box',
+  'desktop-icons-horizontal',
+  'desktop-icons-adaptive',
+  'desktop-icons-dock',
+])
+
 export interface CanvasPoint {
   x: number
   y: number
@@ -10,6 +17,10 @@ export interface CanvasBounds {
   y: number
   width: number
   height: number
+}
+
+export function isDesktopIconWidgetType(type: string): boolean {
+  return DESKTOP_ICON_WIDGET_TYPES.has(type)
 }
 
 export function findInteractiveWidgetAtPoint(

@@ -462,7 +462,7 @@ export function Canvas() {
         widget?.dataset.widget === event.widgetId &&
         normalPointerAgeMs > 80
       )
-      window.canvasBridge?.logDiagnostic('native-dock-click-received', {
+      window.canvasBridge?.logDiagnostic('native-icon-click-received', {
         widgetId: event.widgetId,
         clientX: Math.round(clientX),
         clientY: Math.round(clientY),
@@ -471,7 +471,14 @@ export function Canvas() {
         normalPointerAgeMs,
         activated: valid,
       })
-      if (valid && action) action.click()
+      if (valid && action) {
+        action.dataset.nativeIconClick = 'true'
+        try {
+          action.click()
+        } finally {
+          delete action.dataset.nativeIconClick
+        }
+      }
     })
   }, [])
 

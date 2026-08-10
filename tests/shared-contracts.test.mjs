@@ -24,7 +24,11 @@ import {
   DOCK_BOUNCE_TIMES,
   getDockBounceKeyframes,
 } from '../src/shared/dock-motion.ts'
-import { findInteractiveWidgetAtPoint, shouldIgnoreCanvasMouse } from '../src/shared/canvas-hit-test.ts'
+import {
+  findInteractiveWidgetAtPoint,
+  isDesktopIconWidgetType,
+  shouldIgnoreCanvasMouse,
+} from '../src/shared/canvas-hit-test.ts'
 import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
 import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '../src/shared/native-dock-click.ts'
 
@@ -155,7 +159,7 @@ test('canvas mouse passthrough stays locked until an active pointer gesture ends
   assert.equal(gate.shouldIgnoreMouse(false, true), false)
 })
 
-test('native canvas hit testing keeps Dock input alive without renderer mousemove events', () => {
+test('native canvas hit testing keeps desktop icon widgets alive without renderer mousemove events', () => {
   const dock = {
     id: 'dock-1', type: 'desktop-icons-dock', x: 800, y: 900, width: 600, height: 88, enabled: true, config: {},
   }
@@ -174,9 +178,14 @@ test('native canvas hit testing keeps Dock input alive without renderer mousemov
   assert.equal(shouldIgnoreCanvasMouse({
     desktopOccluded: false, recompositing: true, editing: false, pointerActive: false, widgetUnderCursor: true,
   }), true)
+  assert.equal(isDesktopIconWidgetType('desktop-icons-box'), true)
+  assert.equal(isDesktopIconWidgetType('desktop-icons-horizontal'), true)
+  assert.equal(isDesktopIconWidgetType('desktop-icons-adaptive'), true)
+  assert.equal(isDesktopIconWidgetType('desktop-icons-dock'), true)
+  assert.equal(isDesktopIconWidgetType('clock'), false)
 })
 
-test('native Dock click fallback only runs when the renderer missed a short stationary click', () => {
+test('native desktop icon click fallback only runs when the renderer missed a short stationary click', () => {
   const base = {
     startedAt: 1_000,
     endedAt: 1_120,
@@ -274,12 +283,14 @@ test('new widgets continue an aligned group instead of defaulting to the upper-l
   assert.ok(groupedPlacement.y >= existing[0].y + existing[0].height + 16)
 })
 
-test('Dock launch motion uses a slower damped ballistic curve', () => {
+test('Dock launch motion uses equal-height constant-speed bounces', () => {
   const downward = getDockBounceKeyframes(true)
   const upward = getDockBounceKeyframes(false)
-  assert.ok(DOCK_BOUNCE_DURATION_SECONDS >= 1.2)
+  assert.ok(DOCK_BOUNCE_DURATION_SECONDS >= 0.8)
   assert.equal(DOCK_BOUNCE_TIMES.length, downward.length)
   assert.deepEqual(upward, downward.map((value) => value === 0 ? 0 : -value))
-  assert.ok(Math.max(...downward) >= 70)
+  assert.deepEqual([...new Set(downward)], [0, 58])
+  const timeSteps = DOCK_BOUNCE_TIMES.slice(1).map((time, index) => time - DOCK_BOUNCE_TIMES[index])
+  assert.ok(timeSteps.every((step) => Math.abs(step - timeSteps[0]) < 1e-9))
   assert.equal(downward.at(-1), 0)
 })

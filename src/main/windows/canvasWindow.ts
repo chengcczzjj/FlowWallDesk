@@ -4,7 +4,11 @@ import { is } from '@electron-toolkit/utils'
 import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
 import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occlusion'
-import { findInteractiveWidgetAtPoint, shouldIgnoreCanvasMouse } from '@shared/canvas-hit-test'
+import {
+  findInteractiveWidgetAtPoint,
+  isDesktopIconWidgetType,
+  shouldIgnoreCanvasMouse,
+} from '@shared/canvas-hit-test'
 import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared/native-dock-click'
 import { secureWindowNavigation } from './navigationSecurity'
 import { store } from '../store'
@@ -301,8 +305,8 @@ function refreshCanvasCursorHitTest(): void {
   const cursor = screen.getCursorScreenPoint()
   const widgets = store.get('widgets')
   const widget = findInteractiveWidgetAtPoint(cursor, display.bounds, widgets)
-  const dockSurface = widget?.type === 'desktop-icons-dock' ? inspectNativeCursorSurface() : null
-  const previousDockSurface = lastNativeDockSurfaceSample
+  const iconSurface = widget && isDesktopIconWidgetType(widget.type) ? inspectNativeCursorSurface() : null
+  const previousIconSurface = lastNativeIconSurfaceSample
   const nextWidgetId = widget?.id ?? null
   if (nextWidgetId !== cursorWidgetId) {
     cursorWidgetId = nextWidgetId
@@ -329,40 +333,40 @@ function refreshCanvasCursorHitTest(): void {
     }
 
     if (currentlyDown && !nativeLeftButtonDown) {
-      nativeDockGesture = !desktopOccluded && !isEditing && widget?.type === 'desktop-icons-dock'
+      nativeIconGesture = !desktopOccluded && !isEditing && widget && isDesktopIconWidgetType(widget.type)
         ? {
             widgetId: widget.id,
             startedAt: now,
             start: cursor,
-            canvasTopmostAtStart: Boolean(dockSurface?.canvasTopmost),
-            startSurface: dockSurface,
+            canvasTopmostAtStart: Boolean(iconSurface?.canvasTopmost),
+            startSurface: iconSurface,
           }
         : null
     } else if (!currentlyDown && nativeLeftButtonDown) {
-      finishNativeDockGesture(cursor, nextWidgetId, now, dockSurface)
+      finishNativeIconGesture(cursor, nextWidgetId, now, iconSurface)
     } else if (!currentlyDown && pressedSinceLastSample && !nativeLeftButtonDown) {
       // A complete fast click can happen between two polling samples.
-      if (!desktopOccluded && !isEditing && widget?.type === 'desktop-icons-dock') {
+      if (!desktopOccluded && !isEditing && widget && isDesktopIconWidgetType(widget.type)) {
         const priorSurfaceMatches = Boolean(
-          previousDockSurface &&
-          previousDockSurface.widgetId === widget.id &&
-          now - previousDockSurface.sampledAt <= 100 &&
-          previousDockSurface.surface.canvasTopmost
+          previousIconSurface &&
+          previousIconSurface.widgetId === widget.id &&
+          now - previousIconSurface.sampledAt <= 100 &&
+          previousIconSurface.surface.canvasTopmost
         )
-        nativeDockGesture = {
+        nativeIconGesture = {
           widgetId: widget.id,
           startedAt: now,
           start: cursor,
           canvasTopmostAtStart: priorSurfaceMatches,
-          startSurface: previousDockSurface?.surface ?? null,
+          startSurface: previousIconSurface?.surface ?? null,
         }
-        finishNativeDockGesture(cursor, widget.id, now, dockSurface)
+        finishNativeIconGesture(cursor, widget.id, now, iconSurface)
       }
     }
     nativeLeftButtonDown = currentlyDown
   }
-  lastNativeDockSurfaceSample = dockSurface && widget
-    ? { widgetId: widget.id, sampledAt: Date.now(), surface: dockSurface }
+  lastNativeIconSurfaceSample = iconSurface && widget
+    ? { widgetId: widget.id, sampledAt: Date.now(), surface: iconSurface }
     : null
   applyCanvasMousePassthrough()
 }
@@ -385,7 +389,7 @@ function settleCanvasOnDesktop(win: BrowserWindow): void {
 
 function commitDesktopOcclusion(occluded: boolean): void {
   desktopOccluded = occluded
-  nativeDockGesture = null
+  nativeIconGesture = null
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
@@ -419,14 +423,14 @@ let cursorWidgetId: string | null = null
 let nativeLeftButtonDown = false
 let lastRendererActionPointerDownAt = 0
 let canvasRecompositing = false
-let nativeDockGesture: {
+let nativeIconGesture: {
   widgetId: string
   startedAt: number
   start: { x: number; y: number }
   canvasTopmostAtStart: boolean
   startSurface: NativeCursorSurface | null
 } | null = null
-let lastNativeDockSurfaceSample: {
+let lastNativeIconSurfaceSample: {
   widgetId: string
   sampledAt: number
   surface: NativeCursorSurface
@@ -437,14 +441,14 @@ let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let zOrderRefreshGeneration = 0
 let boundsListenerRegistered = false
 
-function finishNativeDockGesture(
+function finishNativeIconGesture(
   cursor: { x: number; y: number },
   releaseWidgetId: string | null,
   endedAt: number,
   endSurface: NativeCursorSurface | null = inspectNativeCursorSurface(),
 ): void {
-  const gesture = nativeDockGesture
-  nativeDockGesture = null
+  const gesture = nativeIconGesture
+  nativeIconGesture = null
   if (!gesture) return
 
   const fallback = !desktopOccluded && !isEditing && !canvasRecompositing && shouldFallbackNativeDockClick({
@@ -455,7 +459,7 @@ function finishNativeDockGesture(
     rendererActionPointerDownAt: lastRendererActionPointerDownAt,
     canvasTopmostAtEnd: Boolean(endSurface?.canvasTopmost),
   })
-  logDockDiagnostic('canvas.native-dock-click-decision', {
+  logDockDiagnostic('canvas.native-icon-click-decision', {
     widgetId: gesture.widgetId,
     fallback,
     durationMs: endedAt - gesture.startedAt,
@@ -478,7 +482,7 @@ function finishNativeDockGesture(
     screenY: cursor.y,
     detectedAt: endedAt,
   })
-  logDockDiagnostic('canvas.native-dock-click-sent', {
+  logDockDiagnostic('canvas.native-icon-click-sent', {
     widgetId: gesture.widgetId,
     cursor,
   })
@@ -555,8 +559,8 @@ export function createCanvasWindow(): BrowserWindow {
   cursorWidgetId = null
   nativeLeftButtonDown = false
   canvasRecompositing = true
-  nativeDockGesture = null
-  lastNativeDockSurfaceSample = null
+  nativeIconGesture = null
+  lastNativeIconSurfaceSample = null
   lastRendererActionPointerDownAt = 0
   applyCanvasMousePassthrough()
   registerCanvasDisplayListener()
@@ -628,8 +632,8 @@ export function createCanvasWindow(): BrowserWindow {
     cursorWidgetId = null
     nativeLeftButtonDown = false
     canvasRecompositing = false
-    nativeDockGesture = null
-    lastNativeDockSurfaceSample = null
+    nativeIconGesture = null
+    lastNativeIconSurfaceSample = null
     lastRendererActionPointerDownAt = 0
     canvasWindow = null
   })
@@ -785,8 +789,8 @@ export function refreshCanvasZOrder(): void {
   const generation = ++zOrderRefreshGeneration
   if (zOrderRefreshTimer) clearTimeout(zOrderRefreshTimer)
   canvasRecompositing = true
-  nativeDockGesture = null
-  lastNativeDockSurfaceSample = null
+  nativeIconGesture = null
+  lastNativeIconSurfaceSample = null
   applyCanvasMousePassthrough()
   // Re-entering the top-level compositor briefly repairs transparent-window input
   // after Chromium/Windows marks the canvas as fully occluded.
