@@ -90,6 +90,8 @@ export interface DesktopIconLaunchResult {
   requestId?: string
   method?: 'activate-existing' | 'external-url' | 'shortcut' | 'target-spawn' | 'target-shell' | 'fallback-shell'
   activatedExisting?: boolean
+  readiness?: 'window-ready' | 'launch-accepted' | 'timed-out' | 'unavailable'
+  readyElapsedMs?: number
 }
 
 export type DesktopIconContextMenuAction = 'open' | 'show-in-folder' | 'restore' | 'remove'

@@ -9,6 +9,7 @@ import { FrostedGlassBackground } from '../FrostedGlassBackground'
 import { toRendererPublicUrl } from '@shared/asset-url'
 import {
   DOCK_BOUNCE_DURATION_SECONDS,
+  DOCK_BOUNCE_MIN_VISIBLE_MS,
   DOCK_BOUNCE_RESET_MS,
   DOCK_BOUNCE_TIMES,
   getDockBounceKeyframes,
@@ -187,6 +188,7 @@ function DesktopIconsWidget({
   const lastClickRef = useRef<{ id: string; at: number } | null>(null)
   const lastActivationRef = useRef<{ id: string; at: number } | null>(null)
   const suppressActivationRef = useRef<{ id: string; until: number } | null>(null)
+  const pendingLaunchIdsRef = useRef<Set<string>>(new Set())
   const refreshedIdsRef = useRef<Set<string>>(new Set())
   const [containerSize, setContainerSize] = useState({ width: widget.width || 360, height: widget.height || 260 })
   const [dropActive, setDropActive] = useState(false)
@@ -364,6 +366,7 @@ function DesktopIconsWidget({
   const activateItem = useCallback(
     (item: DesktopIconItem) => {
       if (editing) return
+      if (variant === 'dock') pendingLaunchIdsRef.current.add(item.id)
       const requestId = crypto.randomUUID()
       const startedAt = performance.now()
       window.canvasBridge.logDiagnostic('dock-launch-dispatched', {
@@ -373,8 +376,8 @@ function DesktopIconsWidget({
         itemName: item.name,
         variant,
       })
-      const launch = () => {
-        void window.canvasBridge.launchDesktopIcon(widget.id, item, requestId).then((result) => {
+      const launch = () => (
+        window.canvasBridge.launchDesktopIcon(widget.id, item, requestId).then((result) => {
           window.canvasBridge.logDiagnostic('dock-launch-result', {
             requestId,
             widgetId: widget.id,
@@ -382,6 +385,8 @@ function DesktopIconsWidget({
             ok: result.ok,
             method: result.method ?? null,
             activatedExisting: result.activatedExisting ?? false,
+            readiness: result.readiness ?? null,
+            readyElapsedMs: result.readyElapsedMs ?? null,
             error: result.error ?? null,
             elapsedMs: Math.round(performance.now() - startedAt),
           })
@@ -395,14 +400,19 @@ function DesktopIconsWidget({
             elapsedMs: Math.round(performance.now() - startedAt),
           })
         })
-      }
+      )
       if (variant === 'dock') {
         setBouncingId(item.id)
-        launch()
-        window.setTimeout(() => setBouncingId(null), DOCK_BOUNCE_RESET_MS)
+        void launch().finally(() => {
+          const remainingMs = Math.max(0, DOCK_BOUNCE_MIN_VISIBLE_MS - (performance.now() - startedAt))
+          window.setTimeout(() => {
+            pendingLaunchIdsRef.current.delete(item.id)
+            setBouncingId((current) => current === item.id ? null : current)
+          }, remainingMs)
+        })
       } else {
         setBouncingId(item.id)
-        launch()
+        void launch()
         window.setTimeout(() => setBouncingId(null), 500)
       }
     },
@@ -412,6 +422,14 @@ function DesktopIconsWidget({
   const requestActivateItem = useCallback(
     (item: DesktopIconItem) => {
       const now = Date.now()
+      if (pendingLaunchIdsRef.current.has(item.id)) {
+        window.canvasBridge.logDiagnostic('dock-launch-suppressed', {
+          widgetId: widget.id,
+          itemId: item.id,
+          reason: 'pending',
+        })
+        return
+      }
       const suppressed = suppressActivationRef.current
       if (suppressed && suppressed.id === item.id && now <= suppressed.until) {
         window.canvasBridge.logDiagnostic('dock-launch-suppressed', {
@@ -1439,8 +1457,14 @@ function DockIconButton({
         layout: { type: 'spring', stiffness: 520, damping: 32 },
         scale: { type: 'spring', stiffness: 420, damping: 26 },
         y: bouncing
-          ? { duration: DOCK_BOUNCE_DURATION_SECONDS, times: DOCK_BOUNCE_TIMES, ease: 'linear' }
-          : { type: 'spring', stiffness: 520, damping: 32 },
+          ? {
+              duration: DOCK_BOUNCE_DURATION_SECONDS,
+              times: DOCK_BOUNCE_TIMES,
+              ease: 'linear',
+              repeat: Infinity,
+              repeatType: 'loop',
+            }
+          : { duration: 0.12, ease: 'linear' },
       }}
       style={{
         ...iconButtonBase,

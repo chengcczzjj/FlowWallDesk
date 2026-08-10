@@ -21,9 +21,11 @@ import { normalizeStockSymbols } from '../src/shared/stock-symbols.ts'
 import { findSmartWidgetPlacement } from '../src/shared/widget-placement.ts'
 import {
   DOCK_BOUNCE_DURATION_SECONDS,
+  DOCK_BOUNCE_MIN_VISIBLE_MS,
   DOCK_BOUNCE_TIMES,
   getDockBounceKeyframes,
 } from '../src/shared/dock-motion.ts'
+import { createShowDesktopInputEvents } from '../src/main/windows/windowsDesktop.ts'
 import {
   findInteractiveWidgetAtPoint,
   isDesktopIconWidgetType,
@@ -213,6 +215,18 @@ test('native desktop icon click fallback only runs when the renderer missed a sh
   assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 0, rootHwnd: 0, canvasHwnd: 0 }), false)
 })
 
+test('show desktop emits a complete Win+D key sequence', () => {
+  assert.deepEqual(
+    createShowDesktopInputEvents().map((event) => [event.u.ki.wVk, event.u.ki.dwFlags]),
+    [
+      [0x5b, 0],
+      [0x44, 0],
+      [0x44, 0x0002],
+      [0x5b, 0x0002],
+    ],
+  )
+})
+
 test('existing single-instance apps prefer a visible family window for reactivation', () => {
   const candidates = [
     {
@@ -292,5 +306,6 @@ test('Dock launch motion uses equal-height constant-speed bounces', () => {
   assert.deepEqual([...new Set(downward)], [0, 58])
   const timeSteps = DOCK_BOUNCE_TIMES.slice(1).map((time, index) => time - DOCK_BOUNCE_TIMES[index])
   assert.ok(timeSteps.every((step) => Math.abs(step - timeSteps[0]) < 1e-9))
+  assert.equal(DOCK_BOUNCE_MIN_VISIBLE_MS, 320)
   assert.equal(downward.at(-1), 0)
 })

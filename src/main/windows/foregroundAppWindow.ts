@@ -36,6 +36,11 @@ export interface ForegroundActivationResult {
   error?: string
 }
 
+export interface AppWindowReadinessResult extends ForegroundActivationResult {
+  waitedMs: number
+  timedOut: boolean
+}
+
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 const GW_OWNER = 4
 const GWL_EXSTYLE = -20
@@ -204,5 +209,26 @@ export function activateExistingAppWindow(targetPath: string): ForegroundActivat
       activated: false,
       error: error instanceof Error ? error.message : String(error),
     }
+  }
+}
+
+export async function waitForAppWindow(
+  targetPath: string,
+  timeoutMs = 15_000,
+  pollIntervalMs = 250,
+): Promise<AppWindowReadinessResult> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt <= timeoutMs) {
+    const result = activateExistingAppWindow(targetPath)
+    if (result.found || result.error) {
+      return { ...result, waitedMs: Date.now() - startedAt, timedOut: false }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
+  return {
+    found: false,
+    activated: false,
+    waitedMs: Date.now() - startedAt,
+    timedOut: true,
   }
 }

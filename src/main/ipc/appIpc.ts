@@ -3,11 +3,12 @@ import { spawn } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
 import { getMainWindow, createMainWindow } from '../windows/mainWindow'
 import type { MainWindowNavTarget } from '../windows/mainWindow'
-import { refreshCanvasZOrder } from '../windows/canvasWindow'
 import { getLocationPrivacySettings, requestPreciseLocationAuthorization, setPreciseLocationEnabled, validatePreciseLocationEnabled } from '../memory/tools/definitions/user-location'
 import { assertTrustedIpcSender } from './ipcSecurity'
 import { getLaunchAtLoginStatus, setLaunchAtLoginEnabled } from '../services/launch-at-login-service'
 import { checkForAppUpdates, downloadAppUpdate, getAppUpdateStatus, installDownloadedUpdate } from '../services/update-service'
+import { toggleWindowsDesktop } from '../windows/windowsDesktop'
+import { logDockDiagnostic } from '../runtime/diagnosticLog'
 
 function showMainWindow(target?: MainWindowNavTarget): void {
   const win = getMainWindow() ?? createMainWindow(target)
@@ -121,32 +122,9 @@ export function registerAppIpc(): void {
   })
   ipcMain.handle(IPC.APP_SHOW_DESKTOP, (event) => {
     assertTrustedIpcSender(event, ['main', 'canvas'])
-    // 使用 Windows 原生 ToggleDesktop 实现切换：第一次返回桌面，第二次恢复窗口
-    if (process.platform === 'win32') {
-      try {
-        const child = spawn('powershell', [
-          '-NoProfile',
-          '-Command',
-          '(New-Object -ComObject "Shell.Application").ToggleDesktop()',
-        ], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
-        })
-        child.unref()
-      } catch { /* fall through */ }
-    }
-    const main = getMainWindow()
-    if (main && !main.isDestroyed()) {
-      if (main.isMinimized()) {
-        main.restore()
-        main.focus()
-      } else {
-        main.minimize()
-      }
-    }
-    refreshCanvasZOrder()
-    return true
+    const ok = toggleWindowsDesktop()
+    logDockDiagnostic('desktop.toggle-requested', { ok, method: 'send-input-win-d' })
+    return ok
   })
 
   ipcMain.on(IPC.WIN_MINIMIZE, (e) => {

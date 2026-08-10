@@ -1,5 +1,6 @@
 export const DOCK_BOUNCE_DURATION_SECONDS = 0.96
 export const DOCK_BOUNCE_RESET_MS = 1_050
+export const DOCK_BOUNCE_MIN_VISIBLE_MS = 320
 export const DOCK_BOUNCE_TIMES = [0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1]
 
 export function getDockBounceKeyframes(flipped: boolean): number[] {
