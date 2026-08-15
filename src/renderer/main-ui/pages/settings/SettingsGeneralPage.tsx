@@ -13,8 +13,11 @@ import {
   Globe,
   ExternalLink,
   MapPin,
+  RefreshCw,
+  Download,
+  RotateCcw,
 } from 'lucide-react'
-import type { ModelProfile, ModelProvider } from '@shared/types'
+import type { AppUpdateStatus, ModelProfile, ModelProvider } from '@shared/types'
 import { DEEPSEEK_API_BASE_URL, DEEPSEEK_LATEST_MODEL } from '@shared/model-defaults'
 import './settings.css'
 
@@ -22,6 +25,16 @@ const PROVIDER_LABELS: Record<ModelProvider, string> = {
   'openai-compatible': 'OpenAI 兼容',
   'deepseek': 'DeepSeek',
   'google': 'Google Gemini',
+}
+
+function formatUpdateCheckTime(timestamp?: number): string {
+  if (!timestamp) return '尚未完成检查'
+  return `上次检查：${new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp)}`
 }
 
 export function SettingsGeneralPage() {
@@ -34,6 +47,9 @@ export function SettingsGeneralPage() {
   const [locationBusy, setLocationBusy] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
   const [showLocationSettingsAction, setShowLocationSettingsAction] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null)
+  const [updateActionBusy, setUpdateActionBusy] = useState(false)
+  const [updateActionError, setUpdateActionError] = useState('')
 
   /* ── Model profiles state ── */
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
@@ -64,6 +80,26 @@ export function SettingsGeneralPage() {
     setProfiles(list)
     const active = await window.lingyue.chat.getActiveProfile()
     if (active) setActiveId(active.id)
+  }, [])
+
+  useEffect(() => {
+    let canceled = false
+    window.lingyue.app.getUpdateStatus()
+      .then((status) => {
+        if (!canceled) setUpdateStatus(status)
+      })
+      .catch((error) => {
+        if (!canceled) setUpdateActionError((error as Error).message || '更新状态读取失败。')
+      })
+    const offUpdate = window.lingyue.app.onUpdateStateChanged((status) => {
+      if (canceled) return
+      setUpdateStatus(status)
+      setUpdateActionError('')
+    })
+    return () => {
+      canceled = true
+      offUpdate()
+    }
   }, [])
 
   useEffect(() => {
@@ -256,8 +292,96 @@ export function SettingsGeneralPage() {
     }
   }
 
+  const handleUpdateAction = async () => {
+    if (!updateStatus || updateActionBusy) return
+    if (['checking', 'downloading', 'installing'].includes(updateStatus.phase)) return
+
+    setUpdateActionBusy(true)
+    setUpdateActionError('')
+    try {
+      if (updateStatus.phase === 'downloaded') {
+        const started = await window.lingyue.app.installUpdate()
+        if (!started) setUpdateActionError('更新安装器尚未准备好，请重新检查更新。')
+        return
+      }
+
+      const shouldDownload = updateStatus.phase === 'available' || (
+        updateStatus.phase === 'error' && Boolean(updateStatus.availableVersion)
+      )
+      const nextStatus = shouldDownload
+        ? await window.lingyue.app.downloadUpdate()
+        : await window.lingyue.app.checkForUpdates()
+      setUpdateStatus(nextStatus)
+    } catch (error) {
+      setUpdateActionError((error as Error).message || '更新操作失败，请稍后重试。')
+    } finally {
+      setUpdateActionBusy(false)
+    }
+  }
+
+  const updateWorking = updateActionBusy || Boolean(
+    updateStatus && ['checking', 'downloading', 'installing'].includes(updateStatus.phase)
+  )
+  const updateActionLabel = !updateStatus
+    ? '读取中'
+    : updateStatus.phase === 'unsupported'
+      ? '仅正式版可用'
+      : updateStatus.phase === 'checking'
+        ? '检查中'
+        : updateStatus.phase === 'downloading'
+          ? `下载中 ${Math.round(updateStatus.progressPercent || 0)}%`
+          : updateStatus.phase === 'installing'
+            ? '正在安装'
+            : updateStatus.phase === 'downloaded'
+              ? '重启并安装'
+              : updateStatus.phase === 'available' || (updateStatus.phase === 'error' && updateStatus.availableVersion)
+                ? `下载 v${updateStatus.availableVersion}`
+                : '检查更新'
+  const UpdateActionIcon = updateWorking
+    ? Loader2
+    : updateStatus?.phase === 'downloaded'
+      ? RotateCcw
+      : updateStatus?.phase === 'available'
+        ? Download
+        : RefreshCw
+
   return (
     <div className="settings-scroll">
+      {/* ════════ 版本与更新 ════════ */}
+      <div className="settings-group">
+        <div className="settings-group__header">版本与更新</div>
+        <div className="settings-card settings-update-card">
+          <div className="settings-card__icon"><RefreshCw size={18} /></div>
+          <div className="settings-card__body" aria-live="polite">
+            <div className="settings-card__title">
+              灵月桌面 v{updateStatus?.currentVersion || '—'}
+            </div>
+            <div className="settings-card__desc settings-update-card__message">
+              {updateActionError || updateStatus?.message || '正在读取更新状态…'}
+            </div>
+            <div className="settings-update-card__meta">
+              {formatUpdateCheckTime(updateStatus?.lastCheckedAt)}
+            </div>
+            {updateStatus?.phase === 'downloading' && (
+              <div className="settings-update-card__progress" aria-hidden="true">
+                <span style={{ width: `${Math.max(0, Math.min(100, updateStatus.progressPercent || 0))}%` }} />
+              </div>
+            )}
+          </div>
+          <div className="settings-card__action">
+            <button
+              type="button"
+              className="settings-btn settings-btn--primary settings-update-card__button"
+              disabled={!updateStatus || updateStatus.phase === 'unsupported' || updateWorking}
+              onClick={handleUpdateAction}
+            >
+              <UpdateActionIcon size={14} className={updateWorking ? 'spin' : undefined} />
+              {updateActionLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* ════════ 外观与行为 ════════ */}
       <div className="settings-group">
         <div className="settings-group__header">外观与行为</div>

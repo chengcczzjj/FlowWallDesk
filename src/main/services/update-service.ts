@@ -49,6 +49,7 @@ function onUpdateAvailable(info: UpdateInfo): void {
     phase: 'available',
     availableVersion: info.version,
     progressPercent: 0,
+    lastCheckedAt: Date.now(),
     message: `发现新版本 ${info.version}，可从左侧更新按钮下载。`,
     canCheck: false,
     canInstall: false,

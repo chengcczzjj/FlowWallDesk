@@ -46,8 +46,10 @@
 默认 Git 行为：
 - 暂存前先查看 `git status --short` 和 `git diff --stat`。
 - 默认只暂存当前任务相关文件；除非用户明确要求，不使用全量暂存。
+- 完成并验证一个开发任务后，默认直接提交该任务相关改动，不再等待额外的提交指令。
 - 提交前展示 staged 文件列表和 commit message。
 - `git push` 必须由用户明确要求或单独确认。
+- 打包、打标签、上传发布资产和创建 GitHub Release 仅在用户明确要求发布时执行。
 - commit message 优先使用 `<type>(<scope>): <summary>` 格式。
 
 日志规则：

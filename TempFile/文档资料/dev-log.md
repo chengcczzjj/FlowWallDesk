@@ -1,5 +1,26 @@
 # 灵月桌面 开发日志
 
+## [2026-08-15 23:51] 发布 1.0.7 Dock 交互与手动更新版
+
+**变更摘要**: 发布 1.0.7，补齐设置页手动更新入口，并修复图标收纳点击、回到桌面和 Dock 启动等待反馈。
+
+**涉及模块**:
+- `src/renderer/widgets/DesktopIcons/` / `src/renderer/canvas/`: 原生点击补偿覆盖全部图标收纳，Dock 改为等高匀速弹跳并等待真实应用窗口就绪。
+- `src/main/windows/` / `src/main/ipc/`: 修复 Win+D 回到桌面，统一应用窗口枚举、唤醒与 15 秒有界就绪检测。
+- `src/renderer/main-ui/pages/settings/` / `src/main/services/update-service.ts`: 新增常驻版本与更新卡片，展示检查时间、状态、进度和重启安装操作。
+- `package.json` / `package-lock.json` / `README.md` / `tests/`: 版本和发布契约升级到 1.0.7，更新兼容的安全依赖覆盖，并补齐 Dock、更新和发布回归检查。
+- `AGENTS.md`: 固化“开发完成并验证后默认提交、仅在用户明确要求时打包发布”的项目协作约定。
+
+**遇到的问题**:
+- 透明 Canvas 的原生点击补偿只覆盖 Dock，普通收纳仍无法启动；固定时长弹跳也早于应用真正打开结束 → 扩展全部图标组件命中，并以真实主窗口就绪信号控制循环弹跳。
+- PowerShell 桌面切换与主窗口最小化、Canvas 层级刷新互相竞态 → 改用 Win32 `SendInput` 的完整 Win+D 序列。
+- 自动检查有延迟且缺少常驻入口 → 设置页提供始终可见的手动检查、下载和安装状态反馈。
+- 依赖审计的 `brace-expansion`、`fast-uri`、`nanoid` 可兼容升级；`extract-zip` 仅存在于 Electron 构建依赖，彻底移除需单独验证 Electron 43 大版本升级。
+
+**Git Commit**: 已提交 — `fix(release): publish LingyueDesk 1.0.7`
+
+---
+
 ## [2026-08-08 09:50] 发布 1.0.6 Dock 前台误触安全修复版
 
 **变更摘要**: 修复点击覆盖 Dock 的其他前台窗口时错误闪动 Dock 并启动下方应用的严重输入穿透问题，同时发布低占用更新安装改进。
