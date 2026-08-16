@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
 import type { MotionValue } from 'framer-motion'
 import { AppWindow, File as FileGlyph, Folder, Plus } from 'lucide-react'
@@ -8,13 +8,17 @@ import { DesktopInteractionEpochCtx, WidgetPosCtx } from '../../canvas/contexts'
 import { FrostedGlassBackground } from '../FrostedGlassBackground'
 import { toRendererPublicUrl } from '@shared/asset-url'
 import {
-  DOCK_BOUNCE_DURATION_SECONDS,
-  DOCK_BOUNCE_RESET_MS,
-  DOCK_BOUNCE_TIMES,
-  getDockBounceCompletionDelayMs,
-  getDockBounceKeyframes,
-  shouldDockSystemActionBounce,
-} from '@shared/dock-motion'
+  ICON_LAUNCH_FEEDBACK_MS,
+  ICON_LAUNCH_OVERLAY_DELAY_SECONDS,
+  ICON_LAUNCH_OVERLAY_DURATION_SECONDS,
+  ICON_LAUNCH_OVERLAY_EASE,
+  ICON_LAUNCH_OVERLAY_INITIAL_OPACITY,
+  ICON_LAUNCH_OVERLAY_SCALE,
+  ICON_LAUNCH_SCALE_DURATION_SECONDS,
+  ICON_LAUNCH_SCALE_EASE,
+  ICON_LAUNCH_SCALE_KEYFRAMES,
+  shouldAnimateDockSystemAction,
+} from '@shared/icon-launch-motion'
 
 type DesktopIconVariant = 'vertical' | 'horizontal' | 'adaptive' | 'dock'
 type StorageVariant = Exclude<DesktopIconVariant, 'dock'>
@@ -404,17 +408,16 @@ function DesktopIconsWidget({
       )
       if (variant === 'dock') {
         setBouncingId(item.id)
+        window.setTimeout(() => {
+          setBouncingId((current) => current === item.id ? null : current)
+        }, ICON_LAUNCH_FEEDBACK_MS)
         void launch().finally(() => {
-          const remainingMs = getDockBounceCompletionDelayMs(performance.now() - startedAt)
-          window.setTimeout(() => {
-            pendingLaunchIdsRef.current.delete(item.id)
-            setBouncingId((current) => current === item.id ? null : current)
-          }, remainingMs)
+          pendingLaunchIdsRef.current.delete(item.id)
         })
       } else {
         setBouncingId(item.id)
         void launch()
-        window.setTimeout(() => setBouncingId(null), 500)
+        window.setTimeout(() => setBouncingId(null), ICON_LAUNCH_FEEDBACK_MS)
       }
     },
     [editing, variant, widget.id]
@@ -883,7 +886,7 @@ function StorageSurface({
               initial={{ opacity: 0, scale: 0.82 }}
               animate={{
                 opacity: 1,
-                scale: bouncingId === item.id ? [1, 0.82, 1.06, 1] : draggingId === item.id ? 1.08 : 1,
+                scale: bouncingId === item.id ? ICON_LAUNCH_SCALE_KEYFRAMES : draggingId === item.id ? 1.08 : 1,
                 left: x,
                 top: y,
               }}
@@ -892,7 +895,9 @@ function StorageSurface({
                 type: 'spring',
                 stiffness: 420,
                 damping: 32,
-                scale: bouncingId === item.id ? { duration: 0.38, ease: [0.28, 0, 0.42, 1] } : undefined,
+                scale: bouncingId === item.id
+                  ? { duration: ICON_LAUNCH_SCALE_DURATION_SECONDS, ease: ICON_LAUNCH_SCALE_EASE }
+                  : undefined,
               }}
               style={{
                 ...iconButtonBase,
@@ -914,10 +919,14 @@ function StorageSurface({
             ((bounceEntry) => (
               <motion.span
                 key={`launch-overlay-${bounceEntry.item.id}`}
-                initial={{ opacity: 0.7, scale: 1 }}
-                animate={{ opacity: 0, scale: 2.6 }}
+                initial={{ opacity: ICON_LAUNCH_OVERLAY_INITIAL_OPACITY, scale: 1 }}
+                animate={{ opacity: 0, scale: ICON_LAUNCH_OVERLAY_SCALE }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.48, delay: 0.15, ease: [0.22, 0, 0.36, 1] }}
+                transition={{
+                  duration: ICON_LAUNCH_OVERLAY_DURATION_SECONDS,
+                  delay: ICON_LAUNCH_OVERLAY_DELAY_SECONDS,
+                  ease: ICON_LAUNCH_OVERLAY_EASE,
+                }}
                 style={{
                   position: 'absolute',
                   left: bounceEntry.x + (metrics.cellWidth - metrics.iconSize) / 2,
@@ -1152,7 +1161,7 @@ function DockSystemButton({
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   const [hovered, setHovered] = useState(false)
-  const [bouncing, setBouncing] = useState(false)
+  const [launching, setLaunching] = useState(false)
   const distance = useTransform(mouseX, (value) => {
     if (!Number.isFinite(value)) return 9999
     const rect = ref.current?.getBoundingClientRect()
@@ -1180,9 +1189,9 @@ function DockSystemButton({
   const slotSize = iconSize + DOCK_SLOT_EXTRA
   const hitInsets = getDockInteractionInsets(iconSize, hoverScale)
 
-  const triggerBounce = useCallback(() => {
-    setBouncing(true)
-    window.setTimeout(() => setBouncing(false), DOCK_BOUNCE_RESET_MS)
+  const triggerLaunchFeedback = useCallback(() => {
+    setLaunching(true)
+    window.setTimeout(() => setLaunching(false), ICON_LAUNCH_FEEDBACK_MS)
   }, [])
 
   return (
@@ -1198,25 +1207,17 @@ function DockSystemButton({
         if (event.button !== 0) return
         event.preventDefault()
         event.stopPropagation()
-        if (shouldDockSystemActionBounce(action.id)) triggerBounce()
+        setHovered(false)
+        if (shouldAnimateDockSystemAction(action.id)) triggerLaunchFeedback()
         onAction(action.id)
       }}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
         if (event.detail !== 0) return
-        if (shouldDockSystemActionBounce(action.id)) triggerBounce()
+        setHovered(false)
+        if (shouldAnimateDockSystemAction(action.id)) triggerLaunchFeedback()
         onAction(action.id)
-      }}
-      animate={
-        bouncing
-          ? { y: getDockBounceKeyframes(flipped) }
-          : {}
-      }
-      transition={{
-        y: bouncing
-          ? { duration: DOCK_BOUNCE_DURATION_SECONDS, times: DOCK_BOUNCE_TIMES, ease: 'linear' }
-          : {},
       }}
       style={{
         ...iconButtonBase,
@@ -1225,13 +1226,13 @@ function DockSystemButton({
         position: 'relative',
         overflow: 'visible',
         justifyContent: 'center',
-        zIndex: hovered ? 5 : 2,
+        zIndex: launching ? 10 : hovered ? 5 : 2,
         transformOrigin: flipped ? 'top center' : 'bottom center',
       }}
     >
       <DockInteractionHitArea insets={hitInsets} flipped={flipped} />
       <AnimatePresence>
-        {hovered && (
+        {hovered && !launching && (
           <motion.span
             initial={{ opacity: 0, y: 4, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1252,23 +1253,88 @@ function DockSystemButton({
         )}
       </AnimatePresence>
       <motion.span
+        animate={{ scale: launching ? ICON_LAUNCH_SCALE_KEYFRAMES : 1 }}
+        transition={{
+          scale: launching
+            ? { duration: ICON_LAUNCH_SCALE_DURATION_SECONDS, ease: ICON_LAUNCH_SCALE_EASE }
+            : { duration: 0.12, ease: 'linear' },
+        }}
         style={{
           width: iconSize,
           height: iconSize,
-          scale,
           display: 'flex',
           flex: '0 0 auto',
           alignItems: 'center',
           justifyContent: 'center',
           position: 'relative',
           zIndex: 1,
-          transformOrigin: flipped ? 'top center' : 'bottom center',
+          transformOrigin: 'center center',
         }}
       >
-        <DockSystemIcon action={action.id} size={iconSize} fluid />
-        {showReflection && <DockSystemReflection action={action.id} size={iconSize} flipped={flipped} />}
+        <motion.span
+          style={{
+            width: '100%',
+            height: '100%',
+            scale: launching ? 1 : scale,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            transformOrigin: flipped ? 'top center' : 'bottom center',
+          }}
+        >
+          <DockSystemIcon action={action.id} size={iconSize} fluid />
+          {showReflection && <DockSystemReflection action={action.id} size={iconSize} flipped={flipped} />}
+        </motion.span>
       </motion.span>
+      <DockLaunchOverlay active={launching} size={iconSize} overlayKey={action.id}>
+        <DockSystemIcon action={action.id} size={iconSize} fluid />
+      </DockLaunchOverlay>
     </motion.button>
+  )
+}
+
+function DockLaunchOverlay({
+  active,
+  size,
+  overlayKey,
+  children,
+}: {
+  active: boolean
+  size: number
+  overlayKey: string
+  children: ReactNode
+}) {
+  return (
+    <AnimatePresence>
+      {active && (
+        <motion.span
+          key={`dock-launch-overlay-${overlayKey}`}
+          initial={{ opacity: ICON_LAUNCH_OVERLAY_INITIAL_OPACITY, scale: 1 }}
+          animate={{ opacity: 0, scale: ICON_LAUNCH_OVERLAY_SCALE }}
+          exit={{ opacity: 0 }}
+          transition={{
+            duration: ICON_LAUNCH_OVERLAY_DURATION_SECONDS,
+            delay: ICON_LAUNCH_OVERLAY_DELAY_SECONDS,
+            ease: ICON_LAUNCH_OVERLAY_EASE,
+          }}
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            x: '-50%',
+            y: '-50%',
+            width: size,
+            height: size,
+            zIndex: 20,
+            pointerEvents: 'none',
+            transformOrigin: 'center center',
+          }}
+        >
+          {children}
+        </motion.span>
+      )}
+    </AnimatePresence>
   )
 }
 
@@ -1431,6 +1497,7 @@ function DockIconButton({
       onPointerDown={(event) => onPointerDown(item, event)}
       onPointerMove={onPointerMove}
       onPointerUp={(event) => {
+        onHoverIndex(null)
         onPointerUp(item, event)
       }}
       onPointerCancel={(event) => {
@@ -1444,28 +1511,12 @@ function DockIconButton({
       }}
       onContextMenu={(event) => onContextMenu(item, event)}
       initial={{ opacity: 0, y: 14, scale: 0.9 }}
-      animate={
-        bouncing
-          ? {
-              opacity: 1,
-              y: getDockBounceKeyframes(flipped),
-              scale: dragging ? 1.08 : 1,
-            }
-          : { opacity: 1, y: 0, scale: dragging ? 1.08 : 1 }
-      }
+      animate={{ opacity: 1, y: 0, scale: dragging ? 1.08 : 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.86 }}
       transition={{
         layout: { type: 'spring', stiffness: 520, damping: 32 },
         scale: { type: 'spring', stiffness: 420, damping: 26 },
-        y: bouncing
-          ? {
-              duration: DOCK_BOUNCE_DURATION_SECONDS,
-              times: DOCK_BOUNCE_TIMES,
-              ease: 'linear',
-              repeat: Infinity,
-              repeatType: 'loop',
-            }
-          : { duration: 0.12, ease: 'linear' },
+        y: { duration: 0.12, ease: 'linear' },
       }}
       style={{
         ...iconButtonBase,
@@ -1475,12 +1526,12 @@ function DockIconButton({
         transformOrigin: 'bottom center',
         position: 'relative',
         overflow: 'visible',
-        zIndex: bouncing || dragging || hovered ? 4 : 1,
+        zIndex: bouncing ? 10 : dragging || hovered ? 4 : 1,
       }}
     >
       <DockInteractionHitArea insets={hitInsets} flipped={flipped} />
       <AnimatePresence>
-        {hovered && !dragging && (
+        {hovered && !dragging && !bouncing && (
           <motion.span
             initial={{ opacity: 0, y: 4, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1501,20 +1552,39 @@ function DockIconButton({
         )}
       </AnimatePresence>
       <motion.span
+        animate={{ scale: bouncing ? ICON_LAUNCH_SCALE_KEYFRAMES : 1 }}
+        transition={{
+          scale: bouncing
+            ? { duration: ICON_LAUNCH_SCALE_DURATION_SECONDS, ease: ICON_LAUNCH_SCALE_EASE }
+            : { duration: 0.12, ease: 'linear' },
+        }}
         style={{
           width: iconSize,
           height: iconSize,
-          scale,
           display: 'flex',
           flex: '0 0 auto',
           position: 'relative',
           zIndex: 1,
-          transformOrigin: flipped ? 'top center' : 'bottom center',
+          transformOrigin: 'center center',
         }}
       >
-        <IconImage item={item} size={iconSize} fluid />
-        {showReflection && <DockIconReflection item={item} size={iconSize} flipped={flipped} />}
+        <motion.span
+          style={{
+            width: '100%',
+            height: '100%',
+            scale: bouncing ? 1 : scale,
+            display: 'flex',
+            position: 'relative',
+            transformOrigin: flipped ? 'top center' : 'bottom center',
+          }}
+        >
+          <IconImage item={item} size={iconSize} fluid />
+          {showReflection && <DockIconReflection item={item} size={iconSize} flipped={flipped} />}
+        </motion.span>
       </motion.span>
+      <DockLaunchOverlay active={bouncing} size={iconSize} overlayKey={item.id}>
+        <IconImage item={item} size={iconSize} fluid />
+      </DockLaunchOverlay>
     </motion.button>
   )
 }

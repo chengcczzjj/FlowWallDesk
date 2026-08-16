@@ -20,17 +20,17 @@ import {
 import { normalizeStockSymbols } from '../src/shared/stock-symbols.ts'
 import { findSmartWidgetPlacement } from '../src/shared/widget-placement.ts'
 import {
-  DOCK_BOUNCE_CYCLE_MS,
-  DOCK_BOUNCE_DURATION_SECONDS,
-  DOCK_BOUNCE_GROUND_PAUSE_MS,
-  DOCK_BOUNCE_HEIGHT_PX,
-  DOCK_BOUNCE_MIN_VISIBLE_MS,
-  DOCK_BOUNCE_TIMES,
-  DOCK_BOUNCE_TRAVEL_MS,
-  getDockBounceCompletionDelayMs,
-  getDockBounceKeyframes,
-  shouldDockSystemActionBounce,
-} from '../src/shared/dock-motion.ts'
+  ICON_LAUNCH_FEEDBACK_MS,
+  ICON_LAUNCH_OVERLAY_DELAY_SECONDS,
+  ICON_LAUNCH_OVERLAY_DURATION_SECONDS,
+  ICON_LAUNCH_OVERLAY_EASE,
+  ICON_LAUNCH_OVERLAY_INITIAL_OPACITY,
+  ICON_LAUNCH_OVERLAY_SCALE,
+  ICON_LAUNCH_SCALE_DURATION_SECONDS,
+  ICON_LAUNCH_SCALE_EASE,
+  ICON_LAUNCH_SCALE_KEYFRAMES,
+  shouldAnimateDockSystemAction,
+} from '../src/shared/icon-launch-motion.ts'
 import { createShowDesktopInputEvents } from '../src/main/windows/windowsDesktop.ts'
 import {
   findInteractiveWidgetAtPoint,
@@ -303,35 +303,18 @@ test('new widgets continue an aligned group instead of defaulting to the upper-l
   assert.ok(groupedPlacement.y >= existing[0].y + existing[0].height + 16)
 })
 
-test('Dock launch motion uses a paced macOS-style constant-speed cycle', () => {
-  const downward = getDockBounceKeyframes(true)
-  const upward = getDockBounceKeyframes(false)
-  assert.equal(DOCK_BOUNCE_HEIGHT_PX, 58)
-  assert.equal(DOCK_BOUNCE_TRAVEL_MS, 720)
-  assert.equal(DOCK_BOUNCE_GROUND_PAUSE_MS, 100)
-  assert.equal(DOCK_BOUNCE_CYCLE_MS, 820)
-  assert.equal(DOCK_BOUNCE_DURATION_SECONDS, 0.82)
-  assert.equal(DOCK_BOUNCE_TIMES.length, downward.length)
-  assert.deepEqual(upward, downward.map((value) => value === 0 ? 0 : -value))
-  assert.deepEqual(downward, [0, 58, 0, 0])
-  const riseTime = DOCK_BOUNCE_TIMES[1] - DOCK_BOUNCE_TIMES[0]
-  const fallTime = DOCK_BOUNCE_TIMES[2] - DOCK_BOUNCE_TIMES[1]
-  const groundTime = DOCK_BOUNCE_TIMES[3] - DOCK_BOUNCE_TIMES[2]
-  assert.ok(Math.abs(riseTime - fallTime) < 1e-9)
-  assert.ok(groundTime > 0 && groundTime < riseTime)
-  assert.equal(DOCK_BOUNCE_MIN_VISIBLE_MS, 720)
-  assert.equal(downward.at(-1), 0)
-})
-
-test('Dock launch motion stops only after landing and show desktop stays still', () => {
-  assert.equal(getDockBounceCompletionDelayMs(0), 720)
-  assert.equal(getDockBounceCompletionDelayMs(300), 420)
-  assert.equal(getDockBounceCompletionDelayMs(720), 0)
-  assert.equal(getDockBounceCompletionDelayMs(800), 0)
-  assert.equal(getDockBounceCompletionDelayMs(820), 0)
-  assert.equal(getDockBounceCompletionDelayMs(1_000), 540)
-  assert.equal(shouldDockSystemActionBounce('settings'), true)
-  assert.equal(shouldDockSystemActionBounce('explorer'), true)
-  assert.equal(shouldDockSystemActionBounce('recycle-bin'), true)
-  assert.equal(shouldDockSystemActionBounce('desktop'), false)
+test('Dock and storage icons share the same launch feedback', () => {
+  assert.equal(ICON_LAUNCH_FEEDBACK_MS, 500)
+  assert.deepEqual(ICON_LAUNCH_SCALE_KEYFRAMES, [1, 0.82, 1.06, 1])
+  assert.equal(ICON_LAUNCH_SCALE_DURATION_SECONDS, 0.38)
+  assert.deepEqual(ICON_LAUNCH_SCALE_EASE, [0.28, 0, 0.42, 1])
+  assert.equal(ICON_LAUNCH_OVERLAY_INITIAL_OPACITY, 0.7)
+  assert.equal(ICON_LAUNCH_OVERLAY_SCALE, 2.6)
+  assert.equal(ICON_LAUNCH_OVERLAY_DURATION_SECONDS, 0.48)
+  assert.equal(ICON_LAUNCH_OVERLAY_DELAY_SECONDS, 0.15)
+  assert.deepEqual(ICON_LAUNCH_OVERLAY_EASE, [0.22, 0, 0.36, 1])
+  assert.equal(shouldAnimateDockSystemAction('settings'), true)
+  assert.equal(shouldAnimateDockSystemAction('explorer'), true)
+  assert.equal(shouldAnimateDockSystemAction('recycle-bin'), true)
+  assert.equal(shouldAnimateDockSystemAction('desktop'), false)
 })

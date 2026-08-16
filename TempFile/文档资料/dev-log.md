@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-16 18:23] 发布 1.0.9 统一图标启动反馈版
+
+**变更摘要**: 移除 Dock 纵向等待弹跳，改为与普通图标收纳完全一致的缩放回弹和图标副本扩散反馈，并打包发布 1.0.9。
+
+**涉及模块**:
+- `src/shared/icon-launch-motion.ts`: 提取收纳与 Dock 共用的缩放、缓动、扩散和反馈时长参数。
+- `src/renderer/widgets/DesktopIcons/DesktopIcons.tsx`: Dock 应用及系统入口复用收纳动画；启动时隔离悬停放大，“回到桌面”继续无动画。
+- `src/renderer/widgets/FrostedGlassBackground.tsx` / `src/renderer/canvas/wallpaperFrameStore.ts`: 纳入上一提交的毛玻璃帧更新效率优化，显示参数保持不变。
+- `package.json` / `package-lock.json` / `README.md` / `tests/`: 版本与发布契约升级到 1.0.9，并验证三处图标入口共享同一动画参数。
+
+**遇到的问题**:
+- Dock 悬停放大与点击缩放叠乘会让按下阶段不明显 → 启动反馈期间暂时使用基础尺寸，在独立层播放收纳动画，结束后再恢复悬停缩放。
+
+**Git Commit**: 已提交 — `fix(release): publish LingyueDesk 1.0.9`
+
+---
+
 ## [2026-08-16 17:00] 优化毛玻璃帧更新效率
 
 **变更摘要**: 在保持抽帧分辨率、帧率、JPEG 质量、模糊半径、颜色和坐标裁切完全不变的前提下，降低动态毛玻璃的 React 与 Canvas 开销。

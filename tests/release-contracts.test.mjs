@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.0.8')
+  assert.equal(packageJson.version, '1.0.9')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -106,6 +106,7 @@ test('desktop icon launches stay bound to their persisted widget record', async 
   const ipcSource = await readFile(new URL('../src/main/ipc/desktopIconIpc.ts', import.meta.url), 'utf8')
   const canvasSource = await readFile(new URL('../src/main/windows/canvasWindow.ts', import.meta.url), 'utf8')
   const diagnosticSource = await readFile(new URL('../src/main/runtime/diagnosticLog.ts', import.meta.url), 'utf8')
+  const widgetSource = await readFile(new URL('../src/renderer/widgets/DesktopIcons/DesktopIcons.tsx', import.meta.url), 'utf8')
 
   assert.match(preloadSource, /launchDesktopIcon: \(widgetId: string, item: DesktopIconItem, requestId\?: string\)/)
   assert.match(ipcSource, /findStoredDesktopIcon\(item\.id, widgetId\)/)
@@ -126,6 +127,10 @@ test('desktop icon launches stay bound to their persisted widget record', async 
   assert.match(canvasSource, /canvasTopmostAtStart/)
   assert.match(canvasSource, /canvasTopmostAtEnd/)
   assert.match(canvasSource, /canvasRecompositing = true/)
+  assert.equal(widgetSource.match(/ICON_LAUNCH_SCALE_KEYFRAMES/g)?.length, 4)
+  assert.match(widgetSource, /DockLaunchOverlay active=\{bouncing\}/)
+  assert.match(widgetSource, /shouldAnimateDockSystemAction\(action\.id\)/)
+  assert.doesNotMatch(widgetSource, /getDockBounceKeyframes/)
 })
 
 test('frosted glass frame updates avoid React commits without changing the visual pipeline', async () => {
