@@ -51,7 +51,7 @@
 | 安全 preload     | ✅ 完成 | 单文件角色化 bridge，三个窗口保持 `sandbox: true`         |
 | 自动更新         | ✅ 完成 | 启动后 15 秒检查、每 6 小时轮询；设置页常驻手动检查入口，统一显示状态、版本、检查时间、下载进度和重启安装操作 |
 | 开机启动         | ✅ 完成 | 正式安装版默认注册 Windows 启动项，设置页可开关            |
-| 正式分发         | 🟡 v1.1.0 待发布 | 本地 NSIS 安装包、`latest.yml` 与 blockmap 已验证；等待推送远端并创建 GitHub Release |
+| 正式分发         | ✅ v1.1.0 | 分支、`main` 与标签已推送；GitHub Release 已上传 NSIS 安装包、`latest.yml` 和 blockmap，本机已升级验证 |
 
 ### 组件系统 ✅ 99%
 

@@ -8,6 +8,7 @@
 - `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 同步 1.1.0 版本元数据与自动更新发布契约。
 - `README.md` / `TempFile/文档资料/project-status.md`: 更新 1.1.0 发布命令、里程碑名称与本地分发状态。
 - `doc/发布说明/1.1.0.md` / `dist/`: 记录功能、兼容性、验证和安装信息，生成 NSIS 安装包、blockmap 与 `latest.yml`（构建产物不进入 Git）。
+- GitHub / 本机安装：将发布分支、`main` 和 `v1.1.0` 推送远端，创建正式 Release 并上传三个自动更新资产；静默安装后 EXE 与注册表均确认为 1.1.0。
 
 **版本重点**:
 - 一张任务一张纸的多实例自由便笺，可直接输入、拖动、缩放、重叠、换色、分类和完成撕除。
@@ -15,7 +16,8 @@
 - 透明 Canvas 补齐全屏游戏返回后的 WorkerW/DefView 层级、合成和鼠标命中自愈。
 
 **Git Commit**: 已提交 — `feat(release): prepare LingyueDesk 1.1.0`
-**Git Tag**: 本地标签 `v1.1.0`（未推送）
+**Git Tag**: `v1.1.0`（已推送）
+**GitHub Release**: `https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.0`
 
 ---
 
