@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.0.9')
+  assert.equal(packageJson.version, '1.0.10')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -129,6 +129,9 @@ test('desktop icon launches stay bound to their persisted widget record', async 
   assert.match(canvasSource, /canvasRecompositing = true/)
   assert.equal(widgetSource.match(/ICON_LAUNCH_SCALE_KEYFRAMES/g)?.length, 4)
   assert.match(widgetSource, /DockLaunchOverlay active=\{bouncing\}/)
+  assert.equal(widgetSource.match(/initialScale=\{scale\.get\(\)\}/g)?.length, 2)
+  assert.doesNotMatch(widgetSource, /scale: (?:launching|bouncing) \? 1 : scale/)
+  assert.match(widgetSource, /initial=\{\{ opacity: ICON_LAUNCH_OVERLAY_INITIAL_OPACITY, scale: initialScale \}\}/)
   assert.match(widgetSource, /shouldAnimateDockSystemAction\(action\.id\)/)
   assert.doesNotMatch(widgetSource, /getDockBounceKeyframes/)
 })

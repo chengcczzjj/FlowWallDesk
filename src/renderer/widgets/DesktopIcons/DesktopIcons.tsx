@@ -1275,7 +1275,7 @@ function DockSystemButton({
           style={{
             width: '100%',
             height: '100%',
-            scale: launching ? 1 : scale,
+            scale,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -1287,7 +1287,7 @@ function DockSystemButton({
           {showReflection && <DockSystemReflection action={action.id} size={iconSize} flipped={flipped} />}
         </motion.span>
       </motion.span>
-      <DockLaunchOverlay active={launching} size={iconSize} overlayKey={action.id}>
+      <DockLaunchOverlay active={launching} size={iconSize} initialScale={scale.get()} overlayKey={action.id}>
         <DockSystemIcon action={action.id} size={iconSize} fluid />
       </DockLaunchOverlay>
     </motion.button>
@@ -1297,11 +1297,13 @@ function DockSystemButton({
 function DockLaunchOverlay({
   active,
   size,
+  initialScale,
   overlayKey,
   children,
 }: {
   active: boolean
   size: number
+  initialScale: number
   overlayKey: string
   children: ReactNode
 }) {
@@ -1310,7 +1312,7 @@ function DockLaunchOverlay({
       {active && (
         <motion.span
           key={`dock-launch-overlay-${overlayKey}`}
-          initial={{ opacity: ICON_LAUNCH_OVERLAY_INITIAL_OPACITY, scale: 1 }}
+          initial={{ opacity: ICON_LAUNCH_OVERLAY_INITIAL_OPACITY, scale: initialScale }}
           animate={{ opacity: 0, scale: ICON_LAUNCH_OVERLAY_SCALE }}
           exit={{ opacity: 0 }}
           transition={{
@@ -1572,7 +1574,7 @@ function DockIconButton({
           style={{
             width: '100%',
             height: '100%',
-            scale: bouncing ? 1 : scale,
+            scale,
             display: 'flex',
             position: 'relative',
             transformOrigin: flipped ? 'top center' : 'bottom center',
@@ -1582,7 +1584,7 @@ function DockIconButton({
           {showReflection && <DockIconReflection item={item} size={iconSize} flipped={flipped} />}
         </motion.span>
       </motion.span>
-      <DockLaunchOverlay active={bouncing} size={iconSize} overlayKey={item.id}>
+      <DockLaunchOverlay active={bouncing} size={iconSize} initialScale={scale.get()} overlayKey={item.id}>
         <IconImage item={item} size={iconSize} fluid />
       </DockLaunchOverlay>
     </motion.button>
