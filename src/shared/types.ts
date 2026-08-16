@@ -47,6 +47,10 @@ export type TodoTaskCategory = 'work' | 'study' | 'life' | 'health' | 'other'
 
 export type TodoTaskPriority = 'high' | 'normal' | 'low'
 
+export type TodoNoteColor = 'butter' | 'rose' | 'mint' | 'sky' | 'lilac'
+
+export type TodoNotePaperStyle = 'tape' | 'pin' | 'plain'
+
 /** 桌面任务便笺中的单项任务。时间戳使用本地设备的 Unix 毫秒值。 */
 export interface TodoTask {
   id: string
@@ -61,12 +65,23 @@ export interface TodoTask {
   remind: boolean
 }
 
-export interface TodoWidgetConfig {
+/** 旧版聚合任务板配置，仅用于无损迁移。 */
+export interface LegacyTodoWidgetConfig {
   version: 1
   title: string
   tasks: TodoTask[]
   view: 'plan' | 'week'
   weekOffset: number
+}
+
+/** 一张桌面便利贴只承载一项任务；统计和周记由主应用跨实例聚合。 */
+export interface TodoWidgetConfig {
+  version: 2
+  task?: TodoTask
+  color: TodoNoteColor
+  paperStyle: TodoNotePaperStyle
+  rotation: number
+  tearRequestedAt?: number
 }
 
 export interface CanvasOcclusionState {

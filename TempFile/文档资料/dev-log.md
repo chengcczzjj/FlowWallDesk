@@ -1,5 +1,26 @@
 # 灵月桌面 开发日志
 
+## [2026-08-16 20:47] 重做自由便利贴与软件内任务工作台
+
+**变更摘要**: 根据实际便利贴的使用心智彻底拆分桌面与管理场景：桌面改为“一张任务一张纸”的多实例自由便利贴，软件内新增完整任务工作台，完成任务时以撕落动画离开桌面并保留历史。
+
+**涉及模块**:
+- `src/shared/todo.ts` / `src/shared/types.ts` / `src/main/ipc/widgetIpc.ts`: 引入 v2 单任务便利贴模型和 v1 无损展开迁移；多实例按像素自由落位、允许重叠并只保留最小可抓取边缘。
+- `src/renderer/widgets/TodoBoard/` / `src/renderer/canvas/Canvas.tsx`: 桌面仅保留文字、轻量状态、完成圆圈与折角；无需组件编辑模式即可直接拖动和缩放，完成后播放纸张撕落动画并隐藏实例。
+- `src/main/windows/canvasWindow.ts` / `src/preload/canvas.ts`: 增加独立桌面输入焦点会话；点击便签正文时临时聚焦 Canvas，结束输入后恢复不可聚焦和桌面层级。
+- `src/renderer/main-ui/pages/widgets/TodoNotesManager.tsx` / `src/renderer/main-ui/styles.css`: 新增便笺工作台，承载批量创建、纸色/固定方式、时间分组、桌面显隐、周复盘、完成归档和恢复。
+- `src/main/memory/tools/definitions/widgets.ts` / `tests/todo-widget.test.mjs`: AI 改为跨全部便利贴实例聚合操作，新增多实例、自由坐标、重叠、撕落保留、隐藏历史和旧数据迁移契约。
+- `doc/小组件/桌面任务便笺组件设计.md`: 重写产品边界、桌面/软件信息架构、物理纸张视觉和验收标准。
+
+**遇到的问题**:
+- 原组件的网格吸附、碰撞推开和单实例规则与真实便利贴冲突 → 为 `todo-board` 建立独立自由布局策略，不复用普通组件落位。
+- 完成后直接删除会让周统计和恢复丢失 → 动画结束只设置 `enabled: false`，完成实例继续作为归档数据存在。
+- Canvas 常态 `focusable: false` 导致 textarea 能收到点击却无法接收键盘，且原排版只按宽度缩放 → 使用受限 IPC 临时开启输入焦点，并按容器宽度和高度分别重排窄、矮、默认与大尺寸。
+
+**Git Commit**: 已提交 — `refactor(widget): redesign sticky notes as freeform tasks`
+
+---
+
 ## [2026-08-16 19:22] 新增桌面任务便笺与 AI 任务管理
 
 **变更摘要**: 基于 TickTick、Notezilla 和 Sticky Tasks 调研，新增可直接拖动、自由缩放、自动分类、逾期提醒和按周复盘的特色纸张式任务便笺。

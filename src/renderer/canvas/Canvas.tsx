@@ -21,6 +21,7 @@ const ICON_GAP_Y_COMPACT = 8
 const ICON_PADDING = 22
 const LONG_PRESS_WIDGET_DRAG_MS = 520
 const LONG_PRESS_WIDGET_CANCEL_PX = 10
+const STICKY_NOTE_GRAB_EDGE = 42
 const ICON_STORAGE_SCALE_MIN = 0.65
 const ICON_STORAGE_SCALE_MAX = 1.8
 const ICON_STORAGE_TITLE_HEIGHT = 38
@@ -51,7 +52,17 @@ function isIconStorageType(type: string): boolean {
 }
 
 function getWidgetMinimumSize(type: string): { width: number; height: number } {
-  return type === 'todo-board' ? { width: 320, height: 320 } : { width: MIN_SIZE, height: MIN_SIZE }
+  return type === 'todo-board' ? { width: 150, height: 130 } : { width: MIN_SIZE, height: MIN_SIZE }
+}
+
+function getWidgetMaximumSize(type: string): { width: number; height: number } {
+  return type === 'todo-board'
+    ? { width: 420, height: 380 }
+    : { width: Number.POSITIVE_INFINITY, height: Number.POSITIVE_INFINITY }
+}
+
+function isFreeformStickyNote(type: string): boolean {
+  return type === 'todo-board'
 }
 
 function readStorageChromeStyle(config?: Record<string, unknown>): 'plain' | 'titled' {
@@ -580,7 +591,6 @@ export function Canvas() {
   useEffect(() => {
     const glassTypes = new Set([
       'calendar', 'news', 'stocks', 'quicktools', 'sysmonitor', 'pet',
-      'todo-board',
       'desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock',
     ])
     const demanded = widgets.some((widget) => {
@@ -904,6 +914,7 @@ function DraggableWidget({
 
   const canResize = isFloatingType(widget.type)
   const canLongPressDrag = true
+  const directManipulation = isFreeformStickyNote(widget.type)
   /** stretch-fill 类型不走 naturalSize/scale 等比缩放 */
   const stretchFill = isStretchFillType(widget.type)
 
@@ -1114,28 +1125,29 @@ function DraggableWidget({
     (e: React.PointerEvent) => {
       if (e.button !== 0) return
       e.stopPropagation()
-      if (editing) {
-        if ((e.target as HTMLElement).closest('[data-delete-btn]')) return
-        if ((e.target as HTMLElement).closest('[data-toolbar]')) return
-        // 检查是否点击了 resize handle
-        const resizeEdge = (e.target as HTMLElement).closest('[data-resize]')?.getAttribute('data-resize')
-        if (resizeEdge && canResize) {
-          e.preventDefault()
-          elRef.current?.setPointerCapture(e.pointerId)
-          setResizing(true)
-          const actual = getActualSize()
-          resizeRef.current = {
-            startX: e.clientX,
-            startY: e.clientY,
-            origW: actual.w,
-            origH: actual.h,
-            origX: posRef.current.x,
-            origY: posRef.current.y,
-            edge: resizeEdge,
-            pointerId: e.pointerId,
-          }
-          return
+      const target = e.target as HTMLElement
+      const resizeEdge = target.closest('[data-resize]')?.getAttribute('data-resize')
+      if (resizeEdge && canResize && (editing || directManipulation)) {
+        e.preventDefault()
+        elRef.current?.setPointerCapture(e.pointerId)
+        window.canvasBridge?.setIgnoreMouse(false)
+        setResizing(true)
+        const actual = getActualSize()
+        resizeRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origW: actual.w,
+          origH: actual.h,
+          origX: posRef.current.x,
+          origY: posRef.current.y,
+          edge: resizeEdge,
+          pointerId: e.pointerId,
         }
+        return
+      }
+      if (editing) {
+        if (target.closest('[data-delete-btn]')) return
+        if (target.closest('[data-toolbar]')) return
         e.preventDefault()
         elRef.current?.setPointerCapture(e.pointerId)
         onSelect() // 点击/拖拽即选中
@@ -1151,7 +1163,22 @@ function DraggableWidget({
         return
       }
 
-      const target = e.target as HTMLElement
+      if (directManipulation && !isWidgetInteractionTarget(target)) {
+        e.preventDefault()
+        elRef.current?.setPointerCapture(e.pointerId)
+        window.canvasBridge?.setIgnoreMouse(false)
+        setDragging(true)
+        hasDraggedRef.current = false
+        dragRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origX: posRef.current.x,
+          origY: posRef.current.y,
+          pointerId: e.pointerId,
+        }
+        return
+      }
+
       if (canLongPressDrag && target.closest('[data-widget-drag-handle]')) {
         e.preventDefault()
         elRef.current?.setPointerCapture(e.pointerId)
@@ -1190,7 +1217,7 @@ function DraggableWidget({
         longPressDragRef.current = { startX, startY, pointerId, timer }
       }
     },
-    [editing, canResize, canLongPressDrag, getActualSize, onSelect]
+    [editing, canResize, canLongPressDrag, directManipulation, getActualSize, onSelect]
   )
 
   const onPointerMove = useCallback(
@@ -1229,23 +1256,30 @@ function DraggableWidget({
           r.nextIconScale = resized.iconScale
         } else {
           const minimum = getWidgetMinimumSize(widget.type)
-          if (r.edge.includes('r')) nw = Math.max(minimum.width, r.origW + dx)
-          if (r.edge.includes('b')) nh = Math.max(minimum.height, r.origH + dy)
+          const maximum = getWidgetMaximumSize(widget.type)
+          if (r.edge.includes('r')) nw = Math.min(maximum.width, Math.max(minimum.width, r.origW + dx))
+          if (r.edge.includes('b')) nh = Math.min(maximum.height, Math.max(minimum.height, r.origH + dy))
           if (r.edge.includes('l')) {
-            const dw = Math.min(dx, r.origW - minimum.width)
+            const dw = Math.max(r.origW - maximum.width, Math.min(dx, r.origW - minimum.width))
             nw = r.origW - dw
             nx = r.origX + dw
           }
           if (r.edge.includes('t')) {
-            const dh = Math.min(dy, r.origH - minimum.height)
+            const dh = Math.max(r.origH - maximum.height, Math.min(dy, r.origH - minimum.height))
             nh = r.origH - dh
             ny = r.origY + dh
           }
-          // 吸附到网格
-          nw = Math.round(nw / GRID) * GRID
-          nh = Math.round(nh / GRID) * GRID
-          nx = Math.round(nx / GRID) * GRID
-          ny = Math.round(ny / GRID) * GRID
+          if (!directManipulation) {
+            nw = Math.round(nw / GRID) * GRID
+            nh = Math.round(nh / GRID) * GRID
+            nx = Math.round(nx / GRID) * GRID
+            ny = Math.round(ny / GRID) * GRID
+          } else {
+            nw = Math.round(nw)
+            nh = Math.round(nh)
+            nx = Math.round(nx)
+            ny = Math.round(ny)
+          }
           nw = Math.max(minimum.width, nw)
           nh = Math.max(minimum.height, nh)
         }
@@ -1260,22 +1294,31 @@ function DraggableWidget({
       const dx = e.clientX - dragRef.current.startX
       const dy = e.clientY - dragRef.current.startY
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDraggedRef.current = true
-      let nx = Math.round((dragRef.current.origX + dx) / GRID) * GRID
-      let ny = Math.round((dragRef.current.origY + dy) / GRID) * GRID
+      let nx = directManipulation
+        ? Math.round(dragRef.current.origX + dx)
+        : Math.round((dragRef.current.origX + dx) / GRID) * GRID
+      let ny = directManipulation
+        ? Math.round(dragRef.current.origY + dy)
+        : Math.round((dragRef.current.origY + dy) / GRID) * GRID
       const curW = elRef.current?.offsetWidth || size.w || 200
       const curH = elRef.current?.offsetHeight || size.h || 100
-      const maxX = window.innerWidth - EDGE_PADDING - curW
-      const maxY = window.innerHeight - BOTTOM_EDGE_PADDING - curH
-      nx = Math.max(EDGE_PADDING, Math.min(nx, Math.max(EDGE_PADDING, maxX)))
-      ny = Math.max(EDGE_PADDING, Math.min(ny, Math.max(EDGE_PADDING, maxY)))
+      if (directManipulation) {
+        nx = Math.max(-curW + STICKY_NOTE_GRAB_EDGE, Math.min(nx, window.innerWidth - STICKY_NOTE_GRAB_EDGE))
+        ny = Math.max(-curH + STICKY_NOTE_GRAB_EDGE, Math.min(ny, window.innerHeight - STICKY_NOTE_GRAB_EDGE))
+      } else {
+        const maxX = window.innerWidth - EDGE_PADDING - curW
+        const maxY = window.innerHeight - BOTTOM_EDGE_PADDING - curH
+        nx = Math.max(EDGE_PADDING, Math.min(nx, Math.max(EDGE_PADDING, maxX)))
+        ny = Math.max(EDGE_PADDING, Math.min(ny, Math.max(EDGE_PADDING, maxY)))
+      }
       setPos({ x: nx, y: ny })
       posRef.current = { x: nx, y: ny }
       // 实时计算吸附预览
       const curW2 = elRef.current?.offsetWidth || size.w || 200
       const curH2 = elRef.current?.offsetHeight || size.h || 100
-      onDragPreview(widget.id, { x: nx, y: ny, w: curW2, h: curH2 })
+      if (!directManipulation) onDragPreview(widget.id, { x: nx, y: ny, w: curW2, h: curH2 })
     },
-    [clearLongPressDrag, size.w, size.h, onDragPreview, widget]
+    [clearLongPressDrag, directManipulation, size.w, size.h, onDragPreview, widget]
   )
 
   const onPointerUp = useCallback(
@@ -1311,7 +1354,7 @@ function DraggableWidget({
           ),
         }
         window.canvasBridge?.updateWidget(updated)
-        onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
+        if (!directManipulation) onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
         return
       }
       if (dragRef.current) {
@@ -1322,10 +1365,10 @@ function DraggableWidget({
         anchorCenterXRef.current = posRef.current.x + vis.w / 2
         const updated = { ...widget, x: posRef.current.x, y: posRef.current.y, width: vis.w, height: vis.h }
         window.canvasBridge?.updateWidget(updated)
-        onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
+        if (!directManipulation) onResolveCollisions(widget.id, { x: posRef.current.x, y: posRef.current.y, w: vis.w, h: vis.h })
       }
     },
-    [clearLongPressDrag, widget, onResolveCollisions, getActualSize]
+    [clearLongPressDrag, directManipulation, widget, onResolveCollisions, getActualSize]
   )
 
   const onPointerCancel = useCallback(

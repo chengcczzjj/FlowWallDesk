@@ -6,9 +6,12 @@ import { DEFAULT_WIDGET_SIZE_BY_TYPE, WIDGET_TYPES, type WidgetTypeId } from '@s
 import { GENERATED_WIDGET_THEMES, type GeneratedWidgetBlock, type GeneratedWidgetDefinition } from '@shared/generated-widget'
 import { normalizeStockSymbols } from '@shared/stock-symbols'
 import {
-  DEFAULT_TODO_WIDGET_CONFIG,
+  TODO_NOTE_COLORS,
+  TODO_NOTE_PAPER_STYLES,
   TODO_TASK_LIMIT,
+  collectTodoTasks,
   createTodoTask,
+  createTodoWidgetConfig,
   inferTodoCategory,
   normalizeTodoWidgetConfig,
   sanitizeTodoTitle,
@@ -20,6 +23,7 @@ import {
   listWidgetsForTool,
   removeWidgetForTool,
   updateWidgetConfigForTool,
+  updateWidgetForTool,
 } from '../../../ipc/widgetIpc'
 
 function summarizeWidget(widget: WidgetInstance) {
@@ -93,6 +97,8 @@ export const addWidgetTool = tool({
         ? Math.max(10, Math.min(3600, Math.round(normalizedConfig.refreshInterval)))
         : 30
       normalizedConfig = { ...normalizedConfig, symbols, refreshInterval }
+    } else if (type === 'todo-board') {
+      normalizedConfig = { ...normalizeTodoWidgetConfig(normalizedConfig) }
     }
 
     const result = addWidgetForTool(createWidget(type, normalizedConfig))
@@ -106,7 +112,7 @@ export const addWidgetTool = tool({
   },
 })
 
-function summarizeTodoTask(task: TodoTask) {
+function summarizeTodoTask(task: TodoTask, widget?: WidgetInstance) {
   return {
     id: task.id,
     title: task.title,
@@ -117,6 +123,8 @@ function summarizeTodoTask(task: TodoTask) {
     dueAt: task.dueAt ? new Date(task.dueAt).toISOString() : undefined,
     createdAt: new Date(task.createdAt).toISOString(),
     completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : undefined,
+    widgetId: widget?.id,
+    desktopVisible: widget?.enabled,
   }
 }
 
@@ -155,48 +163,39 @@ const todoTaskActionSchema = z.object({
 })
 
 export const manageTodoTasksTool = tool({
-  description: '管理桌面任务便笺里的真实任务：查看、新增、修改、完成、恢复、删除、清理已完成任务或生成周总结。新增任务时如果桌面还没有任务便笺，会自动创建。修改/删除前先 list 获取 taskId，不要猜 id。',
+  description: '管理真实的桌面便利贴任务：每项任务是一张可独立拖动、缩放和叠放的便利贴。支持查看、新增、修改、完成撕下、恢复贴回、删除、清理完成记录或生成周总结。修改/删除前先 list 获取 taskId，不要猜 id。',
   inputSchema: todoTaskActionSchema,
   execute: async ({ action, taskId, title, dueAt, clearDueAt, category, priority, remind, weekOffset }) => {
-    let widget = listWidgetsForTool().find((item) => item.type === 'todo-board')
-    if (!widget && action === 'add') {
-      const result = addWidgetForTool(createWidget('todo-board', { ...DEFAULT_TODO_WIDGET_CONFIG }))
-      widget = result.widget
-    }
-    if (!widget) {
-      return { ok: false, action, error: 'todo-widget-not-found', message: '桌面上还没有任务便笺。' }
-    }
-
-    const config = normalizeTodoWidgetConfig(widget.config)
-    const tasks = [...config.tasks]
+    const widgets = listWidgetsForTool().filter((item) => item.type === 'todo-board')
+    const records = widgets.flatMap((widget) => {
+      const config = normalizeTodoWidgetConfig(widget.config)
+      return config.task ? [{ widget, config, task: config.task }] : []
+    })
+    const tasks = records.map((record) => record.task)
     if (action === 'list') {
-      return { ok: true, action, widgetId: widget.id, count: tasks.length, tasks: tasks.map(summarizeTodoTask) }
+      return { ok: true, action, count: tasks.length, tasks: records.map((record) => summarizeTodoTask(record.task, record.widget)) }
     }
     if (action === 'weekly-summary') {
       const summary = summarizeTodoWeek(tasks, Date.now(), weekOffset ?? 0)
       return {
         ok: true,
         action,
-        widgetId: widget.id,
         headline: summary.headline,
         completedCount: summary.completed.length,
         unfinishedCount: summary.unfinished.length,
         completionRate: summary.completionRate,
         activeDays: summary.activeDays,
-        completed: summary.completed.map(summarizeTodoTask),
-        unfinished: summary.unfinished.map(summarizeTodoTask),
+        completed: summary.completed.map((task) => summarizeTodoTask(task, records.find((record) => record.task.id === task.id)?.widget)),
+        unfinished: summary.unfinished.map((task) => summarizeTodoTask(task, records.find((record) => record.task.id === task.id)?.widget)),
       }
     }
-
-    let nextTasks = tasks
-    let changedTask: TodoTask | undefined
     if (action === 'add') {
-      if (tasks.length >= TODO_TASK_LIMIT) return { ok: false, action, error: 'task-limit-reached', message: `任务便笺最多保存 ${TODO_TASK_LIMIT} 项。` }
+      if (widgets.length >= TODO_TASK_LIMIT) return { ok: false, action, error: 'task-limit-reached', message: `最多保存 ${TODO_TASK_LIMIT} 张任务便利贴。` }
       const parsedDueAt = parseTodoDueAt(dueAt)
       if (parsedDueAt === null) return { ok: false, action, error: 'invalid-due-at', message: '截止时间格式无效。' }
       const safeTitle = sanitizeTodoTitle(title)
       if (!safeTitle) return { ok: false, action, error: 'title-required', message: '任务标题不能为空。' }
-      changedTask = createTodoTask({
+      const changedTask = createTodoTask({
         id: `task-${Date.now()}-${randomUUID().slice(0, 8)}`,
         title: safeTitle,
         dueAt: parsedDueAt,
@@ -204,45 +203,79 @@ export const manageTodoTasksTool = tool({
         priority: priority as TodoTaskPriority | undefined,
         remind,
       })
-      nextTasks = [...tasks, changedTask]
-    } else if (action === 'clear-completed') {
-      nextTasks = tasks.filter((task) => !task.done)
-    } else {
-      const target = tasks.find((task) => task.id === taskId)
-      if (!target) return { ok: false, action, error: 'task-not-found', message: '没有找到这条任务，请先重新查看任务列表。' }
-      if (action === 'delete') {
-        nextTasks = tasks.filter((task) => task.id !== target.id)
-      } else if (action === 'complete' || action === 'reopen') {
-        const nextDone = action === 'complete'
-        changedTask = target.done === nextDone ? target : setTodoTaskDone(target, nextDone)
-        nextTasks = tasks.map((task) => task.id === target.id ? changedTask as TodoTask : task)
-      } else {
-        const parsedDueAt = parseTodoDueAt(dueAt)
-        if (parsedDueAt === null) return { ok: false, action, error: 'invalid-due-at', message: '截止时间格式无效。' }
-        const safeTitle = title === undefined ? target.title : sanitizeTodoTitle(title)
-        if (!safeTitle) return { ok: false, action, error: 'title-required', message: '任务标题不能为空。' }
-        changedTask = {
-          ...target,
-          title: safeTitle,
-          dueAt: clearDueAt ? undefined : parsedDueAt ?? target.dueAt,
-          category: category ?? (title === undefined ? target.category : inferTodoCategory(safeTitle)),
-          priority: priority ?? target.priority,
-          remind: remind ?? target.remind,
-          updatedAt: Date.now(),
-        }
-        nextTasks = tasks.map((task) => task.id === target.id ? changedTask as TodoTask : task)
+      const index = widgets.length
+      const config = createTodoWidgetConfig({
+        task: changedTask,
+        color: TODO_NOTE_COLORS[index % TODO_NOTE_COLORS.length],
+        paperStyle: TODO_NOTE_PAPER_STYLES[index % TODO_NOTE_PAPER_STYLES.length],
+        rotation: [-1.8, 1.3, -0.8, 2.1, -1.2][index % 5],
+      })
+      const result = addWidgetForTool(createWidget('todo-board', { ...config }))
+      return {
+        ok: result.ok,
+        action,
+        widgetId: result.widget.id,
+        count: collectTodoTasks(result.list).length,
+        changedTask: summarizeTodoTask(changedTask, result.widget),
       }
     }
 
-    const result = updateWidgetConfigForTool({ id: widget.id, config: { ...config, tasks: nextTasks } })
+    if (action === 'clear-completed') {
+      const completed = records.filter((record) => record.task.done)
+      for (const record of completed) await removeWidgetForTool({ id: record.widget.id })
+      return { ok: true, action, deletedCount: completed.length, count: tasks.length - completed.length }
+    }
+
+    const record = records.find((item) => item.task.id === taskId)
+    if (!record) return { ok: false, action, error: 'task-not-found', message: '没有找到这条任务，请先重新查看任务列表。' }
+    if (action === 'delete') {
+      const result = await removeWidgetForTool({ id: record.widget.id })
+      return { ok: result.ok, action, deleted: result.deleted, widgetId: record.widget.id, count: collectTodoTasks(result.list).length }
+    }
+
+    let changedTask: TodoTask
+    let nextConfig: ReturnType<typeof normalizeTodoWidgetConfig>
+    if (action === 'complete') {
+      const requestedAt = Date.now()
+      changedTask = record.task.done ? record.task : setTodoTaskDone(record.task, true, requestedAt)
+      nextConfig = { ...record.config, task: changedTask, tearRequestedAt: requestedAt }
+    } else if (action === 'reopen') {
+      changedTask = record.task.done ? setTodoTaskDone(record.task, false) : record.task
+      nextConfig = { ...record.config, task: changedTask, tearRequestedAt: undefined }
+      const result = updateWidgetForTool({ id: record.widget.id, config: { ...nextConfig }, enabled: true })
+      return {
+        ok: result.ok,
+        action,
+        error: result.error,
+        widgetId: record.widget.id,
+        count: collectTodoTasks(result.list).length,
+        changedTask: summarizeTodoTask(changedTask, result.widget),
+      }
+    } else {
+      const parsedDueAt = parseTodoDueAt(dueAt)
+      if (parsedDueAt === null) return { ok: false, action, error: 'invalid-due-at', message: '截止时间格式无效。' }
+      const safeTitle = title === undefined ? record.task.title : sanitizeTodoTitle(title)
+      if (!safeTitle) return { ok: false, action, error: 'title-required', message: '任务标题不能为空。' }
+      changedTask = {
+        ...record.task,
+        title: safeTitle,
+        dueAt: clearDueAt ? undefined : parsedDueAt ?? record.task.dueAt,
+        category: category ?? (title === undefined ? record.task.category : inferTodoCategory(safeTitle)),
+        priority: priority ?? record.task.priority,
+        remind: remind ?? record.task.remind,
+        updatedAt: Date.now(),
+      }
+      nextConfig = { ...record.config, task: changedTask }
+    }
+
+    const result = updateWidgetConfigForTool({ id: record.widget.id, config: { ...nextConfig } })
     return {
       ok: result.ok,
       action,
       error: result.error,
-      widgetId: widget.id,
-      count: nextTasks.length,
-      changedTask: changedTask ? summarizeTodoTask(changedTask) : undefined,
-      tasks: nextTasks.map(summarizeTodoTask),
+      widgetId: record.widget.id,
+      count: collectTodoTasks(result.list).length,
+      changedTask: summarizeTodoTask(changedTask, result.widget),
     }
   },
 })

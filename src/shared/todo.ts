@@ -1,4 +1,13 @@
-import type { TodoTask, TodoTaskCategory, TodoTaskPriority, TodoWidgetConfig } from './types'
+import type {
+  LegacyTodoWidgetConfig,
+  TodoNoteColor,
+  TodoNotePaperStyle,
+  TodoTask,
+  TodoTaskCategory,
+  TodoTaskPriority,
+  TodoWidgetConfig,
+  WidgetInstance,
+} from './types'
 
 export const TODO_TASK_LIMIT = 120
 export const TODO_TITLE_LIMIT = 160
@@ -11,12 +20,14 @@ export const TODO_CATEGORY_META: Record<TodoTaskCategory, { label: string; short
   other: { label: '其他', shortLabel: '其' },
 }
 
+export const TODO_NOTE_COLORS: TodoNoteColor[] = ['butter', 'rose', 'mint', 'sky', 'lilac']
+export const TODO_NOTE_PAPER_STYLES: TodoNotePaperStyle[] = ['tape', 'pin', 'plain']
+
 export const DEFAULT_TODO_WIDGET_CONFIG: TodoWidgetConfig = {
-  version: 1,
-  title: '今日纸条',
-  tasks: [],
-  view: 'plan',
-  weekOffset: 0,
+  version: 2,
+  color: 'butter',
+  paperStyle: 'tape',
+  rotation: -1.4,
 }
 
 const CATEGORY_KEYWORDS: Record<Exclude<TodoTaskCategory, 'other'>, RegExp> = {
@@ -42,6 +53,19 @@ function readCategory(value: unknown): TodoTaskCategory | undefined {
 
 function readPriority(value: unknown): TodoTaskPriority {
   return value === 'high' || value === 'low' ? value : 'normal'
+}
+
+function readNoteColor(value: unknown): TodoNoteColor {
+  return TODO_NOTE_COLORS.includes(value as TodoNoteColor) ? value as TodoNoteColor : 'butter'
+}
+
+function readPaperStyle(value: unknown): TodoNotePaperStyle {
+  return TODO_NOTE_PAPER_STYLES.includes(value as TodoNotePaperStyle) ? value as TodoNotePaperStyle : 'tape'
+}
+
+function clampRotation(value: unknown): number {
+  const rotation = readFiniteNumber(value) ?? DEFAULT_TODO_WIDGET_CONFIG.rotation
+  return Math.round(Math.max(-4.5, Math.min(4.5, rotation)) * 10) / 10
 }
 
 export function sanitizeTodoTitle(value: unknown): string {
@@ -100,9 +124,9 @@ export function normalizeTodoTasks(value: unknown, now = Date.now()): TodoTask[]
   return tasks
 }
 
-export function normalizeTodoWidgetConfig(value: unknown, now = Date.now()): TodoWidgetConfig {
+export function normalizeLegacyTodoWidgetConfig(value: unknown, now = Date.now()): LegacyTodoWidgetConfig {
   const source = isRecord(value) ? value : {}
-  const title = sanitizeTodoTitle(source.title).slice(0, 40) || DEFAULT_TODO_WIDGET_CONFIG.title
+  const title = sanitizeTodoTitle(source.title).slice(0, 40) || '今日纸条'
   const rawWeekOffset = readFiniteNumber(source.weekOffset) ?? 0
   return {
     version: 1,
@@ -111,6 +135,71 @@ export function normalizeTodoWidgetConfig(value: unknown, now = Date.now()): Tod
     view: source.view === 'week' ? 'week' : 'plan',
     weekOffset: Math.max(-52, Math.min(1, Math.round(rawWeekOffset))),
   }
+}
+
+export function normalizeTodoWidgetConfig(value: unknown, now = Date.now()): TodoWidgetConfig {
+  const source = isRecord(value) ? value : {}
+  const legacyTasks = source.version === 1 ? normalizeTodoTasks(source.tasks, now) : []
+  return {
+    version: 2,
+    task: normalizeTodoTask(source.task, 0, now) ?? legacyTasks[0] ?? undefined,
+    color: readNoteColor(source.color),
+    paperStyle: readPaperStyle(source.paperStyle),
+    rotation: clampRotation(source.rotation),
+    tearRequestedAt: readFiniteNumber(source.tearRequestedAt),
+  }
+}
+
+export function createTodoWidgetConfig(params: {
+  task?: TodoTask
+  color?: TodoNoteColor
+  paperStyle?: TodoNotePaperStyle
+  rotation?: number
+  tearRequestedAt?: number
+} = {}): TodoWidgetConfig {
+  return normalizeTodoWidgetConfig({
+    version: 2,
+    task: params.task,
+    color: params.color ?? DEFAULT_TODO_WIDGET_CONFIG.color,
+    paperStyle: params.paperStyle ?? DEFAULT_TODO_WIDGET_CONFIG.paperStyle,
+    rotation: params.rotation ?? DEFAULT_TODO_WIDGET_CONFIG.rotation,
+    tearRequestedAt: params.tearRequestedAt,
+  })
+}
+
+/** 将旧版“一块板里多项任务”展开为“一项任务一张便利贴”。 */
+export function migrateTodoWidgetInstance(widget: WidgetInstance, now = Date.now()): WidgetInstance[] {
+  if (widget.type !== 'todo-board') return [widget]
+  const source = isRecord(widget.config) ? widget.config : {}
+  if (source.version !== 1) {
+    return [{ ...widget, config: { ...normalizeTodoWidgetConfig(source, now) } }]
+  }
+
+  const legacy = normalizeLegacyTodoWidgetConfig(source, now)
+  const tasks: Array<TodoTask | undefined> = legacy.tasks.length > 0 ? legacy.tasks : [undefined]
+  return tasks.map((task, index) => ({
+    ...widget,
+    id: index === 0 ? widget.id : `${widget.id}-${index}`.slice(0, 160),
+    x: widget.x + (index % 5) * 26,
+    y: widget.y + (index % 4) * 22,
+    width: 220,
+    height: 190,
+    enabled: task?.done ? false : widget.enabled,
+    config: { ...createTodoWidgetConfig({
+      task,
+      color: TODO_NOTE_COLORS[index % TODO_NOTE_COLORS.length],
+      paperStyle: TODO_NOTE_PAPER_STYLES[index % TODO_NOTE_PAPER_STYLES.length],
+      rotation: [-1.8, 1.2, -0.7, 2.1, -1.1][index % 5],
+      tearRequestedAt: task?.done ? task.completedAt : undefined,
+    }) },
+  }))
+}
+
+export function collectTodoTasks(widgets: WidgetInstance[], now = Date.now()): TodoTask[] {
+  return widgets
+    .filter((widget) => widget.type === 'todo-board')
+    .map((widget) => normalizeTodoWidgetConfig(widget.config, now).task)
+    .filter((task): task is TodoTask => Boolean(task))
 }
 
 export function createTodoTask(params: {

@@ -239,7 +239,7 @@ function applyCanvasMousePassthrough(): void {
   const ignore = shouldIgnoreCanvasMouse({
     desktopOccluded,
     recompositing: canvasRecompositing,
-    editing: isEditing,
+    editing: isEditing || canvasTextInputActive,
     pointerActive: rendererPointerActive,
     widgetUnderCursor: Boolean(cursorWidgetId) || rendererHoverHint,
   })
@@ -255,6 +255,7 @@ function applyCanvasMousePassthrough(): void {
     desktopOccluded,
     recompositing: canvasRecompositing,
     editing: isEditing,
+    textInputActive: canvasTextInputActive,
     pointerActive: rendererPointerActive,
     cursorWidgetId,
     rendererHoverHint,
@@ -393,7 +394,11 @@ function commitDesktopOcclusion(occluded: boolean): void {
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
-  if (occluded) cancelCanvasZOrderRefresh()
+  if (occluded) {
+    cancelCanvasZOrderRefresh()
+    canvasTextInputActive = false
+    getCanvasWindow()?.setFocusable(false)
+  }
   applyCanvasMousePassthrough()
 
   const wp = getWallpaperWindow()
@@ -415,6 +420,7 @@ function commitDesktopOcclusion(occluded: boolean): void {
 
 let canvasWindow: BrowserWindow | null = null
 let isEditing = false
+let canvasTextInputActive = false
 let rendererMousePassthrough = true
 let rendererMousePassthroughAt = 0
 let rendererPointerActive = false
@@ -555,6 +561,7 @@ export function createCanvasWindow(): BrowserWindow {
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
+  canvasTextInputActive = false
   nativeMousePassthrough = null
   cursorWidgetId = null
   nativeLeftButtonDown = false
@@ -628,6 +635,7 @@ export function createCanvasWindow(): BrowserWindow {
     if (cursorHitTestTimer) { clearInterval(cursorHitTestTimer); cursorHitTestTimer = null }
     cancelCanvasZOrderRefresh()
     rendererPointerActive = false
+    canvasTextInputActive = false
     nativeMousePassthrough = null
     cursorWidgetId = null
     nativeLeftButtonDown = false
@@ -671,6 +679,38 @@ export function setCanvasPointerActive(active: boolean): void {
   applyCanvasMousePassthrough()
 }
 
+/** 只为桌面内联编辑临时开启键盘焦点，不改变组件层级或全局编辑状态。 */
+export function setCanvasTextInputActive(active: boolean): boolean {
+  const win = getCanvasWindow()
+  if (!win || (desktopOccluded && active)) return false
+  if (isEditing) return true
+  if (canvasTextInputActive === active) {
+    if (active) {
+      win.setFocusable(true)
+      win.focus()
+      win.webContents.focus()
+    }
+    return true
+  }
+
+  canvasTextInputActive = active
+  rendererMousePassthrough = !active
+  rendererMousePassthroughAt = Date.now()
+  if (active) {
+    cancelCanvasZOrderRefresh()
+    win.setFocusable(true)
+    applyCanvasMousePassthrough()
+    win.focus()
+    win.webContents.focus()
+  } else {
+    win.setFocusable(false)
+    applyCanvasMousePassthrough()
+    settleCanvasOnDesktop(win)
+  }
+  logDockDiagnostic('canvas.text-input-active-changed', { active })
+  return true
+}
+
 export function noteCanvasRendererActionPointerDown(): void {
   lastRendererActionPointerDownAt = Date.now()
 }
@@ -695,6 +735,7 @@ export function setCanvasEditMode(on: boolean): void {
   if (!canvasWindow || canvasWindow.isDestroyed()) return
   cancelCanvasZOrderRefresh()
   isEditing = on
+  canvasTextInputActive = false
   if (on) {
     // 最小化其他所有普通窗口，露出桌面组件
     minimizeAllOtherWindows()
@@ -784,7 +825,7 @@ export function minimizeAllOtherWindows(): void {
  */
 export function refreshCanvasZOrder(): void {
   const win = getCanvasWindow()
-  if (!win || desktopOccluded || isEditing) return
+  if (!win || desktopOccluded || isEditing || canvasTextInputActive) return
 
   const generation = ++zOrderRefreshGeneration
   if (zOrderRefreshTimer) clearTimeout(zOrderRefreshTimer)

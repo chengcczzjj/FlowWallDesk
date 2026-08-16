@@ -56,6 +56,8 @@ const api = {
   setPointerActive: (active: boolean): void => {
     ipcRenderer.send(IPC.CANVAS_SET_POINTER_ACTIVE, active)
   },
+  setTextInputActive: (active: boolean): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.CANVAS_SET_TEXT_INPUT_ACTIVE, active),
   logDiagnostic: (event: string, details: Record<string, unknown> = {}): void => {
     ipcRenderer.send(IPC.CANVAS_DIAGNOSTIC, event, details)
   },

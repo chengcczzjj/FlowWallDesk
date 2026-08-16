@@ -7,6 +7,7 @@ import { z } from 'zod'
 import type { DesktopIconItem, WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan } from '@shared/desktop-scene-layout'
 import { findSmartWidgetPlacement } from '@shared/widget-placement'
+import { migrateTodoWidgetInstance } from '@shared/todo'
 import {
   DEFAULT_WIDGET_SIZE_BY_TYPE,
   WIDGET_TYPES,
@@ -23,6 +24,7 @@ import {
   setCanvasEditMode,
   setCanvasMousePassthrough,
   setCanvasPointerActive,
+  setCanvasTextInputActive,
 } from '../windows/canvasWindow'
 import {
   getUserWallpaperFolderName,
@@ -45,6 +47,7 @@ const DOCK_MIN_RESTORED_HEIGHT = 72
 const DOCK_BOTTOM_MARGIN = 72
 const GLOBAL_ICON_WIDGET_TYPES = ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock']
 const MAX_DESKTOP_SCENE_SNAPSHOTS = 20
+const STICKY_NOTE_GRAB_EDGE = 42
 const DEFAULT_DOCK_CONFIG: Record<string, unknown> = {
   items: [],
   dockStyle: 'glass',
@@ -57,7 +60,11 @@ const DEFAULT_DOCK_CONFIG: Record<string, unknown> = {
 }
 
 function canAddMultipleWidgetType(type: string): boolean {
-  return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'generated-widget'].includes(type)
+  return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'generated-widget', 'todo-board'].includes(type)
+}
+
+function isFreeformStickyNote(type: string): boolean {
+  return type === 'todo-board'
 }
 
 const widgetConfigSchema = z.record(z.string().max(120), z.unknown()).superRefine((value, context) => {
@@ -113,7 +120,7 @@ function withDefaultWidgetConfig(widget: WidgetInstance): WidgetInstance {
 }
 
 function withDefaultWidgetConfigs(widgets: WidgetInstance[]): WidgetInstance[] {
-  return widgets.map((widget) => withDefaultWidgetConfig(widget))
+  return widgets.flatMap((widget) => migrateTodoWidgetInstance(withDefaultWidgetConfig(widget)))
 }
 
 function getWallpaperScopedWidgets(widgets: WidgetInstance[]): WidgetInstance[] {
@@ -270,6 +277,27 @@ function getDockPlacement(width: number, height: number): { x: number; y: number
     x: Math.max(EDGE_PADDING, Math.min(Math.round((area.width - width) / 2), Math.max(EDGE_PADDING, maxX))),
     y: Math.max(EDGE_PADDING, Math.min(Math.round(area.height - height - DOCK_BOTTOM_MARGIN), Math.max(EDGE_PADDING, maxY))),
   }
+}
+
+function clampStickyNotePosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
+  const area = screen.getPrimaryDisplay().bounds
+  return {
+    x: Math.round(Math.max(-width + STICKY_NOTE_GRAB_EDGE, Math.min(x, area.width - STICKY_NOTE_GRAB_EDGE))),
+    y: Math.round(Math.max(-height + STICKY_NOTE_GRAB_EDGE, Math.min(y, area.height - STICKY_NOTE_GRAB_EDGE))),
+  }
+}
+
+/** 新便利贴有意错落叠放，避免把“可重叠”又退化成普通组件自动排版。 */
+function findStickyNotePlacement(width: number, height: number, existing: WidgetInstance[]): { x: number; y: number } {
+  const display = screen.getPrimaryDisplay()
+  const area = display.workArea
+  const bounds = display.bounds
+  const count = existing.filter((widget) => widget.type === 'todo-board' && widget.enabled).length
+  const column = count % 6
+  const row = Math.floor(count / 6) % 3
+  const x = Math.round(area.x - bounds.x + area.width * 0.66 - width / 2 + column * 28 - row * 36)
+  const y = Math.round(area.y - bounds.y + Math.min(150, area.height * 0.17) + column * 22 + row * 34)
+  return clampStickyNotePosition(x, y, width, height)
 }
 
 /** 将坐标对齐到网格 */
@@ -631,6 +659,8 @@ export function registerWidgetIpc(): void {
     const widget = withDefaultWidgetConfig(w)
     const placement = widget.type === 'desktop-icons-dock'
       ? getDockPlacement(widget.width, widget.height)
+      : isFreeformStickyNote(widget.type)
+        ? findStickyNotePlacement(widget.width, widget.height, list)
       : findPlacement(widget.width, widget.height, list)
     widget.x = placement.x
     widget.y = placement.y
@@ -653,11 +683,14 @@ export function registerWidgetIpc(): void {
     assertTrustedIpcSender(_e, ['main', 'canvas'])
     w = widgetInstanceSchema.parse(w)
     const list = store.get('widgets')
-    // 网格吸附 + 边界约束 + 重叠避让
-    const resolved = resolvePosition(w.id, w.x, w.y, w.width, w.height, list, !canAddMultipleWidgetType(w.type))
+    const resolved = isFreeformStickyNote(w.type)
+      ? clampStickyNotePosition(w.x, w.y, w.width, w.height)
+      : resolvePosition(w.id, w.x, w.y, w.width, w.height, list, !canAddMultipleWidgetType(w.type))
     w.x = resolved.x
     w.y = resolved.y
-    const updated = list.map((it) => (it.id === w.id ? mergeWidgetUpdate(it, w) : it))
+    const updated = isFreeformStickyNote(w.type)
+      ? [...list.filter((item) => item.id !== w.id), mergeWidgetUpdate(list.find((item) => item.id === w.id) ?? w, w)]
+      : list.map((it) => (it.id === w.id ? mergeWidgetUpdate(it, w) : it))
     persistWidgets(updated)
     syncToCanvas()
     autoSaveToWallpaper()
@@ -688,6 +721,12 @@ export function registerWidgetIpc(): void {
     assertTrustedIpcSender(_e, ['canvas'])
     if (typeof active !== 'boolean') return
     setCanvasPointerActive(active)
+  })
+
+  ipcMain.handle(IPC.CANVAS_SET_TEXT_INPUT_ACTIVE, (_e, active: boolean) => {
+    assertTrustedIpcSender(_e, ['canvas'])
+    active = z.boolean().parse(active)
+    return setCanvasTextInputActive(active)
   })
 
   ipcMain.on(IPC.CANVAS_DIAGNOSTIC, (_e, event: string, details: Record<string, unknown>) => {
@@ -797,6 +836,8 @@ export function addWidgetForTool(widget: WidgetInstance): { ok: boolean; added: 
   const normalized = withDefaultWidgetConfig(widget)
   const placement = normalized.type === 'desktop-icons-dock'
     ? getDockPlacement(normalized.width, normalized.height)
+    : isFreeformStickyNote(normalized.type)
+      ? findStickyNotePlacement(normalized.width, normalized.height, list)
     : findPlacement(normalized.width, normalized.height, list)
   normalized.x = placement.x
   normalized.y = placement.y
@@ -829,6 +870,27 @@ export function updateWidgetConfigForTool(params: { id?: string; type?: string; 
   syncToCanvas()
   autoSaveToWallpaper()
   return { ok: true, widget: updated.find((item) => item.id === target.id), list: updated }
+}
+
+export function updateWidgetForTool(params: {
+  id: string
+  config?: Record<string, unknown>
+  enabled?: boolean
+}): { ok: boolean; widget?: WidgetInstance; list: WidgetInstance[]; error?: string } {
+  const list = withDefaultWidgetConfigs(store.get('widgets'))
+  const target = list.find((item) => item.id === params.id)
+  if (!target) return { ok: false, list, error: 'widget-not-found' }
+
+  const nextWidget: WidgetInstance = {
+    ...target,
+    enabled: params.enabled ?? target.enabled,
+    config: params.config ? mergeConfigUpdate(target, params.config) : target.config,
+  }
+  const updated = list.map((item) => item.id === target.id ? nextWidget : item)
+  persistWidgets(updated)
+  syncToCanvas()
+  autoSaveToWallpaper()
+  return { ok: true, widget: nextWidget, list: updated }
 }
 
 export async function removeWidgetForTool(params: { id?: string; type?: string }): Promise<{ ok: boolean; deleted: boolean; list: WidgetInstance[]; error?: string }> {

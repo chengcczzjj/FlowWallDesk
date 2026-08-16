@@ -67,6 +67,8 @@ export const IPC = {
   CANVAS_SET_IGNORE_MOUSE: 'canvas:set-ignore-mouse',
   // 画布 → 主进程：指针手势生命周期，防止拖拽中途穿透
   CANVAS_SET_POINTER_ACTIVE: 'canvas:set-pointer-active',
+  // 画布 → 主进程：桌面内联输入临时获取键盘焦点，不进入全局编辑模式
+  CANVAS_SET_TEXT_INPUT_ACTIVE: 'canvas:set-text-input-active',
   // 画布 → 主进程：Dock 交互链路持久化诊断事件
   CANVAS_DIAGNOSTIC: 'canvas:diagnostic',
   // 主进程 -> 画布：Windows 透明窗口丢失 pointerdown 时的 Dock 单击兜底

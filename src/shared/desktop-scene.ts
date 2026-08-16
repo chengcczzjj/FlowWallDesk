@@ -39,7 +39,7 @@ export type WidgetLayer = 'persistent' | 'ambient' | 'information' | 'companion'
 export type DesktopSceneDensity = 'minimal' | 'balanced' | 'dense'
 export type DesktopAestheticStyle = 'minimal' | 'soft' | 'neon' | 'pixel' | 'workbench' | 'poster'
 export type DesktopRiskLevel = 'low' | 'medium' | 'high'
-export type WidgetMaterial = 'text-only' | 'glass' | 'neon' | 'pixel' | 'card'
+export type WidgetMaterial = 'text-only' | 'glass' | 'neon' | 'pixel' | 'card' | 'paper'
 export type WidgetVisualWeight = 'quiet' | 'normal' | 'strong'
 export type WallpaperContrastMode = 'auto' | 'light-on-dark' | 'dark-on-light'
 
@@ -250,7 +250,7 @@ export const DEFAULT_WIDGET_SIZE_BY_TYPE: Record<WidgetTypeId, DesktopSize> = {
   weather: { width: 0, height: 0 },
   whitenoise: { width: 0, height: 0 },
   text: { width: 0, height: 0 },
-  'todo-board': { width: 420, height: 520 },
+  'todo-board': { width: 220, height: 190 },
   stocks: { width: 336, height: 336 },
   news: { width: 160, height: 336 },
   calendar: { width: 160, height: 160 },
@@ -461,23 +461,24 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
   },
   {
     type: 'todo-board',
-    displayName: '桌面任务便笺',
+    displayName: '自由便利贴',
     layer: 'information',
-    role: '可直接操作的桌面待办、提醒与周复盘',
+    role: '一张纸记录一件事，可自由叠放并在完成时撕下',
     intents: ['todo', 'task', 'note', 'reminder', 'weekly-review', 'plan', 'work'],
     defaultSize: DEFAULT_WIDGET_SIZE_BY_TYPE['todo-board'],
-    minSize: { width: 320, height: 320 },
-    maxSize: { width: 760, height: 840 },
-    allowMultiple: false,
+    minSize: { width: 150, height: 130 },
+    maxSize: { width: 420, height: 380 },
+    allowMultiple: true,
     persistent: false,
     canAutoHide: true,
-    aesthetics: { visualWeight: 'normal', material: 'glass', maxDefaultInstances: 1, canBeHero: true, shouldGroupWith: ['calendar'], wallpaperContrast: 'auto' },
+    aesthetics: { visualWeight: 'quiet', material: 'paper', maxDefaultInstances: 5, canBeHero: false, shouldGroupWith: ['calendar'], wallpaperContrast: 'auto' },
     configSchema: [
-      { key: 'title', type: 'string', label: '便笺标题' },
-      { key: 'tasks', type: 'array', label: '任务清单' },
-      { key: 'view', type: 'enum', label: '视图', options: ['plan', 'week'] },
+      { key: 'task', type: 'object', label: '单项任务' },
+      { key: 'color', type: 'enum', label: '纸张颜色', options: ['butter', 'rose', 'mint', 'sky', 'lilac'] },
+      { key: 'paperStyle', type: 'enum', label: '固定方式', options: ['tape', 'pin', 'plain'] },
+      { key: 'rotation', type: 'number', label: '自然倾斜角度' },
     ],
-    presets: [{ id: 'daily-note', label: '今日纸条', intent: ['todo', 'daily', 'plan'], config: { title: '今日纸条', view: 'plan' } }],
+    presets: [{ id: 'blank-note', label: '空白便利贴', intent: ['todo', 'note'], config: { version: 2, color: 'butter', paperStyle: 'tape', rotation: -1.4 } }],
     layoutHints: { preferredAnchors: ['top-right', 'center-right', 'top-left'], avoidCenter: true },
     allowedOps: CARD_OPS,
     risk: 'low',
