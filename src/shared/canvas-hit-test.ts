@@ -19,6 +19,8 @@ export interface CanvasBounds {
   height: number
 }
 
+export const CANVAS_INTERACTION_REPAIR_DELAY_MS = 140
+
 export function isDesktopIconWidgetType(type: string): boolean {
   return DESKTOP_ICON_WIDGET_TYPES.has(type)
 }
@@ -31,16 +33,19 @@ export function findInteractiveWidgetAtPoint(
   const clientX = point.x - displayBounds.x
   const clientY = point.y - displayBounds.y
 
-  return widgets.find((widget) => {
-    if (widget.enabled === false) return false
+  // Widgets render in array order, so the last matching item is visually on top.
+  for (let index = widgets.length - 1; index >= 0; index -= 1) {
+    const widget = widgets[index]
+    if (widget.enabled === false) continue
     const padding = widget.type === 'desktop-icons-dock' ? 28 : 2
-    return (
+    if (
       clientX >= widget.x - padding &&
       clientX <= widget.x + widget.width + padding &&
       clientY >= widget.y - padding &&
       clientY <= widget.y + widget.height + padding
-    )
-  })
+    ) return widget
+  }
+  return undefined
 }
 
 export function shouldIgnoreCanvasMouse(options: {
@@ -53,4 +58,25 @@ export function shouldIgnoreCanvasMouse(options: {
   if (options.desktopOccluded || options.recompositing) return true
   if (options.editing || options.pointerActive || options.widgetUnderCursor) return false
   return true
+}
+
+export function shouldRepairCanvasInteraction(options: {
+  desktopOccluded: boolean
+  recompositing: boolean
+  nativeMousePassthrough: boolean | null
+  rendererMousePassthrough: boolean
+  captureRequestedAt: number
+  now: number
+  canvasTopmost: boolean
+  desktopSurface: boolean
+  alreadyAttempted: boolean
+}): boolean {
+  if (options.desktopOccluded || options.recompositing || options.alreadyAttempted) return false
+  if (options.nativeMousePassthrough !== false || !options.rendererMousePassthrough) return false
+  if (options.captureRequestedAt <= 0 || options.now - options.captureRequestedAt < CANVAS_INTERACTION_REPAIR_DELAY_MS) {
+    return false
+  }
+  // Repair only when the cursor is on our canvas or a desktop shell surface.
+  // A normal application covering the same coordinates must never be raised over.
+  return options.canvasTopmost || options.desktopSurface
 }

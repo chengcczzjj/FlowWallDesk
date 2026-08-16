@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-17 00:00] 修复全屏游戏返回后便笺无法拖动
+
+**变更摘要**: 修复 Windows 退出全屏游戏后透明 Canvas 仍可见、主进程也能命中便笺，但 renderer 收不到鼠标事件导致便笺无法拖动的层级/合成状态脱节。
+
+**诊断证据**:
+- `dock-diagnostics.jsonl` 显示全屏遮挡已从 `true` 正常恢复为 `false`，且 `canvas.cursor-region-changed` 能连续命中 `todo-board`。
+- 同期 `canvas.mouse-passthrough-changed` 已切到 `ignore: false`，原生左键 down/up 也存在，但没有对应的 renderer `pointer-down-observed`；因此故障不在便笺拖动逻辑，而在 Canvas HWND/Chromium 输入表面恢复。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts`: 全屏返回时同步刷新壁纸 WorkerW 和 Canvas DefView owner，使用 `showInactive / invalidate / alwaysOnTop -> HWND_BOTTOM` 有界重组合，并强制重应用鼠标穿透状态。
+- `src/shared/canvas-hit-test.ts`: 原生命中改为从数组末尾查找最上层重叠便笺；增加 140ms renderer 接管超时自愈决策，且仅允许在 Canvas/桌面 Shell 表面修复，避免抬高到普通应用之上。
+- `tests/shared-contracts.test.mjs` / `tests/release-contracts.test.mjs`: 增加重叠顺序、自愈安全边界、全屏返回重组合和 Electron 穿透缓存刷新契约。
+
+**Git Commit**: 已提交 — `fix(canvas): restore sticky note input after fullscreen`
+
+---
+
 ## [2026-08-16 21:07] 简化便笺排版与撕除动效
 
 **变更摘要**: 桌面便笺改用 Windows 系统字体与 Sticky Notes 式极简顶栏，在纸面内提供配色/分类快捷设置，并将完成动画从向下扯落改为短促的横向纤维撕除。

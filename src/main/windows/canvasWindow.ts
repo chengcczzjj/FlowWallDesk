@@ -7,6 +7,7 @@ import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occl
 import {
   findInteractiveWidgetAtPoint,
   isDesktopIconWidgetType,
+  shouldRepairCanvasInteraction,
   shouldIgnoreCanvasMouse,
 } from '@shared/canvas-hit-test'
 import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared/native-dock-click'
@@ -245,6 +246,7 @@ function applyCanvasMousePassthrough(): void {
   })
   if (nativeMousePassthrough === ignore) return
   nativeMousePassthrough = ignore
+  nativeCaptureRequestedAt = ignore ? 0 : Date.now()
   if (ignore) {
     win.setIgnoreMouseEvents(true, { forward: true })
   } else {
@@ -267,7 +269,29 @@ interface NativeCursorSurface {
   rootHwnd: number
   canvasHwnd: number
   canvasTopmost: boolean
+  desktopSurface: boolean
+  hitClassName: string
+  rootClassName: string
   reason: string
+}
+
+function readNativeClassName(hwnd: number): string {
+  if (!u32 || !hwnd) return ''
+  const buffer = Buffer.alloc(128)
+  const length = Number(u32.GetClassNameA(hwnd, buffer, buffer.length))
+  return length > 0 ? buffer.toString('utf8', 0, length) : ''
+}
+
+function isDesktopShellSurface(hitHwnd: number, rootHwnd: number, rootClassName: string): boolean {
+  if (!u32) return false
+  const progman = Number(u32.FindWindowExA(0, 0, 'Progman', 0))
+  const defView = findDefView()
+  const desktopRoot = defView ? Number(u32.GetAncestor(defView, GA_ROOT)) : 0
+  return (
+    hitHwnd === progman || rootHwnd === progman ||
+    hitHwnd === defView || rootHwnd === desktopRoot ||
+    rootClassName === 'Progman' || rootClassName === 'WorkerW'
+  )
 }
 
 function inspectNativeCursorSurface(): NativeCursorSurface {
@@ -277,6 +301,9 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
     rootHwnd: 0,
     canvasHwnd: 0,
     canvasTopmost: false,
+    desktopSurface: false,
+    hitClassName: '',
+    rootClassName: '',
     reason,
   })
   if (!u32) return unavailable('native-api-unavailable')
@@ -289,11 +316,16 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
     const hitHwnd = Number(u32.WindowFromPoint(point))
     const rootHwnd = hitHwnd ? Number(u32.GetAncestor(hitHwnd, GA_ROOT)) : 0
     const canvasHwnd = Number(win.getNativeWindowHandle().readBigInt64LE(0))
+    const hitClassName = readNativeClassName(hitHwnd)
+    const rootClassName = readNativeClassName(rootHwnd)
     return {
       hitHwnd,
       rootHwnd,
       canvasHwnd,
       canvasTopmost: isNativeCanvasSurfaceHit({ hitHwnd, rootHwnd, canvasHwnd }),
+      desktopSurface: isDesktopShellSurface(hitHwnd, rootHwnd, rootClassName),
+      hitClassName,
+      rootClassName,
       reason: hitHwnd ? 'window-from-point' : 'no-window-at-cursor',
     }
   } catch {
@@ -306,11 +338,16 @@ function refreshCanvasCursorHitTest(): void {
   const cursor = screen.getCursorScreenPoint()
   const widgets = store.get('widgets')
   const widget = findInteractiveWidgetAtPoint(cursor, display.bounds, widgets)
-  const iconSurface = widget && isDesktopIconWidgetType(widget.type) ? inspectNativeCursorSurface() : null
+  const widgetSurface = widget && (isDesktopIconWidgetType(widget.type) || rendererMousePassthrough)
+    ? inspectNativeCursorSurface()
+    : null
+  const iconSurface = widget && isDesktopIconWidgetType(widget.type) ? widgetSurface : null
   const previousIconSurface = lastNativeIconSurfaceSample
   const nextWidgetId = widget?.id ?? null
   if (nextWidgetId !== cursorWidgetId) {
     cursorWidgetId = nextWidgetId
+    nativeCaptureRequestedAt = nextWidgetId ? Date.now() : 0
+    interactionRepairWidgetId = null
     logDockDiagnostic('canvas.cursor-region-changed', {
       widgetId: cursorWidgetId,
       widgetType: widget?.type ?? null,
@@ -370,6 +407,25 @@ function refreshCanvasCursorHitTest(): void {
     ? { widgetId: widget.id, sampledAt: Date.now(), surface: iconSurface }
     : null
   applyCanvasMousePassthrough()
+  if (widget && widgetSurface && shouldRepairCanvasInteraction({
+    desktopOccluded,
+    recompositing: canvasRecompositing,
+    nativeMousePassthrough,
+    rendererMousePassthrough,
+    captureRequestedAt: nativeCaptureRequestedAt,
+    now: Date.now(),
+    canvasTopmost: widgetSurface.canvasTopmost,
+    desktopSurface: widgetSurface.desktopSurface,
+    alreadyAttempted: interactionRepairWidgetId === widget.id,
+  })) {
+    interactionRepairWidgetId = widget.id
+    logDockDiagnostic('canvas.interaction-repair-requested', {
+      widgetId: widget.id,
+      widgetType: widget.type,
+      surface: widgetSurface,
+    })
+    refreshCanvasZOrder('missing-renderer-hover')
+  }
 }
 
 function cancelCanvasZOrderRefresh(): void {
@@ -377,6 +433,10 @@ function cancelCanvasZOrderRefresh(): void {
   if (zOrderRefreshTimer) {
     clearTimeout(zOrderRefreshTimer)
     zOrderRefreshTimer = null
+  }
+  if (desktopReturnRecoveryTimer) {
+    clearTimeout(desktopReturnRecoveryTimer)
+    desktopReturnRecoveryTimer = null
   }
   const win = getCanvasWindow()
   if (win) win.setAlwaysOnTop(false)
@@ -388,12 +448,27 @@ function settleCanvasOnDesktop(win: BrowserWindow): void {
   sendToBottom(win)
 }
 
+function recoverCanvasAfterDesktopReturn(): void {
+  refreshWallpaperAttach()
+  refreshCanvasZOrder('desktop-return')
+  if (desktopReturnRecoveryTimer) clearTimeout(desktopReturnRecoveryTimer)
+  desktopReturnRecoveryTimer = setTimeout(() => {
+    desktopReturnRecoveryTimer = null
+    if (cursorWidgetId || rendererPointerActive || canvasTextInputActive) return
+    refreshCanvasZOrder('desktop-return-settled')
+  }, 360)
+}
+
 function commitDesktopOcclusion(occluded: boolean): void {
   desktopOccluded = occluded
   nativeIconGesture = null
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
+  cursorWidgetId = null
+  nativeCaptureRequestedAt = 0
+  interactionRepairWidgetId = null
+  lastNativeIconSurfaceSample = null
   if (occluded) {
     cancelCanvasZOrderRefresh()
     canvasTextInputActive = false
@@ -413,7 +488,7 @@ function commitDesktopOcclusion(occluded: boolean): void {
     })
   }
 
-  if (!occluded) refreshCanvasZOrder()
+  if (!occluded) recoverCanvasAfterDesktopReturn()
   console.log(`[canvas] desktop ${occluded ? 'occluded' : 'visible'}; interaction state reset`)
   logDockDiagnostic('canvas.occlusion-changed', { occluded, foreground: lastOcclusionDiagnostic })
 }
@@ -429,6 +504,8 @@ let cursorWidgetId: string | null = null
 let nativeLeftButtonDown = false
 let lastRendererActionPointerDownAt = 0
 let canvasRecompositing = false
+let nativeCaptureRequestedAt = 0
+let interactionRepairWidgetId: string | null = null
 let nativeIconGesture: {
   widgetId: string
   startedAt: number
@@ -444,6 +521,7 @@ let lastNativeIconSurfaceSample: {
 let canvasHealthTimer: ReturnType<typeof setInterval> | null = null
 let cursorHitTestTimer: ReturnType<typeof setInterval> | null = null
 let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let desktopReturnRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 let zOrderRefreshGeneration = 0
 let boundsListenerRegistered = false
 
@@ -566,6 +644,8 @@ export function createCanvasWindow(): BrowserWindow {
   cursorWidgetId = null
   nativeLeftButtonDown = false
   canvasRecompositing = true
+  nativeCaptureRequestedAt = 0
+  interactionRepairWidgetId = null
   nativeIconGesture = null
   lastNativeIconSurfaceSample = null
   lastRendererActionPointerDownAt = 0
@@ -640,6 +720,8 @@ export function createCanvasWindow(): BrowserWindow {
     cursorWidgetId = null
     nativeLeftButtonDown = false
     canvasRecompositing = false
+    nativeCaptureRequestedAt = 0
+    interactionRepairWidgetId = null
     nativeIconGesture = null
     lastNativeIconSurfaceSample = null
     lastRendererActionPointerDownAt = 0
@@ -823,7 +905,7 @@ export function minimizeAllOtherWindows(): void {
  * 壁纸 attach 后画布的 HWND_BOTTOM 可能落到 WorkerW 下面导致无法交互。
  * 重新做一次 alwaysOnTop → sendToBottom 来修复 z-order。
  */
-export function refreshCanvasZOrder(): void {
+export function refreshCanvasZOrder(reason = 'requested'): void {
   const win = getCanvasWindow()
   if (!win || desktopOccluded || isEditing || canvasTextInputActive) return
 
@@ -835,8 +917,11 @@ export function refreshCanvasZOrder(): void {
   applyCanvasMousePassthrough()
   // Re-entering the top-level compositor briefly repairs transparent-window input
   // after Chromium/Windows marks the canvas as fully occluded.
+  disableShowDesktopMinimize(win)
+  win.showInactive()
+  if (!win.webContents.isDestroyed()) win.webContents.invalidate()
   win.setAlwaysOnTop(true, 'screen-saver')
-  logDockDiagnostic('canvas.z-order-refresh-started')
+  logDockDiagnostic('canvas.z-order-refresh-started', { reason })
   zOrderRefreshTimer = setTimeout(() => {
     zOrderRefreshTimer = null
     if (generation !== zOrderRefreshGeneration) return
@@ -845,16 +930,19 @@ export function refreshCanvasZOrder(): void {
       canvasRecompositing = false
       return
     }
-    if (desktopOccluded || isEditing) {
+    if (desktopOccluded || isEditing || canvasTextInputActive) {
       canvasRecompositing = false
       applyCanvasMousePassthrough()
       return
     }
     current.setAlwaysOnTop(false)
     settleCanvasOnDesktop(current)
+    if (!current.webContents.isDestroyed()) current.webContents.invalidate()
     canvasRecompositing = false
+    // Full-screen transitions can invalidate Electron's cached click-through style.
+    nativeMousePassthrough = null
     applyCanvasMousePassthrough()
-    logDockDiagnostic('canvas.z-order-refresh-completed')
+    logDockDiagnostic('canvas.z-order-refresh-completed', { reason })
   }, 150)
 }
 

@@ -33,9 +33,11 @@ import {
 } from '../src/shared/icon-launch-motion.ts'
 import { createShowDesktopInputEvents } from '../src/main/windows/windowsDesktop.ts'
 import {
+  CANVAS_INTERACTION_REPAIR_DELAY_MS,
   findInteractiveWidgetAtPoint,
   isDesktopIconWidgetType,
   shouldIgnoreCanvasMouse,
+  shouldRepairCanvasInteraction,
 } from '../src/shared/canvas-hit-test.ts'
 import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
 import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '../src/shared/native-dock-click.ts'
@@ -167,13 +169,18 @@ test('canvas mouse passthrough stays locked until an active pointer gesture ends
   assert.equal(gate.shouldIgnoreMouse(false, true), false)
 })
 
-test('native canvas hit testing keeps desktop icon widgets alive without renderer mousemove events', () => {
+test('native canvas hit testing follows visual z-order and keeps widgets alive without renderer mousemove events', () => {
   const dock = {
     id: 'dock-1', type: 'desktop-icons-dock', x: 800, y: 900, width: 600, height: 88, enabled: true, config: {},
   }
+  const lowerNote = {
+    id: 'note-lower', type: 'todo-board', x: 100, y: 100, width: 220, height: 190, enabled: true, config: {},
+  }
+  const upperNote = { ...lowerNote, id: 'note-upper', x: 130, y: 120 }
   const display = { x: 0, y: 0, width: 1920, height: 1080 }
   assert.equal(findInteractiveWidgetAtPoint({ x: 810, y: 890 }, display, [dock])?.id, dock.id)
   assert.equal(findInteractiveWidgetAtPoint({ x: 400, y: 400 }, display, [dock]), undefined)
+  assert.equal(findInteractiveWidgetAtPoint({ x: 180, y: 150 }, display, [lowerNote, upperNote])?.id, upperNote.id)
   assert.equal(shouldIgnoreCanvasMouse({
     desktopOccluded: false, editing: false, pointerActive: false, widgetUnderCursor: true,
   }), false)
@@ -191,6 +198,29 @@ test('native canvas hit testing keeps desktop icon widgets alive without rendere
   assert.equal(isDesktopIconWidgetType('desktop-icons-adaptive'), true)
   assert.equal(isDesktopIconWidgetType('desktop-icons-dock'), true)
   assert.equal(isDesktopIconWidgetType('clock'), false)
+})
+
+test('canvas interaction repair is limited to a missing renderer capture on desktop surfaces', () => {
+  const base = {
+    desktopOccluded: false,
+    recompositing: false,
+    nativeMousePassthrough: false,
+    rendererMousePassthrough: true,
+    captureRequestedAt: 1_000,
+    now: 1_000 + CANVAS_INTERACTION_REPAIR_DELAY_MS,
+    canvasTopmost: true,
+    desktopSurface: false,
+    alreadyAttempted: false,
+  }
+  assert.equal(shouldRepairCanvasInteraction(base), true)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, canvasTopmost: false, desktopSurface: true }), true)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, canvasTopmost: false, desktopSurface: false }), false)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, rendererMousePassthrough: false }), false)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, nativeMousePassthrough: true }), false)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, desktopOccluded: true }), false)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, recompositing: true }), false)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, alreadyAttempted: true }), false)
+  assert.equal(shouldRepairCanvasInteraction({ ...base, now: base.now - 1 }), false)
 })
 
 test('native desktop icon click fallback only runs when the renderer missed a short stationary click', () => {
