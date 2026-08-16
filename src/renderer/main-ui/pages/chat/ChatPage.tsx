@@ -729,6 +729,26 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
     }
   }
 
+  if (tc.toolName === 'manage_todo_tasks') {
+    const action = stringValue(input, 'action') ?? 'list'
+    const task = asRecord(output?.changedTask)
+    const taskTitle = stringValue(task, 'title') ?? stringValue(input, 'title')
+    const actionLabel = action === 'add' ? '新增任务'
+      : action === 'update' ? '修改任务'
+        : action === 'complete' ? '完成任务'
+          : action === 'reopen' ? '恢复任务'
+            : action === 'delete' ? '删除任务'
+              : action === 'weekly-summary' ? '整理周记'
+                : action === 'clear-completed' ? '清理已完成任务'
+                  : '查看任务便笺'
+    return {
+      title: ok === false || tc.status === 'error' ? `${actionLabel}没完成` : tc.status === 'running' ? actionLabel : `${actionLabel}完成`,
+      detail: taskTitle ?? '桌面任务便笺',
+      meta: error ?? stringValue(output, 'headline') ?? undefined,
+      ok,
+    }
+  }
+
   if (tc.toolName === 'list_widgets' || tc.toolName === 'add_widget' || tc.toolName === 'create_generated_widget' || tc.toolName === 'update_widget_config' || tc.toolName === 'remove_widget') {
     const widget = asRecord(output?.widget)
     const type = stringValue(input, 'type') ?? stringValue(widget, 'type')
@@ -781,6 +801,7 @@ function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus,
     if (latest.toolName === 'list_widgets') return `我看一下桌面上现在放了哪些组件${target}。`
     if (latest.toolName === 'add_widget') return `我把这个小组件放到桌面上${target}。`
     if (latest.toolName === 'create_generated_widget') return `我把这个专属小组件做好并放到桌面上${target}。`
+    if (latest.toolName === 'manage_todo_tasks') return `我直接在任务便笺里处理一下${target}。`
     if (latest.toolName === 'update_widget_config') return `我调整一下这个小组件${target}。`
     if (latest.toolName === 'remove_widget') return `我把这个小组件从桌面上拿掉${target}。`
     if (latest.toolName === 'read_file' || latest.toolName === 'list_directory' || latest.toolName === 'get_file_info') return `我先翻一下相关文件${target}。`

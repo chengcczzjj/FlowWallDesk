@@ -17,7 +17,7 @@ import { systemInfoTool } from './definitions/system-info'
 import { memoryStoreTool, memoryRecallTool } from './definitions/memory-tools'
 import { weatherTool } from './definitions/weather'
 import { newsTool } from './definitions/news'
-import { addWidgetTool, createGeneratedWidgetTool, listWidgetsTool, removeWidgetTool, updateWidgetConfigTool } from './definitions/widgets'
+import { addWidgetTool, createGeneratedWidgetTool, listWidgetsTool, manageTodoTasksTool, removeWidgetTool, updateWidgetConfigTool } from './definitions/widgets'
 import {
   desktopSceneApplyTool,
   desktopSceneGetTool,
@@ -68,6 +68,7 @@ export function getToolSet(context: WorkspaceToolContext = {}, selectedToolNames
     update_widget_config: updateWidgetConfigTool,
     remove_widget: removeWidgetTool,
     create_generated_widget: createGeneratedWidgetTool,
+    manage_todo_tasks: manageTodoTasksTool,
     widget_capability_list: widgetCapabilityListTool,
     desktop_scene_get: desktopSceneGetTool,
     desktop_scene_preview: desktopScenePreviewTool,

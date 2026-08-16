@@ -15,6 +15,7 @@ import { PixelClock } from './PixelClock/PixelClock'
 import { GraphicDateTime } from './GraphicDateTime/GraphicDateTime'
 import { DesktopIconAdaptive, DesktopIconBox, DesktopIconDock, DesktopIconHorizontal } from './DesktopIcons/DesktopIcons'
 import { GeneratedWidget } from './GeneratedWidget/GeneratedWidget'
+import { TodoBoardWidget } from './TodoBoard/TodoBoard'
 
 /** 组件类型 → 组件实现 的注册表 */
 export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; resizing?: boolean; entering?: boolean }) {
@@ -29,6 +30,8 @@ export function renderWidget(w: WidgetInstance, options?: { editing?: boolean; r
       return <GraphicDateTime config={w.config} />
     case 'generated-widget':
       return <GeneratedWidget widget={w} entering={Boolean(options?.entering)} />
+    case 'todo-board':
+      return <TodoBoardWidget widget={w} />
     case 'desktop-icons-box':
       return <DesktopIconBox widget={w} editing={Boolean(options?.editing)} resizing={Boolean(options?.resizing)} />
     case 'desktop-icons-horizontal':
@@ -91,6 +94,7 @@ export function isFloatingType(type: string): boolean {
     'weather',
     'whitenoise',
     'text',
+    'todo-board',
     'desktop-icons-box',
     'desktop-icons-horizontal',
     'desktop-icons-adaptive',
@@ -104,6 +108,7 @@ export function isStretchFillType(type: string): boolean {
   return (
     type === 'audio' ||
     type === 'generated-widget' ||
+    type === 'todo-board' ||
     type === 'desktop-icons-box' ||
     type === 'desktop-icons-horizontal' ||
     type === 'desktop-icons-adaptive' ||

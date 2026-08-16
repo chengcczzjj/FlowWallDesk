@@ -42,6 +42,7 @@ export const TOOL_MANIFEST = [
   defineTool({ name: 'update_widget_config', category: 'widget', risk: 'low', cacheable: false, tracksAgentRun: false, label: '调整组件', compactLabel: '组件' }),
   defineTool({ name: 'remove_widget', category: 'widget', risk: 'medium', cacheable: false, tracksAgentRun: false, label: '移除组件', compactLabel: '组件' }),
   defineTool({ name: 'create_generated_widget', category: 'widget', risk: 'low', cacheable: false, tracksAgentRun: false, label: '生成桌面组件', compactLabel: '组件' }),
+  defineTool({ name: 'manage_todo_tasks', category: 'widget', risk: 'low', cacheable: false, tracksAgentRun: false, label: '管理任务便笺', compactLabel: '任务' }),
   defineTool({ name: 'widget_capability_list', category: 'desktop-scene', risk: 'read-only', cacheable: true, tracksAgentRun: false, label: '组件能力', compactLabel: '桌面编排' }),
   defineTool({ name: 'desktop_scene_get', category: 'desktop-scene', risk: 'read-only', cacheable: true, tracksAgentRun: false, label: '桌面上下文', compactLabel: '桌面编排' }),
   defineTool({ name: 'desktop_scene_preview', category: 'desktop-scene', risk: 'read-only', cacheable: true, tracksAgentRun: false, label: '桌面草案', compactLabel: '桌面编排' }),

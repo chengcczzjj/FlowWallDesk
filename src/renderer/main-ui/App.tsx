@@ -52,6 +52,7 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
   widgets: {
     label: '小组件',
     pages: [
+      { id: 'widgets-tasks', label: '任务便笺' },
       { id: 'widgets-floating', label: '悬浮挂件' },
       { id: 'widgets-card', label: '卡片组件' },
       { id: 'widgets-icons', label: '图标收纳' },

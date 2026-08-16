@@ -29,6 +29,12 @@ import {
   PanelBottom,
   Trash2,
   Sparkles,
+  BellRing,
+  Bot,
+  Check,
+  ClipboardCheck,
+  Maximize2,
+  Move,
 } from 'lucide-react'
 import { getStylesForType } from '../../widgets/shared/constants'
 
@@ -94,6 +100,14 @@ const ICON_WIDGETS: WidgetCatalogItem[] = [
   { type: 'desktop-icons-dock', name: '桌面 Dock', icon: <PanelBottom size={20} />, size: 'medium', floating: true },
 ]
 
+const TODO_WIDGET: WidgetCatalogItem = {
+  type: 'todo-board',
+  name: '桌面任务便笺',
+  icon: <ClipboardCheck size={20} />,
+  size: 'large',
+  floating: true,
+}
+
 /** 悬浮组件在桌面上的默认尺寸（0 表示 fit-content 自适应） */
 const FLOATING_DESKTOP_SIZES: Record<string, { w: number; h: number }> = {
   clock: { w: 0, h: 0 },
@@ -104,6 +118,7 @@ const FLOATING_DESKTOP_SIZES: Record<string, { w: number; h: number }> = {
   weather: { w: 0, h: 0 },
   whitenoise: { w: 0, h: 0 },
   text: { w: 0, h: 0 },
+  'todo-board': { w: 420, h: 520 },
   'desktop-icons-box': { w: 246, h: 344 },
   'desktop-icons-horizontal': { w: 356, h: 242 },
   'desktop-icons-adaptive': { w: 246, h: 242 },
@@ -268,6 +283,14 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
   return (
     <div className="widgets-page">
       <div className="widgets-main">
+        {subPage === 'widgets-tasks' && (
+          <TodoWidgetCatalog
+            added={addedTypes.has(TODO_WIDGET.type)}
+            instance={instances.find((item) => item.type === TODO_WIDGET.type)}
+            onAdd={() => addToDesktop(TODO_WIDGET, { version: 1, title: '今日纸条', tasks: [], view: 'plan', weekOffset: 0 })}
+            onRemove={() => removeFromDesktop(TODO_WIDGET.type)}
+          />
+        )}
         {subPage === 'widgets-floating' && (
           <>
             <div className="nobg-grid">
@@ -700,6 +723,102 @@ export function WidgetsPage({ subPage }: { subPage: string }) {
           onClose={() => setSettingsDialog(null)}
         />
       )}
+    </div>
+  )
+}
+
+function TodoWidgetCatalog({
+  added,
+  instance,
+  onAdd,
+  onRemove,
+}: {
+  added: boolean
+  instance?: WidgetInstance
+  onAdd: () => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="todo-catalog">
+      <section className="todo-catalog__intro">
+        <div className="todo-catalog__copy">
+          <span className="todo-catalog__kicker">NEW PRODUCTIVITY WIDGET</span>
+          <h2>把待办留在视线里，<br />但别让它变成压力。</h2>
+          <p>
+            任务便笺把便利贴的低门槛与任务管理的结构结合起来：随手新增、自动归类、到期提示，完成后会沉淀进每周周记。
+          </p>
+          <div className="todo-catalog__features">
+            <span><Move size={14} /> 直接拖动</span>
+            <span><Maximize2 size={14} /> 自由缩放</span>
+            <span><BellRing size={14} /> 逾期提示</span>
+            <span><Bot size={14} /> AI 可管理</span>
+          </div>
+          <div className="todo-catalog__actions">
+            {added ? (
+              <>
+                <button type="button" className="btn btn--primary" disabled>
+                  <Check size={14} /> 已贴到桌面
+                </button>
+                <button type="button" className="btn" onClick={onRemove}>从桌面移除</button>
+              </>
+            ) : (
+              <button type="button" className="btn btn--primary" onClick={onAdd}>
+                <Plus size={14} /> 贴到桌面
+              </button>
+            )}
+            {instance && <span className="todo-catalog__size">当前尺寸 {instance.width} × {instance.height}</span>}
+          </div>
+        </div>
+        <TodoWidgetPreview />
+      </section>
+
+      <section className="todo-catalog__principles">
+        <article>
+          <small>01 / QUICK CAPTURE</small>
+          <strong>三秒记下，不先整理</strong>
+          <p>输入任务即可保存；工作、学习、生活、健康由标题自动识别，需要时再设今天或明天。</p>
+        </article>
+        <article>
+          <small>02 / VISIBLE FOLLOW-UP</small>
+          <strong>逾期被看见，完成很轻</strong>
+          <p>桌面内直接勾选、编辑与删除；未完成任务按时间自动分组，重要任务带醒目标记。</p>
+        </article>
+        <article>
+          <small>03 / WEEKLY MEMORY</small>
+          <strong>不是清零，是留下轨迹</strong>
+          <p>周记按天汇总完成数量、收尾率和未收尾任务，可以前后翻看，也可以让 AI 继续调整。</p>
+        </article>
+      </section>
+    </div>
+  )
+}
+
+function TodoWidgetPreview() {
+  const previewTasks = [
+    { title: '整理任务便笺交互', category: '工作', time: '今天 21:00', tone: 'blue' },
+    { title: '阅读 20 页设计系统', category: '学习', time: '明天', tone: 'violet' },
+    { title: '晚饭后散步半小时', category: '健康', time: '随手记', tone: 'green' },
+  ]
+  return (
+    <div className="todo-catalog__stage" aria-label="任务便笺预览">
+      <div className="todo-catalog__note">
+        <span className="todo-catalog__tape"><Move size={14} /></span>
+        <header>
+          <div><small>LINGYUE NOTE / 3 OPEN</small><strong>今日纸条</strong></div>
+          <b>34<span>%</span></b>
+        </header>
+        <nav><span className="active"><ClipboardCheck size={12} /> 计划</span><span>周记</span><em><BellRing size={11} /> 1 项逾期</em></nav>
+        <div className="todo-catalog__group-title"><i />今天 <small>2</small></div>
+        <div className="todo-catalog__preview-tasks">
+          {previewTasks.map((task, index) => (
+            <div key={task.title}>
+              <button type="button" aria-label={`完成 ${task.title}`}>{index === 1 && <Check size={10} />}</button>
+              <p><strong>{task.title}</strong><span data-tone={task.tone}>{task.category}</span><time>{task.time}</time></p>
+            </div>
+          ))}
+        </div>
+        <footer><Plus size={14} /><span>写下要做的事…</span><b>记下</b></footer>
+      </div>
     </div>
   )
 }

@@ -43,6 +43,32 @@ export interface WidgetInstance {
   config?: Record<string, unknown>
 }
 
+export type TodoTaskCategory = 'work' | 'study' | 'life' | 'health' | 'other'
+
+export type TodoTaskPriority = 'high' | 'normal' | 'low'
+
+/** 桌面任务便笺中的单项任务。时间戳使用本地设备的 Unix 毫秒值。 */
+export interface TodoTask {
+  id: string
+  title: string
+  done: boolean
+  createdAt: number
+  updatedAt: number
+  completedAt?: number
+  dueAt?: number
+  category: TodoTaskCategory
+  priority: TodoTaskPriority
+  remind: boolean
+}
+
+export interface TodoWidgetConfig {
+  version: 1
+  title: string
+  tasks: TodoTask[]
+  view: 'plan' | 'week'
+  weekOffset: number
+}
+
 export interface CanvasOcclusionState {
   occluded: boolean
   cursor: { x: number; y: number }

@@ -50,6 +50,10 @@ function isIconStorageType(type: string): boolean {
   return ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive'].includes(type)
 }
 
+function getWidgetMinimumSize(type: string): { width: number; height: number } {
+  return type === 'todo-board' ? { width: 320, height: 320 } : { width: MIN_SIZE, height: MIN_SIZE }
+}
+
 function readStorageChromeStyle(config?: Record<string, unknown>): 'plain' | 'titled' {
   return config?.storageStyle === 'titled' ? 'titled' : 'plain'
 }
@@ -576,6 +580,7 @@ export function Canvas() {
   useEffect(() => {
     const glassTypes = new Set([
       'calendar', 'news', 'stocks', 'quicktools', 'sysmonitor', 'pet',
+      'todo-board',
       'desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock',
     ])
     const demanded = widgets.some((widget) => {
@@ -1147,8 +1152,6 @@ function DraggableWidget({
       }
 
       const target = e.target as HTMLElement
-      if (isWidgetInteractionTarget(target)) return
-
       if (canLongPressDrag && target.closest('[data-widget-drag-handle]')) {
         e.preventDefault()
         elRef.current?.setPointerCapture(e.pointerId)
@@ -1164,6 +1167,8 @@ function DraggableWidget({
         }
         return
       }
+
+      if (isWidgetInteractionTarget(target)) return
 
       if (canLongPressDrag) {
         e.preventDefault()
@@ -1223,15 +1228,16 @@ function DraggableWidget({
           ny = resized.y
           r.nextIconScale = resized.iconScale
         } else {
-          if (r.edge.includes('r')) nw = Math.max(MIN_SIZE, r.origW + dx)
-          if (r.edge.includes('b')) nh = Math.max(MIN_SIZE, r.origH + dy)
+          const minimum = getWidgetMinimumSize(widget.type)
+          if (r.edge.includes('r')) nw = Math.max(minimum.width, r.origW + dx)
+          if (r.edge.includes('b')) nh = Math.max(minimum.height, r.origH + dy)
           if (r.edge.includes('l')) {
-            const dw = Math.min(dx, r.origW - MIN_SIZE)
+            const dw = Math.min(dx, r.origW - minimum.width)
             nw = r.origW - dw
             nx = r.origX + dw
           }
           if (r.edge.includes('t')) {
-            const dh = Math.min(dy, r.origH - MIN_SIZE)
+            const dh = Math.min(dy, r.origH - minimum.height)
             nh = r.origH - dh
             ny = r.origY + dh
           }
@@ -1240,8 +1246,8 @@ function DraggableWidget({
           nh = Math.round(nh / GRID) * GRID
           nx = Math.round(nx / GRID) * GRID
           ny = Math.round(ny / GRID) * GRID
-          nw = Math.max(MIN_SIZE, nw)
-          nh = Math.max(MIN_SIZE, nh)
+          nw = Math.max(minimum.width, nw)
+          nh = Math.max(minimum.height, nh)
         }
         setSize({ w: nw, h: nh })
         sizeRef.current = { w: nw, h: nh }

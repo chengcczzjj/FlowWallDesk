@@ -1,5 +1,23 @@
 # 灵月桌面 开发日志
 
+## [2026-08-16 19:22] 新增桌面任务便笺与 AI 任务管理
+
+**变更摘要**: 基于 TickTick、Notezilla 和 Sticky Tasks 调研，新增可直接拖动、自由缩放、自动分类、逾期提醒和按周复盘的特色纸张式任务便笺。
+
+**涉及模块**:
+- `src/renderer/widgets/TodoBoard/` / `src/renderer/canvas/`: 实现任务新增、勾选、编辑、删除、计划/周记双视图、纸胶带拖动、八向缩放和每日一次逾期通知。
+- `src/shared/todo.ts` / `src/shared/desktop-scene.ts`: 增加任务契约、分类与时间分桶、周统计和正式组件能力。
+- `src/renderer/main-ui/`: 新增“任务便笺”组件类别、完整产品预览和添加/移除管理入口。
+- `src/main/memory/tools/` / `src/shared/tool-manifest.ts`: AI 支持查看、新增、修改、完成、恢复、删除任务和周总结。
+- `doc/小组件/桌面任务便笺组件设计.md` / `tests/todo-widget.test.mjs`: 记录调研、范围与验收，并覆盖核心数据和拖动契约。
+
+**遇到的问题**:
+- 拖动把手使用按钮元素时会先被通用交互目标门禁拦截 → 让显式 `data-widget-drag-handle` 优先进入拖动分支，并增加回归测试。
+
+**Git Commit**: 已提交 — `feat(widget): add desktop todo note`
+
+---
+
 ## [2026-08-16 18:37] 发布 1.0.10 Dock 悬停连续动画修复版
 
 **变更摘要**: 修复 Dock 图标悬停放大后点击会瞬间缩回基础尺寸的问题，让启动缩放和扩散叠影都从点击瞬间的实际尺寸连续播放，并打包发布 1.0.10。
