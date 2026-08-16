@@ -20,10 +20,16 @@ import {
 import { normalizeStockSymbols } from '../src/shared/stock-symbols.ts'
 import { findSmartWidgetPlacement } from '../src/shared/widget-placement.ts'
 import {
+  DOCK_BOUNCE_CYCLE_MS,
   DOCK_BOUNCE_DURATION_SECONDS,
+  DOCK_BOUNCE_GROUND_PAUSE_MS,
+  DOCK_BOUNCE_HEIGHT_PX,
   DOCK_BOUNCE_MIN_VISIBLE_MS,
   DOCK_BOUNCE_TIMES,
+  DOCK_BOUNCE_TRAVEL_MS,
+  getDockBounceCompletionDelayMs,
   getDockBounceKeyframes,
+  shouldDockSystemActionBounce,
 } from '../src/shared/dock-motion.ts'
 import { createShowDesktopInputEvents } from '../src/main/windows/windowsDesktop.ts'
 import {
@@ -297,15 +303,35 @@ test('new widgets continue an aligned group instead of defaulting to the upper-l
   assert.ok(groupedPlacement.y >= existing[0].y + existing[0].height + 16)
 })
 
-test('Dock launch motion uses equal-height constant-speed bounces', () => {
+test('Dock launch motion uses a paced macOS-style constant-speed cycle', () => {
   const downward = getDockBounceKeyframes(true)
   const upward = getDockBounceKeyframes(false)
-  assert.ok(DOCK_BOUNCE_DURATION_SECONDS >= 0.8)
+  assert.equal(DOCK_BOUNCE_HEIGHT_PX, 58)
+  assert.equal(DOCK_BOUNCE_TRAVEL_MS, 720)
+  assert.equal(DOCK_BOUNCE_GROUND_PAUSE_MS, 100)
+  assert.equal(DOCK_BOUNCE_CYCLE_MS, 820)
+  assert.equal(DOCK_BOUNCE_DURATION_SECONDS, 0.82)
   assert.equal(DOCK_BOUNCE_TIMES.length, downward.length)
   assert.deepEqual(upward, downward.map((value) => value === 0 ? 0 : -value))
-  assert.deepEqual([...new Set(downward)], [0, 58])
-  const timeSteps = DOCK_BOUNCE_TIMES.slice(1).map((time, index) => time - DOCK_BOUNCE_TIMES[index])
-  assert.ok(timeSteps.every((step) => Math.abs(step - timeSteps[0]) < 1e-9))
-  assert.equal(DOCK_BOUNCE_MIN_VISIBLE_MS, 320)
+  assert.deepEqual(downward, [0, 58, 0, 0])
+  const riseTime = DOCK_BOUNCE_TIMES[1] - DOCK_BOUNCE_TIMES[0]
+  const fallTime = DOCK_BOUNCE_TIMES[2] - DOCK_BOUNCE_TIMES[1]
+  const groundTime = DOCK_BOUNCE_TIMES[3] - DOCK_BOUNCE_TIMES[2]
+  assert.ok(Math.abs(riseTime - fallTime) < 1e-9)
+  assert.ok(groundTime > 0 && groundTime < riseTime)
+  assert.equal(DOCK_BOUNCE_MIN_VISIBLE_MS, 720)
   assert.equal(downward.at(-1), 0)
+})
+
+test('Dock launch motion stops only after landing and show desktop stays still', () => {
+  assert.equal(getDockBounceCompletionDelayMs(0), 720)
+  assert.equal(getDockBounceCompletionDelayMs(300), 420)
+  assert.equal(getDockBounceCompletionDelayMs(720), 0)
+  assert.equal(getDockBounceCompletionDelayMs(800), 0)
+  assert.equal(getDockBounceCompletionDelayMs(820), 0)
+  assert.equal(getDockBounceCompletionDelayMs(1_000), 540)
+  assert.equal(shouldDockSystemActionBounce('settings'), true)
+  assert.equal(shouldDockSystemActionBounce('explorer'), true)
+  assert.equal(shouldDockSystemActionBounce('recycle-bin'), true)
+  assert.equal(shouldDockSystemActionBounce('desktop'), false)
 })

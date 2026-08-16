@@ -9,10 +9,11 @@ import { FrostedGlassBackground } from '../FrostedGlassBackground'
 import { toRendererPublicUrl } from '@shared/asset-url'
 import {
   DOCK_BOUNCE_DURATION_SECONDS,
-  DOCK_BOUNCE_MIN_VISIBLE_MS,
   DOCK_BOUNCE_RESET_MS,
   DOCK_BOUNCE_TIMES,
+  getDockBounceCompletionDelayMs,
   getDockBounceKeyframes,
+  shouldDockSystemActionBounce,
 } from '@shared/dock-motion'
 
 type DesktopIconVariant = 'vertical' | 'horizontal' | 'adaptive' | 'dock'
@@ -404,7 +405,7 @@ function DesktopIconsWidget({
       if (variant === 'dock') {
         setBouncingId(item.id)
         void launch().finally(() => {
-          const remainingMs = Math.max(0, DOCK_BOUNCE_MIN_VISIBLE_MS - (performance.now() - startedAt))
+          const remainingMs = getDockBounceCompletionDelayMs(performance.now() - startedAt)
           window.setTimeout(() => {
             pendingLaunchIdsRef.current.delete(item.id)
             setBouncingId((current) => current === item.id ? null : current)
@@ -1197,14 +1198,14 @@ function DockSystemButton({
         if (event.button !== 0) return
         event.preventDefault()
         event.stopPropagation()
-        triggerBounce()
+        if (shouldDockSystemActionBounce(action.id)) triggerBounce()
         onAction(action.id)
       }}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
         if (event.detail !== 0) return
-        triggerBounce()
+        if (shouldDockSystemActionBounce(action.id)) triggerBounce()
         onAction(action.id)
       }}
       animate={
