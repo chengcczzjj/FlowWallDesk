@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Check, Clock3 } from 'lucide-react'
-import type { TodoTask, TodoWidgetConfig, WidgetInstance } from '@shared/types'
+import { Check, Clock3, Ellipsis } from 'lucide-react'
+import type { TodoNoteColor, TodoTask, TodoTaskCategory, TodoWidgetConfig, WidgetInstance } from '@shared/types'
 import {
   TODO_CATEGORY_META,
+  TODO_NOTE_COLORS,
   createTodoTask,
   formatTodoDueLabel,
   getTodoTaskBucket,
@@ -14,7 +15,16 @@ import {
 } from '@shared/todo'
 import './todo-board.css'
 
-const TEAR_DURATION_MS = 780
+const TEAR_DURATION_MS = 540
+const TODO_CATEGORIES: TodoTaskCategory[] = ['work', 'study', 'life', 'health', 'other']
+
+const TODO_COLOR_LABELS: Record<TodoNoteColor, string> = {
+  butter: '黄色',
+  rose: '粉色',
+  mint: '绿色',
+  sky: '蓝色',
+  lilac: '灰紫色',
+}
 
 function createTaskId(): string {
   return `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -24,9 +34,12 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
   const config = useMemo(() => normalizeTodoWidgetConfig(widget.config), [widget.config])
   const [draft, setDraft] = useState(config.task?.title ?? '')
   const [editingText, setEditingText] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [tearing, setTearing] = useState(false)
   const editingRef = useRef(editingText)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const settingsRef = useRef<HTMLDivElement>(null)
   const tearTimerRef = useRef<number | null>(null)
   const handledTearRef = useRef<number | null>(null)
 
@@ -49,8 +62,27 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
     }
   }, [editingText])
 
-  const persistConfig = useCallback((next: TodoWidgetConfig) => {
-    void window.canvasBridge?.updateWidgetConfig(widget.id, { ...next })
+  useEffect(() => {
+    if (!settingsOpen) return undefined
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!settingsRef.current?.contains(target) && !menuButtonRef.current?.contains(target)) {
+        setSettingsOpen(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSettingsOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [settingsOpen])
+
+  const persistConfig = useCallback((patch: Partial<TodoWidgetConfig>) => {
+    void window.canvasBridge?.updateWidgetConfig(widget.id, { ...patch })
   }, [widget.id])
 
   const persistDraft = useCallback(() => {
@@ -97,6 +129,7 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
 
   const completeTask = (): void => {
     if (!config.task || config.task.done || tearing) return
+    setSettingsOpen(false)
     persistDraft()
     const requestedAt = Date.now()
     const nextConfig: TodoWidgetConfig = {
@@ -127,6 +160,15 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
 
   const style = { '--sticky-rotation': `${config.rotation}deg` } as CSSProperties
 
+  const changeColor = (color: TodoNoteColor): void => {
+    if (color !== config.color) persistConfig({ color })
+  }
+
+  const changeCategory = (category: TodoTaskCategory): void => {
+    if (!config.task || category === config.task.category) return
+    persistConfig({ task: { ...config.task, category, updatedAt: Date.now() } })
+  }
+
   return (
     <section
       className="sticky-note"
@@ -145,20 +187,84 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
         <div className="sticky-note__grain" aria-hidden />
         <div className="sticky-note__tear-edge" aria-hidden />
 
-        {config.task && (
-          <header className="sticky-note__meta">
-              <span data-category={config.task.category}>
+        <header className="sticky-note__topbar">
+          <div className="sticky-note__drag-zone" data-widget-drag-handle>
+            {config.task ? (
+              <span className="sticky-note__category" data-category={config.task.category}>
                 <i />
                 {TODO_CATEGORY_META[config.task.category].label}
               </span>
-              {dueLabel && (
-                <time data-overdue={overdue}>
-                  <Clock3 size={11} />
-                  {overdue ? '已逾期' : dueLabel}
-                </time>
+            ) : (
+              <span className="sticky-note__label">便笺</span>
+            )}
+            {config.task && (
+              <>
+                {dueLabel && (
+                  <time data-overdue={overdue}>
+                    <Clock3 size={11} />
+                    {overdue ? '已逾期' : dueLabel}
+                  </time>
+                )}
+                {config.task.priority === 'high' && <b>重要</b>}
+              </>
+            )}
+          </div>
+          <button
+            ref={menuButtonRef}
+            type="button"
+            className="sticky-note__menu-button"
+            data-widget-interactive
+            aria-label="设置便笺颜色和分类"
+            aria-expanded={settingsOpen}
+            aria-haspopup="dialog"
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
+            <Ellipsis size={16} />
+          </button>
+        </header>
+
+        {settingsOpen && (
+          <div ref={settingsRef} className="sticky-note__settings" data-widget-interactive role="dialog" aria-label="便笺设置">
+            <section>
+              <small>便笺颜色</small>
+              <div className="sticky-note__colors">
+                {TODO_NOTE_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    data-color={color}
+                    data-selected={config.color === color}
+                    aria-label={`切换为${TODO_COLOR_LABELS[color]}`}
+                    aria-pressed={config.color === color}
+                    onClick={() => changeColor(color)}
+                  />
+                ))}
+              </div>
+            </section>
+            <section>
+              <small>分类</small>
+              {config.task ? (
+                <div className="sticky-note__categories">
+                  {TODO_CATEGORIES.map((category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      data-category={category}
+                      data-selected={config.task?.category === category}
+                      aria-label={`分类为${TODO_CATEGORY_META[category].label}`}
+                      aria-pressed={config.task?.category === category}
+                      onClick={() => changeCategory(category)}
+                    >
+                      <i />
+                      {TODO_CATEGORY_META[category].label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p>写下内容后即可分类</p>
               )}
-              {config.task.priority === 'high' && <b>重要</b>}
-          </header>
+            </section>
+          </div>
         )}
 
         <div className="sticky-note__body">

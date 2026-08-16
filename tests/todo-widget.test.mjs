@@ -58,11 +58,24 @@ test('desktop note editing opens a scoped keyboard-focus session without enterin
 
 test('sticky note typography and controls reflow for narrow, short and large paper sizes', async () => {
   const cssSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/todo-board.css', import.meta.url), 'utf8')
-  assert.match(cssSource, /font-size: clamp\(14px, min\(8\.6cqw, 10cqh\), 24px\)/)
+  assert.match(cssSource, /font-size: clamp\(14px, min\(7\.4cqw, 9cqh\), 22px\)/)
   assert.match(cssSource, /@container \(max-width: 185px\)/)
-  assert.match(cssSource, /@container \(max-height: 140px\)[\s\S]*sticky-note__meta \{ display: none; \}/)
+  assert.match(cssSource, /@container \(max-height: 140px\)[\s\S]*sticky-note__topbar \{ height: 31px;/)
   assert.match(cssSource, /@container \(min-width: 300px\) and \(min-height: 240px\)/)
   assert.match(cssSource, /sticky-note\[data-empty="true"\]/)
+})
+
+test('desktop note uses system typography and exposes simple color and category controls', async () => {
+  const todoSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/TodoBoard.tsx', import.meta.url), 'utf8')
+  const cssSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/todo-board.css', import.meta.url), 'utf8')
+  assert.match(cssSource, /font-family: system-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif/)
+  assert.doesNotMatch(cssSource, /Segoe Print|KaiTi/)
+  assert.match(todoSource, /aria-label="\u8bbe\u7f6e\u4fbf\u7b3a\u989c\u8272\u548c\u5206\u7c7b"/)
+  assert.match(todoSource, /const changeColor[\s\S]*persistConfig\(\{ color \}\)/)
+  assert.match(todoSource, /const changeCategory[\s\S]*persistConfig\(\{ task: \{ \.\.\.config\.task, category, updatedAt: Date\.now\(\) \} \}\)/)
+  assert.match(todoSource, /TODO_NOTE_COLORS\.map\(/)
+  assert.match(todoSource, /TODO_CATEGORIES\.map\(/)
+  assert.match(todoSource, /menuButtonRef\.current\?\.contains\(target\)/)
 })
 
 test('one sticky note stores one task and keeps physical paper choices', () => {
@@ -115,8 +128,10 @@ test('completion requests a tear animation before preserving the widget as hidde
   const cssSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/todo-board.css', import.meta.url), 'utf8')
   assert.match(todoSource, /tearRequestedAt: requestedAt/)
   assert.match(todoSource, /updateWidget\(\{ \.\.\.widget, enabled: false/)
-  assert.match(cssSource, /@keyframes sticky-note-tear-off/)
-  assert.match(cssSource, /translate3d\(32px, 190%, 0\)/)
+  assert.match(cssSource, /@keyframes sticky-note-tear-off[\s\S]*48% \{[\s\S]*clip-path: polygon\(48% 0/)
+  assert.match(cssSource, /@keyframes sticky-note-tear-edge[\s\S]*left: calc\(100% - 5px\)/)
+  assert.match(cssSource, /animation: sticky-note-tear-off 540ms/)
+  assert.doesNotMatch(cssSource, /translate3d\(32px, 190%, 0\)|translate3d\(-5px, 52px, 0\)/)
 })
 
 test('todo titles are automatically classified into useful desktop categories', () => {
