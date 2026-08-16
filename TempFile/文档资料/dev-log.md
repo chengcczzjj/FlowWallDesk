@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-16 17:00] 优化毛玻璃帧更新效率
+
+**变更摘要**: 在保持抽帧分辨率、帧率、JPEG 质量、模糊半径、颜色和坐标裁切完全不变的前提下，降低动态毛玻璃的 React 与 Canvas 开销。
+
+**涉及模块**:
+- `src/renderer/widgets/FrostedGlassBackground.tsx`: 壁纸帧改为直接更新图片资源，不再让每个毛玻璃组件每帧触发 React 提交。
+- `src/renderer/canvas/wallpaperFrameStore.ts`: 跳过重复源帧，复用 Canvas 与 2D context，并显式清屏保持原有像素输出。
+- `tests/release-contracts.test.mjs`: 固化 768px、4fps、JPEG 质量、12px 基础模糊和饱和度等视觉参数，防止性能优化改变效果。
+
+**遇到的问题**:
+- 直接复用 Canvas 可能残留上一帧透明边缘 → 每帧先 `clearRect`，并用 Electron/Chromium 对新旧管线做 JPEG 逐字节对比，输出长度和内容完全一致。
+
+**Git Commit**: 已提交 — `perf(widget): reduce frosted glass frame overhead`
+
+---
+
 ## [2026-08-16 12:22] 发布 1.0.8 Dock 动画节奏优化版
 
 **变更摘要**: 将过快的 Dock 启动动画重做为接近 macOS 节奏的等高匀速等待弹跳，并让“回到桌面”直接执行、不播放弹跳。

@@ -127,3 +127,26 @@ test('desktop icon launches stay bound to their persisted widget record', async 
   assert.match(canvasSource, /canvasTopmostAtEnd/)
   assert.match(canvasSource, /canvasRecompositing = true/)
 })
+
+test('frosted glass frame updates avoid React commits without changing the visual pipeline', async () => {
+  const wallpaperSource = await readFile(new URL('../src/renderer/wallpaper/Wallpaper.tsx', import.meta.url), 'utf8')
+  const frameStoreSource = await readFile(new URL('../src/renderer/canvas/wallpaperFrameStore.ts', import.meta.url), 'utf8')
+  const glassSource = await readFile(new URL('../src/renderer/widgets/FrostedGlassBackground.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(glassSource, /useSyncExternalStore/)
+  assert.match(glassSource, /subscribeWallpaperFrame\(applyLatestFrame\)/)
+  assert.match(glassSource, /image\.src = frame/)
+  assert.match(frameStoreSource, /frame === activeSourceFrame/)
+  assert.match(frameStoreSource, /frame === lastProcessedSourceFrame/)
+  assert.match(frameStoreSource, /canvas\.width !== bitmap\.width/)
+  assert.match(frameStoreSource, /ctx\.clearRect\(0, 0, canvas\.width, canvas\.height\)/)
+
+  assert.ok(wallpaperSource.includes('c.width = 768'))
+  assert.ok(wallpaperSource.includes("c.toDataURL('image/jpeg', 0.62)"))
+  assert.ok(wallpaperSource.includes('setInterval(captureFrame, 250)'))
+  assert.ok(frameStoreSource.includes('BASE_WALLPAPER_FRAME_BLUR_PX = 12'))
+  assert.ok(frameStoreSource.includes("ctx.filter = `blur(${sourceBlurPx}px) saturate(1.12)`"))
+  assert.ok(frameStoreSource.includes("canvas.toDataURL('image/jpeg', 0.68)"))
+  assert.ok(glassSource.includes('blurPx ** 2 - BASE_WALLPAPER_FRAME_BLUR_PX ** 2'))
+  assert.ok(glassSource.includes('saturate(1.08)'))
+})
