@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem, WallpaperSettings, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
+import type { WallpaperItem, WallpaperSettings, WallpaperResourceCatalog, WallpaperResourceProgress, WallpaperResourceActionResult, WallpaperOwnerStatus, WallpaperOwnerConfigInput, WallpaperPublishInput, WallpaperPublishProgress, WallpaperPublishResult, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
 
 const api = {
   app: {
@@ -64,6 +64,39 @@ const api = {
       meta: { name: string; desc: string; author: string; contact: string }
     ): Promise<{ ok: boolean; item?: WallpaperItem; error?: string }> =>
       ipcRenderer.invoke(IPC.WALLPAPER_IMPORT, filePath, meta),
+    remove: (wallpaperId: string): Promise<WallpaperResourceActionResult> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_REMOVE, wallpaperId),
+    getResourceCatalog: (): Promise<WallpaperResourceCatalog> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_RESOURCE_CATALOG),
+    refreshResourceCatalog: (): Promise<WallpaperResourceCatalog> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_RESOURCE_REFRESH),
+    installResource: (resourceId: string): Promise<WallpaperResourceActionResult> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_RESOURCE_INSTALL, resourceId),
+    removeResource: (resourceId: string): Promise<WallpaperResourceActionResult> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_RESOURCE_REMOVE, resourceId),
+    onResourceProgress: (cb: (progress: WallpaperResourceProgress) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: WallpaperResourceProgress) => cb(progress)
+      ipcRenderer.on(IPC.WALLPAPER_RESOURCE_PROGRESS, handler)
+      return () => ipcRenderer.off(IPC.WALLPAPER_RESOURCE_PROGRESS, handler)
+    },
+    onResourceCatalogChanged: (cb: () => void): (() => void) => {
+      const handler = () => cb()
+      ipcRenderer.on(IPC.WALLPAPER_RESOURCE_CATALOG_CHANGED, handler)
+      return () => ipcRenderer.off(IPC.WALLPAPER_RESOURCE_CATALOG_CHANGED, handler)
+    },
+    getOwnerStatus: (): Promise<WallpaperOwnerStatus> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_OWNER_STATUS),
+    configureOwner: (input: WallpaperOwnerConfigInput): Promise<WallpaperOwnerStatus> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_OWNER_CONFIGURE, input),
+    clearOwnerCredentials: (): Promise<WallpaperOwnerStatus> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_OWNER_CLEAR_CREDENTIALS),
+    publishResource: (input: WallpaperPublishInput): Promise<WallpaperPublishResult> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_OWNER_PUBLISH, input),
+    onPublishProgress: (cb: (progress: WallpaperPublishProgress) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: WallpaperPublishProgress) => cb(progress)
+      ipcRenderer.on(IPC.WALLPAPER_OWNER_PUBLISH_PROGRESS, handler)
+      return () => ipcRenderer.off(IPC.WALLPAPER_OWNER_PUBLISH_PROGRESS, handler)
+    },
   },
   widget: {
     list: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),

@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { LibraryPage } from './pages/LibraryPage'
+import { OnlineWallpaperPage } from './pages/OnlineWallpaperPage'
 import { EmptyPage } from './pages/EmptyPage'
 import { WidgetsPage } from './pages/WidgetsPage'
 import { PixelPetPage } from './pages/pet/PixelPetPage'
@@ -292,7 +293,7 @@ export function App() {
               <LibraryPage search={search} refreshKey={refreshKey} />
             )}
             {activity === 'library' && subPage === 'store' && (
-              <EmptyPage icon={<ImageIcon size={48} />} title="壁纸库" subtitle="敬请期待…" />
+              <OnlineWallpaperPage search={search} refreshKey={refreshKey} />
             )}
             {activity === 'library' && subPage === 'maker' && (
               <EmptyPage icon={<ImageIcon size={48} />} title="壁纸制作" subtitle="敬请期待…" />

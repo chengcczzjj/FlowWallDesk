@@ -63,6 +63,21 @@ export function LibraryPage({
     setAppliedId(item.id)
   }
 
+  const remove = async (item: WallpaperItem) => {
+    if (item.id === appliedId) {
+      window.alert('当前正在使用这张壁纸，请先切换到其他壁纸。')
+      return
+    }
+    if (!window.confirm(`删除本地壁纸“${item.name}”？此操作会移除本机副本。`)) return
+    const result = await window.lingyue.wallpaper.remove(item.id)
+    if (!result.ok) {
+      window.alert(result.error || '删除失败')
+      return
+    }
+    setList((current) => current.filter((candidate) => candidate.id !== item.id))
+    setSelectedId(undefined)
+  }
+
   // 页面级拖放
   const handlePageDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -145,6 +160,7 @@ export function LibraryPage({
           isApplied={selected.id === appliedId}
           onApply={() => apply(selected)}
           onClose={() => setSelectedId(undefined)}
+          onDelete={selected.id.startsWith('user:') ? () => void remove(selected) : undefined}
         />
       )}
     </div>

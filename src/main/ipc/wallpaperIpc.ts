@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, screen } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { promises as fs } from 'fs'
-import { join, basename, extname, dirname } from 'path'
+import { join, basename, extname, dirname, isAbsolute, relative, resolve } from 'path'
 import { execFile } from 'child_process'
 import { IPC } from '@shared/ipc-channels'
 import type { WallpaperItem, WallpaperSettings } from '@shared/types'
@@ -14,13 +14,19 @@ import {
 import { refreshCanvasZOrder, getCanvasWindow, isDesktopOccluded } from '../windows/canvasWindow'
 import {
   getUserWallpapersRoot,
+  getRemoteWallpapersRoot,
+  getUserWallpaperFolderName,
   getWallpaperSettingsOverridePath,
+  getWallpaperOverrideDir,
+  isUserWallpaperId,
   sanitizeUserDataSegment,
+  toRemoteWallpaperId,
   toUserWallpaperId,
 } from '../runtime/userDataPaths'
 import { cancelPendingAutoSave, loadWidgetsForWallpaper } from './widgetIpc'
 import { allowUserSelectedAsset } from '../protocols'
 import { assertTrustedIpcSender } from './ipcSecurity'
+import { extractZipSafely } from '../services/safe-zip'
 
 /**
  * 内置壁纸根目录：
@@ -36,6 +42,12 @@ function getWallpaperRoot(): string {
 
 const VIDEO_EXT = new Set(['.mp4', '.webm', '.mkv', '.mov', '.avi'])
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+const MAX_IMPORTED_ZIP_BYTES = 2 * 1024 * 1024 * 1024
+
+function isPathInside(rootPath: string, targetPath: string): boolean {
+  const rel = relative(rootPath, targetPath)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
 
 function safeSendToWindow(
   win: BrowserWindow | null | undefined,
@@ -220,10 +232,17 @@ async function scanFolder(folder: string, id: string, options: { mutable?: boole
     let source: string | undefined
     let type: WallpaperItem['type'] = 'image'
 
-    if (info?.FileName && files.includes(info.FileName)) {
-      source = join(folder, info.FileName)
-      type = mapType(info.Type, info.FileName)
-    } else {
+    if (info?.FileName) {
+      const configuredSource = resolve(folder, info.FileName)
+      const configuredStat = isPathInside(resolve(folder), configuredSource)
+        ? await fs.stat(configuredSource).catch(() => null)
+        : null
+      if (configuredStat?.isFile()) {
+        source = configuredSource
+        type = mapType(info.Type, info.FileName)
+      }
+    }
+    if (!source) {
       const html = files.find((n) => /\.html?$/i.test(n))
       if (html) {
         source = join(folder, html)
@@ -273,7 +292,7 @@ async function scanFolder(folder: string, id: string, options: { mutable?: boole
 
 async function listWallpapersFromRoot(
   root: string,
-  options: { idPrefix?: 'user'; label: string; mutable?: boolean }
+  options: { idPrefix?: 'user' | 'remote'; label: string; mutable?: boolean }
 ): Promise<WallpaperItem[]> {
   try {
     const entries = await fs.readdir(root, { withFileTypes: true })
@@ -281,7 +300,11 @@ async function listWallpapersFromRoot(
       entries
         .filter((e) => e.isDirectory())
         .map((e) => {
-          const id = options.idPrefix === 'user' ? toUserWallpaperId(e.name) : e.name
+          const id = options.idPrefix === 'user'
+            ? toUserWallpaperId(e.name)
+            : options.idPrefix === 'remote'
+              ? toRemoteWallpaperId(e.name)
+              : e.name
           return scanFolder(join(root, e.name), id, { mutable: options.mutable })
         })
     )
@@ -302,9 +325,17 @@ async function listUserWallpapers(): Promise<WallpaperItem[]> {
   return listWallpapersFromRoot(getUserWallpapersRoot(), { idPrefix: 'user', label: '用户壁纸', mutable: true })
 }
 
+async function listRemoteWallpapers(): Promise<WallpaperItem[]> {
+  return listWallpapersFromRoot(getRemoteWallpapersRoot(), { idPrefix: 'remote', label: '在线壁纸', mutable: true })
+}
+
 async function listAllWallpapers(): Promise<WallpaperItem[]> {
-  const [builtin, user] = await Promise.all([listBuiltinWallpapers(), listUserWallpapers()])
-  return [...builtin, ...user]
+  const [builtin, user, remote] = await Promise.all([
+    listBuiltinWallpapers(),
+    listUserWallpapers(),
+    listRemoteWallpapers(),
+  ])
+  return [...builtin, ...user, ...remote]
 }
 
 // ─── 壁纸帧捕获（用于组件毛玻璃效果）───
@@ -507,6 +538,26 @@ export function registerWallpaperIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.WALLPAPER_REMOVE, async (_event, wallpaperId: string) => {
+    assertTrustedIpcSender(_event, ['main'])
+    if (!isUserWallpaperId(wallpaperId)) {
+      return { ok: false, error: '只能删除用户导入的本地壁纸' }
+    }
+    if (store.get('wallpaper').current?.id === wallpaperId) {
+      return { ok: false, error: '当前正在使用这张壁纸，请先切换到其他壁纸' }
+    }
+    try {
+      await fs.rm(join(getUserWallpapersRoot(), getUserWallpaperFolderName(wallpaperId)), {
+        recursive: true,
+        force: true,
+      })
+      await fs.rm(getWallpaperOverrideDir(wallpaperId), { recursive: true, force: true })
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // 导入壁纸：将文件复制到用户数据目录，创建配置，生成预览
   // 支持：视频、图片、HTML（复制整个文件夹）、ZIP（解压为网页壁纸）
   ipcMain.handle(
@@ -517,6 +568,7 @@ export function registerWallpaperIpc(): void {
       meta: { name: string; desc: string; author: string; contact: string }
     ): Promise<{ ok: boolean; item?: WallpaperItem; error?: string }> => {
       assertTrustedIpcSender(_e, ['main'])
+      let createdFolder: string | undefined
       try {
         const ext = extname(filePath).toLowerCase()
         const isZip = ext === '.zip'
@@ -547,6 +599,7 @@ export function registerWallpaperIpc(): void {
         }
 
         await fs.mkdir(folder, { recursive: true })
+        createdFolder = folder
 
         let mainFileName: string
 
@@ -613,6 +666,7 @@ export function registerWallpaperIpc(): void {
 
         return { ok: true, item }
       } catch (err) {
+        if (createdFolder) await fs.rm(createdFolder, { recursive: true, force: true }).catch(() => undefined)
         console.error('[wallpaper] 导入失败:', err)
         return { ok: false, error: String(err) }
       }
@@ -638,15 +692,12 @@ async function copyDirContents(src: string, dest: string): Promise<void> {
 }
 
 /**
- * 解压 ZIP 文件到目标目录（使用 PowerShell Expand-Archive）
+ * 安全解压用户选择的 ZIP，规则与在线壁纸包保持一致。
  */
 function extractZip(zipPath: string, destDir: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cmd = `Expand-Archive -LiteralPath '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`
-    execFile('powershell.exe', ['-NoProfile', '-Command', cmd], (err) => {
-      if (err) reject(new Error(`ZIP 解压失败: ${err.message}`))
-      else resolve()
-    })
+  return extractZipSafely(zipPath, destDir, {
+    maxEntries: 100_000,
+    maxUncompressedBytes: MAX_IMPORTED_ZIP_BYTES,
   })
 }
 

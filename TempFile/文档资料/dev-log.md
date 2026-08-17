@@ -1,5 +1,24 @@
 # 灵月桌面 开发日志
 
+## [2026-08-18 00:02] 落地在线壁纸库与所有者发布管理
+
+**变更摘要**: 将壁纸资源从应用安装包更新中解耦，完成远程清单、独立下载更新、安全安装和仅官方仓库所有者可用的 GitHub Release UI 发布链路。
+
+**涉及模块**:
+- `src/main/services/wallpaper-resource-service.ts` / `src/main/ipc/wallpaperResourceIpc.ts`: 实现清单定时刷新与缓存回退、下载进度、大小/SHA-256 校验、安全解压、原子安装、版本更新和删除。
+- `src/main/services/wallpaper-owner-service.ts`: 使用 Windows DPAPI 加密 GitHub Token，校验固定所有者账号/仓库权限，并完成仓库初始化、Release 资产上传和 manifest 原子提交。
+- `src/renderer/main-ui/pages/OnlineWallpaperPage.tsx` / `src/renderer/main-ui/components/WallpaperOwnerDialog.tsx`: 新增在线壁纸管理页及受启动参数保护的所有者发布面板。
+- `src/main/ipc/wallpaperIpc.ts` / `src/main/runtime/userDataPaths.ts`: 增加在线资源隔离目录、本地导入壁纸删除，并修复嵌套 Web 壁纸入口扫描。
+- `tests/wallpaper-resource.test.mjs` / `doc/壁纸资源托管与下载方案.md`: 固化资源 ID/版本、IPC、安全安装、所有者授权契约和完整操作说明。
+
+**遇到的问题**:
+- 客户端隐藏发布按钮不能构成真实授权 → 入口使用 `--lingyue-wallpaper-owner` 隔离，同时强制 Token 登录账号为 `chengcczzjj` 且由 GitHub 校验官方仓库写权限。
+- 远程 ZIP 不能直接覆盖已安装目录 → 先做校验并写入随机 staging，旧目录改名备份后原子切换，失败时自动回滚。
+
+**Git Commit**: 已提交 — `feat(wallpaper): add online library and owner publishing`
+
+---
+
 ## [2026-08-17 00:09] 升级 1.1.0 自由便笺与桌面交互版
 
 **变更摘要**: 将项目从 1.0.10 升级为 1.1.0，作为自由便笺、软件内任务工作台、AI 跨便笺管理与全屏返回交互自愈的集中功能版本。

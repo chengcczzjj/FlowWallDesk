@@ -37,11 +37,11 @@
 
 ## 模块完成度
 
-### 核心系统 ✅ 97%
+### 核心系统 ✅ 98%
 
 | 功能             | 状态    | 说明                                                       |
 | ---------------- | ------- | ---------------------------------------------------------- |
-| 壁纸管理         | ✅ 完成 | 列表/应用/导入/设置/切换                                   |
+| 壁纸管理         | ✅ 完成 | 内置/用户/在线三源列表，支持导入、下载、校验、版本更新、应用、设置和删除；在线资源独立于应用发版 |
 | 壁纸窗口贴合桌面 | ✅ 完成 | Windows native attach                                      |
 | 毛玻璃方案       | ✅ 完成 | 壁纸抽帧广播、失活 watchdog 与像素级预模糊兜底，`FrostedGlassBackground` 通用组件 |
 | 托盘             | ✅ 完成 | 右键菜单 + 左键显示/隐藏主窗口                             |
@@ -115,11 +115,11 @@
 | 天气 API   | ⚠️ 部分完成 | AI `weather` 工具已实现；Weather/GraphicDateTime 小组件仍在渲染层直连公网，待统一到主进程服务 |
 | 系统信息   | ⚠️ 部分完成 | AI `get_system_info` 工具已实现；SysMonitor 小组件仍为模拟数据，待接入真实采集 |
 
-### 设置界面 ✅ 85%
+### 设置界面 ✅ 88%
 
 | 功能           | 状态    | 说明                             |
 | -------------- | ------- | -------------------------------- |
-| 壁纸库页面     | ✅ 完成 | LibraryPage                      |
+| 壁纸库页面     | ✅ 完成 | 本地 `LibraryPage` + 在线 `OnlineWallpaperPage`；所有者模式提供 GitHub Release 发布管理 |
 | 组件管理页面   | ✅ 完成 | WidgetsPage（浮动/卡片子标签页） |
 | 实时预览数据   | ✅ 完成 | 新闻/股票                        |
 | 模态设置弹窗   | ✅ 完成 | WidgetSettingsDialog             |
@@ -161,6 +161,7 @@
 | 工具过程 UI 顺序混乱              | 模型文本和工具事件只按单次切分展示           | 按 `textOffset` 构建对话/工具交错时间线 |
 | AI 模块定位偏重编程 Agent          | 文档一度按 Codex 式本地工作区 Agent 设计      | 已调整为 AI 伴侣优先；复杂文件回滚/审批不再是主线 |
 | 打包后写入内置资源不可靠           | `resources/assets` 随安装包分发，应视为只读    | 壁纸导入、壁纸设置和组件覆盖配置改写到 userData；内置资源只提供默认值 |
+| 在线壁纸不能信任远程 ZIP            | ZIP 可能损坏、越界或被替换                    | 限制 HTTPS/2 GiB，校验声明大小与 SHA-256，拒绝符号链接和越界路径后原子安装 |
 | 打包后主界面白屏                   | sandbox preload 被 Rollup 拆出本地共享 chunk  | 单入口打包三套 bridge，并按窗口启动参数只暴露对应 API |
 | 更新错误泄露响应头                 | `electron-updater` 原始错误包含 headers/cookie | 主进程统一映射为脱敏、限长的用户提示并关闭原始 updater logger |
 
@@ -185,6 +186,9 @@
 | `src/shared/types.ts`                             | 全局类型定义                 |
 | `src/main/ipc/widgetIpc.ts`                       | 组件尺寸映射 WIDGET_SIZE_MAP |
 | `src/main/runtime/userDataPaths.ts`               | 运行时可变数据路径：用户壁纸、壁纸设置覆盖、组件配置覆盖 |
+| `src/main/services/wallpaper-resource-service.ts` | 在线清单缓存、下载进度、校验、安全解压、原子安装与版本更新 |
+| `src/main/services/wallpaper-owner-service.ts`    | 所有者 GitHub 凭据、Release 资产上传和 manifest 发布 |
+| `src/renderer/main-ui/pages/OnlineWallpaperPage.tsx` | 在线壁纸下载、更新、应用、删除与所有者入口 |
 | `src/renderer/widgets/index.tsx`                  | Widget 注册表（路由/分类）   |
 | `src/renderer/widgets/shared/constants.tsx`       | 颜色主题定义                 |
 | `src/renderer/widgets/FrostedGlassBackground.tsx` | 毛玻璃通用组件               |
@@ -202,6 +206,7 @@
 | `assets/wallpaper/<id>/widget-config.json`        | 内置壁纸的默认组件配置（打包后只读） |
 | `userData/wallpaper-overrides/<wallpaperId>/widget-config.json` | 用户/AI 调整后的壁纸组件覆盖配置 |
 | `userData/wallpapers/<id>/`                       | 用户导入壁纸目录 |
+| `userData/remote-wallpapers/<id>/`                | 在线下载壁纸目录及独立资源版本元数据 |
 | `src/main/memory/`                                 | AI 伴侣对话记忆、轻量工具与历史事件 |
 | `src/main/memory/models/deepseekToolChat.ts`        | DeepSeek 工具调用与流式输出兼容层 |
 | `src/main/ipc/chatIpc.ts`                          | AI 伴侣对话 / 轻量助手 IPC 注册 |

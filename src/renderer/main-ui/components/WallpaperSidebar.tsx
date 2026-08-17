@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WallpaperItem, WallpaperSettings } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
-import { Check, Monitor, RotateCcw, X } from 'lucide-react'
+import { Check, Monitor, RotateCcw, Trash2, X } from 'lucide-react'
 
 const TYPE_LABEL: Record<WallpaperItem['type'], string> = {
   video: '视频',
@@ -21,6 +21,7 @@ export function WallpaperSidebar(props: {
   isApplied: boolean
   onApply: () => void
   onClose: () => void
+  onDelete?: () => void
 }) {
   const { item, isApplied } = props
   const cover =
@@ -210,6 +211,11 @@ export function WallpaperSidebar(props: {
           <RotateCcw size={14} />
           <span>重置</span>
         </button>
+        {props.onDelete && (
+          <button className="btn sidebar-delete-btn" onClick={props.onDelete} title="删除本地壁纸">
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
     </aside>
   )

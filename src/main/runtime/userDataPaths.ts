@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import { join } from 'path'
 
 const USER_WALLPAPER_PREFIX = 'user:'
+const REMOTE_WALLPAPER_PREFIX = 'remote:'
 
 export function sanitizeUserDataSegment(value: string, fallback = 'item'): string {
   const withoutControls = Array.from(value, (char) => (char.charCodeAt(0) < 32 ? '_' : char)).join('')
@@ -25,6 +26,22 @@ export function getUserWallpapersRoot(): string {
   return join(app.getPath('userData'), 'wallpapers')
 }
 
+export function getRemoteWallpapersRoot(): string {
+  return join(app.getPath('userData'), 'remote-wallpapers')
+}
+
+export function getWallpaperResourceCacheRoot(): string {
+  return join(app.getPath('userData'), 'wallpaper-resource-cache')
+}
+
+export function getWallpaperResourceManifestCachePath(): string {
+  return join(getWallpaperResourceCacheRoot(), 'manifest.json')
+}
+
+export function getWallpaperOwnerConfigPath(): string {
+  return join(app.getPath('userData'), 'wallpaper-owner.json')
+}
+
 export function toUserWallpaperId(folderName: string): string {
   return `${USER_WALLPAPER_PREFIX}${folderName}`
 }
@@ -35,6 +52,18 @@ export function isUserWallpaperId(id?: string): boolean {
 
 export function getUserWallpaperFolderName(id: string): string {
   return sanitizeUserDataSegment(id.slice(USER_WALLPAPER_PREFIX.length), 'wallpaper')
+}
+
+export function toRemoteWallpaperId(resourceId: string): string {
+  return `${REMOTE_WALLPAPER_PREFIX}${resourceId}`
+}
+
+export function isRemoteWallpaperId(id?: string): boolean {
+  return typeof id === 'string' && id.startsWith(REMOTE_WALLPAPER_PREFIX)
+}
+
+export function getRemoteWallpaperFolderName(id: string): string {
+  return sanitizeUserDataSegment(id.slice(REMOTE_WALLPAPER_PREFIX.length), 'wallpaper')
 }
 
 export function getWallpaperOverrideDir(wallpaperId: string): string {

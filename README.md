@@ -58,6 +58,18 @@ git tag -a v1.1.0 -m "LingyueDesk 1.1.0"
 
 随后创建同版本 GitHub Release，并上传 `dist/latest.yml`、安装包和对应 `.blockmap`。`chengcczzjj/FlowWallDesk` 已设为公开仓库，客户端可直接发现公开 Release；如果后续改回私有仓库，需要同步切换到公共对象存储更新源。
 
+## 在线壁纸资源
+
+“壁纸资源 > 壁纸库”通过独立的 `chengcczzjj/LingyueDesk-Wallpapers` 公开仓库读取资源清单，支持按壁纸下载、SHA-256 校验、版本更新、应用和删除，不需要为新增壁纸发布整个应用版本。
+
+正式安装版默认隐藏发布入口。仓库所有者可完全退出应用后，以所有者模式启动：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\LingyueDesk\LingyueDesk.exe" --lingyue-wallpaper-owner
+```
+
+进入“壁纸资源 > 壁纸库 > 资源发布管理”，配置属于官方仓库所有者的 GitHub Token 后，即可在 UI 中选择本地壁纸、打包独立 ZIP、上传 GitHub Release 并更新 `manifest.json`。Token 使用 Windows DPAPI 加密且不会暴露给渲染层。详细格式和发布规则见 [壁纸资源托管与下载方案](doc/壁纸资源托管与下载方案.md)。
+
 ## 目录结构
 
 ```

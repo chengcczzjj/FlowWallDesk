@@ -29,7 +29,10 @@ import {
 import {
   getUserWallpaperFolderName,
   getUserWallpapersRoot,
+  getRemoteWallpaperFolderName,
+  getRemoteWallpapersRoot,
   getWallpaperWidgetOverridePath,
+  isRemoteWallpaperId,
   isUserWallpaperId,
 } from '../runtime/userDataPaths'
 import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIconIpc'
@@ -205,6 +208,9 @@ async function tryReadWidgetConfigFile(configPath: string): Promise<WidgetInstan
 function getWallpaperDefaultWidgetConfigPath(wallpaperId: string): string {
   if (isUserWallpaperId(wallpaperId)) {
     return join(getUserWallpapersRoot(), getUserWallpaperFolderName(wallpaperId), 'widget-config.json')
+  }
+  if (isRemoteWallpaperId(wallpaperId)) {
+    return join(getRemoteWallpapersRoot(), getRemoteWallpaperFolderName(wallpaperId), 'widget-config.json')
   }
   return join(getWallpaperRoot(), wallpaperId, 'widget-config.json')
 }

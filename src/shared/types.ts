@@ -31,6 +31,105 @@ export interface WallpaperState {
   muted: boolean
 }
 
+/** 在线壁纸资源清单中的单项。资源包版本独立于应用版本。 */
+export interface WallpaperResourceEntry {
+  id: string
+  title: string
+  type: WallpaperItem['type']
+  version: string
+  size: number
+  previewUrl?: string
+  packageUrl: string
+  sha256: string
+  description?: string
+  tags?: string[]
+  author?: string
+  license?: string
+  updatedAt?: string
+}
+
+export type WallpaperResourceInstallState =
+  | 'not-installed'
+  | 'installed'
+  | 'update-available'
+  | 'downloading'
+  | 'installing'
+  | 'error'
+
+export interface WallpaperResourceCatalogItem extends WallpaperResourceEntry {
+  installState: WallpaperResourceInstallState
+  installedVersion?: string
+  localWallpaperId?: string
+  cachedPreview?: string
+  error?: string
+}
+
+export interface WallpaperResourceCatalog {
+  source: 'network' | 'cache' | 'empty'
+  updatedAt?: string
+  fetchedAt: number
+  items: WallpaperResourceCatalogItem[]
+  warning?: string
+}
+
+export interface WallpaperResourceProgress {
+  wallpaperId: string
+  phase: 'downloading' | 'verifying' | 'installing' | 'complete' | 'error'
+  percent: number
+  transferredBytes?: number
+  totalBytes?: number
+  message: string
+}
+
+export interface WallpaperResourceActionResult {
+  ok: boolean
+  item?: WallpaperItem
+  error?: string
+}
+
+/** 仅所有者模式可见；tokenHint 永远只返回掩码。 */
+export interface WallpaperOwnerStatus {
+  enabled: boolean
+  configured: boolean
+  repository: string
+  branch: string
+  manifestPath: string
+  manifestUrl: string
+  tokenHint?: string
+  error?: string
+}
+
+export interface WallpaperOwnerConfigInput {
+  token: string
+  branch?: string
+  manifestPath?: string
+}
+
+export interface WallpaperPublishInput {
+  wallpaperId: string
+  remoteId: string
+  version: string
+  releaseTag: string
+  title: string
+  description?: string
+  author?: string
+  license?: string
+  tags?: string[]
+}
+
+export interface WallpaperPublishProgress {
+  phase: 'packing' | 'uploading-package' | 'uploading-preview' | 'updating-manifest' | 'complete' | 'error'
+  percent: number
+  message: string
+}
+
+export interface WallpaperPublishResult {
+  ok: boolean
+  entry?: WallpaperResourceEntry
+  releaseUrl?: string
+  error?: string
+}
+
 /** 桌面组件元数据 */
 export interface WidgetInstance {
   id: string

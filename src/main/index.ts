@@ -2,22 +2,26 @@ import { app, BrowserWindow, session } from 'electron'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import { IPC } from '@shared/ipc-channels'
 import { createMainWindow, getMainWindow } from './windows/mainWindow'
 import { createWallpaperWindow } from './windows/wallpaperWindow'
 import { createCanvasWindow } from './windows/canvasWindow'
 import { createTray } from './tray'
 import { registerAppIpc } from './ipc/appIpc'
 import { registerWallpaperIpc, restoreWallpaper } from './ipc/wallpaperIpc'
+import { registerWallpaperResourceIpc } from './ipc/wallpaperResourceIpc'
 import { registerWidgetIpc, restoreWidgets } from './ipc/widgetIpc'
 import { registerDesktopIconIpc } from './ipc/desktopIconIpc'
 import { registerDataIpc } from './ipc/dataIpc'
 import { registerChatIpc } from './ipc/chatIpc'
 import { allowAssetRoot, registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
-import { getUserWallpapersRoot } from './runtime/userDataPaths'
+import { getRemoteWallpapersRoot, getUserWallpapersRoot } from './runtime/userDataPaths'
 import { initMemorySystem } from './memory'
 import { isPreciseLocationPermissionAllowed } from './memory/tools/definitions/user-location'
 import { applyLaunchAtLoginPreference } from './services/launch-at-login-service'
 import { initializeAutoUpdate } from './services/update-service'
+import { enableWallpaperOwnerMode } from './services/wallpaper-owner-service'
+import { initializeWallpaperResourceUpdates } from './services/wallpaper-resource-service'
 import { getDockDiagnosticLogPath, logDockDiagnostic } from './runtime/diagnosticLog'
 import { runDockLaunchSelfTest } from './runtime/dockLaunchSelfTest'
 
@@ -51,8 +55,17 @@ if (!gotTheLock) {
   app.quit()
 }
 
-app.on('second-instance', () => {
+app.on('second-instance', (_event, argv) => {
   const main = getMainWindow() ?? createMainWindow()
+  if (argv.includes('--lingyue-wallpaper-owner')) {
+    enableWallpaperOwnerMode()
+    const navigateToPublisher = () => main.webContents.send(IPC.APP_NAVIGATE, {
+      activity: 'library',
+      subPage: 'store',
+    })
+    main.webContents.once('did-finish-load', navigateToPublisher)
+    main.webContents.reload()
+  }
   if (main.isMinimized()) main.restore()
   main.show()
   main.focus()
@@ -69,6 +82,7 @@ app.whenReady().then(async () => {
     ? join(process.resourcesPath, 'assets', 'wallpaper')
     : join(__dirname, '../../assets/wallpaper'))
   await allowAssetRoot(getUserWallpapersRoot())
+  await allowAssetRoot(getRemoteWallpapersRoot())
   registerAssetProtocol()
 
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -93,6 +107,7 @@ app.whenReady().then(async () => {
   // 注册 IPC
   registerAppIpc()
   registerWallpaperIpc()
+  registerWallpaperResourceIpc()
   registerWidgetIpc()
   registerDesktopIconIpc()
   registerDataIpc()
@@ -107,7 +122,11 @@ app.whenReady().then(async () => {
   createTray()
   applyLaunchAtLoginPreference()
   initializeAutoUpdate()
-  // mainWindow 延迟创建：用户点击托盘时才创建，节省一个渲染进程（~50-80MB）
+  initializeWallpaperResourceUpdates()
+  if (process.argv.includes('--lingyue-wallpaper-owner')) {
+    createMainWindow({ activity: 'library', subPage: 'store' })
+  }
+  // 普通启动延迟创建主窗口；所有者发布模式直接打开在线壁纸库。
 
   // 恢复上次状态
   await restoreWallpaper()
