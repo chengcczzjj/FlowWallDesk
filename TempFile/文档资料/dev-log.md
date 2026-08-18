@@ -1,5 +1,19 @@
 # 灵月桌面 开发日志
 
+## [2026-08-18 00:00] 发布 1.1.1 桌面交互稳定性版本
+
+**变更摘要**: 汇总在线壁纸库、Dock 自定义图标启动修复和便签/Canvas 输入层自愈，准备发布 1.1.1。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts` / `src/shared/native-dock-click.ts`: 增加原生鼠标 watchdog、pointer reset IPC、Canvas 合成层有限重试和桌面 Shell 点击兜底。
+- `src/renderer/canvas/Canvas.tsx` / `src/renderer/widgets/DesktopIcons/DesktopIcons.tsx`: 清理丢失的 pointerup、缩短 Dock 启动保护并恢复组件交互引用。
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.1.md`: 同步版本号、发布说明和构建验证记录。
+
+**遇到的问题**:
+- 应用抢焦时 renderer 偶尔收不到 pointerup → 主进程以原生按键状态为准，超时向 renderer 广播 reset，并对 Canvas z-order 修复做有限重试。
+
+**Git Commit**: （未提交）
+
 ## [2026-08-18 00:02] 落地在线壁纸库与所有者发布管理
 
 **变更摘要**: 将壁纸资源从应用安装包更新中解耦，完成远程清单、独立下载更新、安全安装和仅官方仓库所有者可用的 GitHub Release UI 发布链路。
