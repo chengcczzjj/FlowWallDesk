@@ -244,6 +244,16 @@ test('native desktop icon click fallback only runs when the renderer missed a sh
   assert.equal(shouldFallbackNativeDockClick({ ...base, releaseWidgetId: null }), false)
   assert.equal(shouldFallbackNativeDockClick({ ...base, canvasTopmostAtStart: false }), false)
   assert.equal(shouldFallbackNativeDockClick({ ...base, canvasTopmostAtEnd: false }), false)
+  assert.equal(
+    shouldFallbackNativeDockClick({
+      ...base,
+      canvasTopmostAtStart: false,
+      canvasTopmostAtEnd: false,
+      desktopSurfaceAtStart: true,
+      desktopSurfaceAtEnd: true,
+    }),
+    true,
+  )
 
   assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 11, rootHwnd: 10, canvasHwnd: 10 }), true)
   assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 10, rootHwnd: 10, canvasHwnd: 10 }), true)

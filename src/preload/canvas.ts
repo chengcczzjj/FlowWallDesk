@@ -37,6 +37,11 @@ const api = {
     ipcRenderer.on(IPC.CANVAS_OCCLUSION_CHANGED, handler)
     return () => ipcRenderer.off(IPC.CANVAS_OCCLUSION_CHANGED, handler)
   },
+  onPointerReset: (cb: () => void): (() => void) => {
+    const handler = () => cb()
+    ipcRenderer.on(IPC.CANVAS_POINTER_RESET, handler)
+    return () => ipcRenderer.off(IPC.CANVAS_POINTER_RESET, handler)
+  },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
   getFilePath: (file: File): string | undefined => {
     try {

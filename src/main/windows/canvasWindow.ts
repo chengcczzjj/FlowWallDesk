@@ -68,6 +68,12 @@ const SWP_NOMOVE = 0x0002
 const SWP_NOSIZE = 0x0001
 const SWP_NOACTIVATE = 0x0010
 const WS_EX_TOOLWINDOW = 0x00000080
+// Windows may activate a launched application before Chromium delivers the
+// matching pointerup. Do not let a lost gesture keep the transparent canvas
+// intercepting the whole desktop indefinitely.
+const RENDERER_POINTER_STALE_MS = 180
+const INTERACTION_REPAIR_COOLDOWN_MS = 450
+const INTERACTION_REPAIR_MAX_ATTEMPTS = 4
 
 const GW_OWNER = 4
 const GA_ROOT = 2
@@ -348,6 +354,8 @@ function refreshCanvasCursorHitTest(): void {
     cursorWidgetId = nextWidgetId
     nativeCaptureRequestedAt = nextWidgetId ? Date.now() : 0
     interactionRepairWidgetId = null
+    interactionRepairAttempts = 0
+    interactionRepairLastAt = 0
     logDockDiagnostic('canvas.cursor-region-changed', {
       widgetId: cursorWidgetId,
       widgetType: widget?.type ?? null,
@@ -402,26 +410,44 @@ function refreshCanvasCursorHitTest(): void {
       }
     }
     nativeLeftButtonDown = currentlyDown
+
+    // GetAsyncKeyState is the final source of truth for the physical button.
+    // If the renderer missed pointerup during an app/focus transition, repair
+    // both sides of the gate instead of waiting for another user gesture.
+    if (!currentlyDown && rendererPointerActive) {
+      if (rendererPointerReleaseCandidateAt === 0) rendererPointerReleaseCandidateAt = now
+      if (now - rendererPointerReleaseCandidateAt >= RENDERER_POINTER_STALE_MS) {
+        resetCanvasPointerState('native-button-up-without-renderer-release')
+      }
+    } else if (currentlyDown) {
+      rendererPointerReleaseCandidateAt = 0
+    }
   }
   lastNativeIconSurfaceSample = iconSurface && widget
     ? { widgetId: widget.id, sampledAt: Date.now(), surface: iconSurface }
     : null
   applyCanvasMousePassthrough()
-  if (widget && widgetSurface && shouldRepairCanvasInteraction({
+  const repairNow = Date.now()
+  const repairCoolingDown = interactionRepairWidgetId === widget?.id && repairNow - interactionRepairLastAt < INTERACTION_REPAIR_COOLDOWN_MS
+  const repairExhausted = interactionRepairWidgetId === widget?.id && interactionRepairAttempts >= INTERACTION_REPAIR_MAX_ATTEMPTS
+  if (!rendererPointerActive && !repairCoolingDown && !repairExhausted && widget && widgetSurface && shouldRepairCanvasInteraction({
     desktopOccluded,
     recompositing: canvasRecompositing,
     nativeMousePassthrough,
     rendererMousePassthrough,
     captureRequestedAt: nativeCaptureRequestedAt,
-    now: Date.now(),
+    now: repairNow,
     canvasTopmost: widgetSurface.canvasTopmost,
     desktopSurface: widgetSurface.desktopSurface,
-    alreadyAttempted: interactionRepairWidgetId === widget.id,
+    alreadyAttempted: false,
   })) {
     interactionRepairWidgetId = widget.id
+    interactionRepairAttempts = interactionRepairAttempts + 1
+    interactionRepairLastAt = repairNow
     logDockDiagnostic('canvas.interaction-repair-requested', {
       widgetId: widget.id,
       widgetType: widget.type,
+      attempt: interactionRepairAttempts,
       surface: widgetSurface,
     })
     refreshCanvasZOrder('missing-renderer-hover')
@@ -465,9 +491,12 @@ function commitDesktopOcclusion(occluded: boolean): void {
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
+  rendererPointerReleaseCandidateAt = 0
   cursorWidgetId = null
   nativeCaptureRequestedAt = 0
   interactionRepairWidgetId = null
+  interactionRepairAttempts = 0
+  interactionRepairLastAt = 0
   lastNativeIconSurfaceSample = null
   if (occluded) {
     cancelCanvasZOrderRefresh()
@@ -499,6 +528,7 @@ let canvasTextInputActive = false
 let rendererMousePassthrough = true
 let rendererMousePassthroughAt = 0
 let rendererPointerActive = false
+let rendererPointerReleaseCandidateAt = 0
 let nativeMousePassthrough: boolean | null = null
 let cursorWidgetId: string | null = null
 let nativeLeftButtonDown = false
@@ -506,6 +536,8 @@ let lastRendererActionPointerDownAt = 0
 let canvasRecompositing = false
 let nativeCaptureRequestedAt = 0
 let interactionRepairWidgetId: string | null = null
+let interactionRepairAttempts = 0
+let interactionRepairLastAt = 0
 let nativeIconGesture: {
   widgetId: string
   startedAt: number
@@ -525,6 +557,17 @@ let desktopReturnRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 let zOrderRefreshGeneration = 0
 let boundsListenerRegistered = false
 
+function resetCanvasPointerState(reason: string): void {
+  const win = getCanvasWindow()
+  if (!rendererPointerActive && !win) return
+  rendererPointerActive = false
+  rendererPointerReleaseCandidateAt = 0
+  nativeIconGesture = null
+  logDockDiagnostic('canvas.pointer-state-reset', { reason })
+  if (win && !win.webContents.isDestroyed()) win.webContents.send(IPC.CANVAS_POINTER_RESET)
+  applyCanvasMousePassthrough()
+}
+
 function finishNativeIconGesture(
   cursor: { x: number; y: number },
   releaseWidgetId: string | null,
@@ -542,6 +585,8 @@ function finishNativeIconGesture(
     releaseWidgetId,
     rendererActionPointerDownAt: lastRendererActionPointerDownAt,
     canvasTopmostAtEnd: Boolean(endSurface?.canvasTopmost),
+    desktopSurfaceAtStart: gesture.startSurface?.desktopSurface === true,
+    desktopSurfaceAtEnd: endSurface?.desktopSurface === true,
   })
   logDockDiagnostic('canvas.native-icon-click-decision', {
     widgetId: gesture.widgetId,
@@ -639,6 +684,7 @@ export function createCanvasWindow(): BrowserWindow {
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
+  rendererPointerReleaseCandidateAt = 0
   canvasTextInputActive = false
   nativeMousePassthrough = null
   cursorWidgetId = null
@@ -646,6 +692,8 @@ export function createCanvasWindow(): BrowserWindow {
   canvasRecompositing = true
   nativeCaptureRequestedAt = 0
   interactionRepairWidgetId = null
+  interactionRepairAttempts = 0
+  interactionRepairLastAt = 0
   nativeIconGesture = null
   lastNativeIconSurfaceSample = null
   lastRendererActionPointerDownAt = 0
@@ -715,6 +763,7 @@ export function createCanvasWindow(): BrowserWindow {
     if (cursorHitTestTimer) { clearInterval(cursorHitTestTimer); cursorHitTestTimer = null }
     cancelCanvasZOrderRefresh()
     rendererPointerActive = false
+    rendererPointerReleaseCandidateAt = 0
     canvasTextInputActive = false
     nativeMousePassthrough = null
     cursorWidgetId = null
@@ -722,6 +771,8 @@ export function createCanvasWindow(): BrowserWindow {
     canvasRecompositing = false
     nativeCaptureRequestedAt = 0
     interactionRepairWidgetId = null
+    interactionRepairAttempts = 0
+    interactionRepairLastAt = 0
     nativeIconGesture = null
     lastNativeIconSurfaceSample = null
     lastRendererActionPointerDownAt = 0
@@ -757,6 +808,7 @@ export function setCanvasPointerActive(active: boolean): void {
   if (desktopOccluded && active) return
   if (rendererPointerActive === active) return
   rendererPointerActive = active
+  rendererPointerReleaseCandidateAt = 0
   logDockDiagnostic('canvas.pointer-active-changed', { active, cursorWidgetId })
   applyCanvasMousePassthrough()
 }

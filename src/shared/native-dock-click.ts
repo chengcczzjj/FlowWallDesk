@@ -12,10 +12,15 @@ export interface NativeDockClickDecisionInput {
   rendererActionPointerDownAt: number
   canvasTopmostAtStart: boolean
   canvasTopmostAtEnd: boolean
+  /** The desktop shell can be the hit surface while the transparent canvas is visually valid. */
+  desktopSurfaceAtStart?: boolean
+  desktopSurfaceAtEnd?: boolean
 }
 
 export function shouldFallbackNativeDockClick(input: NativeDockClickDecisionInput): boolean {
-  if (!input.canvasTopmostAtStart || !input.canvasTopmostAtEnd) return false
+  const usableAtStart = input.canvasTopmostAtStart || input.desktopSurfaceAtStart === true
+  const usableAtEnd = input.canvasTopmostAtEnd || input.desktopSurfaceAtEnd === true
+  if (!usableAtStart || !usableAtEnd) return false
   if (!input.widgetId || input.releaseWidgetId !== input.widgetId) return false
   const durationMs = input.endedAt - input.startedAt
   if (durationMs < 0 || durationMs > NATIVE_DOCK_CLICK_MAX_DURATION_MS) return false

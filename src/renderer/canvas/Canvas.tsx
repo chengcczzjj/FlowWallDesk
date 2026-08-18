@@ -433,6 +433,17 @@ export function Canvas() {
     const offFrame = window.canvasBridge?.onFrame(setWallpaperFrame)
     const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
     const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
+    const offPointerReset = window.canvasBridge?.onPointerReset(() => {
+      // Native polling is authoritative when Windows steals focus before the
+      // renderer receives pointerup. Reset every widget gesture, not only the
+      // main-process passthrough flag, so the next desktop click starts clean.
+      pointerGateRef.current.reset()
+      window.canvasBridge?.setPointerActive(false)
+      lastMousePassthroughRef.current = null
+      setInteractionEpoch((current) => current + 1)
+      window.canvasBridge?.logDiagnostic('pointer-reset-received')
+      reconcileLastPointer(true)
+    })
     const offOcclusion = window.canvasBridge?.onDesktopOcclusionChange((state) => {
       desktopOccludedRef.current = state.occluded
       pointerGateRef.current.reset()
@@ -457,11 +468,12 @@ export function Canvas() {
       offFrame?.()
       offScenePreview?.()
       offScenePreviewClear?.()
+      offPointerReset?.()
       offOcclusion?.()
       for (const timer of entryTimers.values()) window.clearTimeout(timer)
       entryTimers.clear()
     }
-  }, [reconcileMousePassthrough, syncWidgets])
+  }, [reconcileLastPointer, reconcileMousePassthrough, syncWidgets])
 
   useEffect(() => {
     return window.canvasBridge?.onNativeDockClick((event) => {

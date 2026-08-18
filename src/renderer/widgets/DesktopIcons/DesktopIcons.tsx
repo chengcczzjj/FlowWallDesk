@@ -48,6 +48,9 @@ const DOCK_DEFAULT_TINT_STRENGTH = 0.1
 const DOCK_DEFAULT_BLUR = 16
 const DOCK_DEFAULT_HOVER_SCALE = 1.58
 const DOUBLE_CLICK_MS = 420
+// Keep the duplicate-click guard short. Readiness probing may take seconds,
+// but it must never make a Dock icon look permanently dead after launch.
+const DOCK_LAUNCH_GUARD_MS = 1_200
 const LONG_PRESS_REORDER_MS = 1000
 const POINTER_CANCEL_PX = 8
 const DRAG_MOVE_PX = 4
@@ -411,7 +414,11 @@ function DesktopIconsWidget({
         window.setTimeout(() => {
           setBouncingId((current) => current === item.id ? null : current)
         }, ICON_LAUNCH_FEEDBACK_MS)
+        const guardTimer = window.setTimeout(() => {
+          pendingLaunchIdsRef.current.delete(item.id)
+        }, DOCK_LAUNCH_GUARD_MS)
         void launch().finally(() => {
+          window.clearTimeout(guardTimer)
           pendingLaunchIdsRef.current.delete(item.id)
         })
       } else {

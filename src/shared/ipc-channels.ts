@@ -91,6 +91,8 @@ export const IPC = {
   CANVAS_SET_EDIT_MODE: 'canvas:set-edit-mode',
   // 主进程 → 画布：桌面被全屏窗口遮挡/重新可见
   CANVAS_OCCLUSION_CHANGED: 'canvas:occlusion-changed',
+  // 主进程 → 画布：原生鼠标抬起但 renderer 丢失 pointerup 时强制清理手势
+  CANVAS_POINTER_RESET: 'canvas:pointer-reset',
   // 主进程 → 壁纸窗口：暂停/恢复帧捕获（全屏遮挡优化）
   WALLPAPER_PAUSE_CAPTURE: 'wallpaper:pause-capture',
 

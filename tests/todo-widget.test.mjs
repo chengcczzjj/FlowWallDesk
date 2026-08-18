@@ -29,6 +29,7 @@ test('todo board is a first-class widget and AI tool capability', () => {
 
 test('sticky notes use direct freeform drag and resize without edit mode or collision resolution', async () => {
   const canvasSource = await readFile(new URL('../src/renderer/canvas/Canvas.tsx', import.meta.url), 'utf8')
+  const canvasWindowSource = await readFile(new URL('../src/main/windows/canvasWindow.ts', import.meta.url), 'utf8')
   const mainSource = await readFile(new URL('../src/main/ipc/widgetIpc.ts', import.meta.url), 'utf8')
   const todoSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/TodoBoard.tsx', import.meta.url), 'utf8')
   assert.match(canvasSource, /directManipulation && !isWidgetInteractionTarget\(target\)/)
@@ -40,6 +41,9 @@ test('sticky notes use direct freeform drag and resize without edit mode or coll
   assert.match(mainSource, /findStickyNotePlacement/)
   assert.match(todoSource, /data-widget-drag-handle/)
   assert.match(todoSource, /data-resize="br"/)
+  assert.match(canvasSource, /onPointerReset\(\(\) =>/)
+  assert.match(canvasSource, /pointerGateRef\.current\.reset\(\)/)
+  assert.match(canvasWindowSource, /CANVAS_POINTER_RESET/)
 })
 
 test('desktop note editing opens a scoped keyboard-focus session without entering global edit mode', async () => {
