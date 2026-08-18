@@ -13,6 +13,8 @@
 - 应用抢焦时 renderer 偶尔收不到 pointerup → 主进程以原生按键状态为准，超时向 renderer 广播 reset，并对 Canvas z-order 修复做有限重试。
 
 **Git Commit**: 已提交 — `chore(release): prepare LingyueDesk 1.1.1`
+**Git Tag**: `v1.1.1`（已推送）
+**GitHub Release**: `https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.1`
 
 ## [2026-08-18 00:02] 落地在线壁纸库与所有者发布管理
 
