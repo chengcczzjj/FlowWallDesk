@@ -498,6 +498,7 @@ function commitDesktopOcclusion(occluded: boolean): void {
   interactionRepairAttempts = 0
   interactionRepairLastAt = 0
   lastNativeIconSurfaceSample = null
+  lastRendererActionPointerDownAt = 0
   if (occluded) {
     cancelCanvasZOrderRefresh()
     canvasTextInputActive = false
@@ -563,6 +564,7 @@ function resetCanvasPointerState(reason: string): void {
   rendererPointerActive = false
   rendererPointerReleaseCandidateAt = 0
   nativeIconGesture = null
+  lastRendererActionPointerDownAt = 0
   logDockDiagnostic('canvas.pointer-state-reset', { reason })
   if (win && !win.webContents.isDestroyed()) win.webContents.send(IPC.CANVAS_POINTER_RESET)
   applyCanvasMousePassthrough()
