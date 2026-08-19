@@ -283,7 +283,14 @@ export function App() {
                 <button className="nav-btn" title="添加壁纸" onClick={() => openAddDialog()}>
                   <Plus size={16} />
                 </button>
-                <button className="nav-btn" title="控制面板">
+                <button
+                  className="nav-btn"
+                  title="显示器控制面板"
+                  onClick={() => {
+                    setActivity('settings')
+                    setSubPage('settings-displays')
+                  }}
+                >
                   <Monitor size={16} />
                 </button>
               </div>
