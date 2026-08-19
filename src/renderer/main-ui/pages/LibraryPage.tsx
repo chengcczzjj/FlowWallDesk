@@ -14,10 +14,12 @@ const TYPE_LABEL: Record<WallpaperItem['type'], string> = {
 export function LibraryPage({
   search,
   refreshKey,
+  targetDisplayId = null,
   onDropFile,
 }: {
   search: string
   refreshKey?: number
+  targetDisplayId?: number | null
   onDropFile?: (file: InitialFile) => void
 }) {
   const [list, setList] = useState<WallpaperItem[]>([])
@@ -59,8 +61,17 @@ export function LibraryPage({
   )
 
   const apply = async (item: WallpaperItem) => {
-    await window.lingyue.wallpaper.apply(item)
-    setAppliedId(item.id)
+    try {
+      if (targetDisplayId !== null) {
+        await window.lingyue.wallpaper.setDisplayMode('per-display')
+        await window.lingyue.wallpaper.setDisplayAssignment(targetDisplayId, item.id)
+      } else {
+        await window.lingyue.wallpaper.apply(item)
+      }
+      setAppliedId(item.id)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '应用壁纸失败')
+    }
   }
 
   const remove = async (item: WallpaperItem) => {

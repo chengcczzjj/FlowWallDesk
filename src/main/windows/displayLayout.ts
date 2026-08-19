@@ -8,17 +8,23 @@ function rectFromElectron(rect: Electron.Rectangle): DisplayBounds {
 
 /** Stable display metadata used by settings and by the virtual desktop windows. */
 export function getDisplayDescriptors(): DisplayDescriptor[] {
-  const primaryId = screen.getPrimaryDisplay().id
-  return screen.getAllDisplays()
-    .sort((a, b) => (a.id === primaryId ? -1 : b.id === primaryId ? 1 : a.bounds.x - b.bounds.x))
-    .map((display, index) => ({
-      id: display.id,
-      label: display.id === primaryId ? '主显示器' : `显示器 ${index + 1}`,
-      primary: display.id === primaryId,
-      bounds: rectFromElectron(display.bounds),
-      workArea: rectFromElectron(display.workArea),
-      scaleFactor: display.scaleFactor,
-    }))
+  try {
+    const primaryId = screen.getPrimaryDisplay().id
+    return screen.getAllDisplays()
+      .sort((a, b) => (a.id === primaryId ? -1 : b.id === primaryId ? 1 : a.bounds.x - b.bounds.x))
+      .map((display, index) => ({
+        id: display.id,
+        label: display.id === primaryId ? '主显示器' : `显示器 ${index + 1}`,
+        primary: display.id === primaryId,
+        bounds: rectFromElectron(display.bounds),
+        workArea: rectFromElectron(display.workArea),
+        scaleFactor: display.scaleFactor,
+      }))
+  } catch {
+    // The screen module can briefly be unavailable during startup or display
+    // topology changes. Callers can safely render an empty selector meanwhile.
+    return []
+  }
 }
 
 export function getWallpaperDisplayMode(): WallpaperDisplayMode {
@@ -42,6 +48,7 @@ export function getDesktopRenderBounds(mode = getWallpaperDisplayMode()): Displa
 export function getDesktopRenderWorkArea(mode = getWallpaperDisplayMode()): DisplayBounds {
   const render = getDesktopRenderBounds(mode)
   const displays = getDisplayDescriptors()
+  if (displays.length === 0) return render
   if (mode === 'primary') {
     const primary = displays.find((item) => item.primary) ?? displays[0]
     return {
@@ -57,4 +64,3 @@ export function getDesktopRenderWorkArea(mode = getWallpaperDisplayMode()): Disp
   const bottom = Math.max(...displays.map((item) => item.workArea.y + item.workArea.height))
   return { x: left - render.x, y: top - render.y, width: right - left, height: bottom - top }
 }
-

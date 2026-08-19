@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
+import type { WallpaperDisplaySettings } from '@shared/types'
 import { LibraryPage } from './pages/LibraryPage'
 import { OnlineWallpaperPage } from './pages/OnlineWallpaperPage'
 import { EmptyPage } from './pages/EmptyPage'
@@ -145,6 +146,10 @@ export function App() {
   const [search, setSearch] = useState('')
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [displaySelectorOpen, setDisplaySelectorOpen] = useState(false)
+  const [displaySettings, setDisplaySettings] = useState<WallpaperDisplaySettings | null>(null)
+  const [displaySelectorError, setDisplaySelectorError] = useState('')
+  const [targetDisplayId, setTargetDisplayId] = useState<number | null>(null)
 
   const openAddDialog = useCallback(() => {
     setShowAddDialog(true)
@@ -186,6 +191,23 @@ export function App() {
     setActivity(key)
     const first = NAV_TABS[key].pages?.[0]?.id
     if (first) setSubPage(first)
+  }
+
+  const openDisplaySelector = async () => {
+    setDisplaySelectorOpen((open) => !open)
+    if (displaySelectorOpen && displaySettings) return
+    try {
+      setDisplaySelectorError('')
+      const next = await window.lingyue.wallpaper.getDisplaySettings()
+      setDisplaySettings(next)
+    } catch (error) {
+      setDisplaySelectorError(error instanceof Error ? error.message : '显示器信息读取失败')
+    }
+  }
+
+  const selectDisplayTarget = (displayId: number | null) => {
+    setTargetDisplayId(displayId)
+    setDisplaySelectorOpen(false)
   }
 
   return (
@@ -283,26 +305,45 @@ export function App() {
                 <button className="nav-btn" title="添加壁纸" onClick={() => openAddDialog()}>
                   <Plus size={16} />
                 </button>
-                <button
-                  className="nav-btn"
-                  title="显示器控制面板"
-                  onClick={() => {
-                    setActivity('settings')
-                    setSubPage('settings-displays')
-                  }}
-                >
-                  <Monitor size={16} />
-                </button>
+                <div className="display-target-picker">
+                  <button
+                    className={`nav-btn${displaySelectorOpen ? ' active' : ''}`}
+                    title="选择壁纸显示器"
+                    aria-label="选择壁纸显示器"
+                    aria-haspopup="menu"
+                    aria-expanded={displaySelectorOpen}
+                    onClick={() => void openDisplaySelector()}
+                  >
+                    <Monitor size={16} />
+                  </button>
+                  {displaySelectorOpen && (
+                    <div className="display-target-picker__menu" role="menu">
+                      <div className="display-target-picker__title">壁纸应用到</div>
+                      <button className={`display-target-picker__item${targetDisplayId === null ? ' selected' : ''}`} role="menuitemradio" aria-checked={targetDisplayId === null} onClick={() => selectDisplayTarget(null)}>
+                        <Monitor size={14} />
+                        <span><strong>全部显示器</strong><small>应用到当前布局中的所有显示器</small></span>
+                      </button>
+                      {(displaySettings?.displays ?? []).map((display) => (
+                        <button key={display.id} className={`display-target-picker__item${targetDisplayId === display.id ? ' selected' : ''}`} role="menuitemradio" aria-checked={targetDisplayId === display.id} onClick={() => selectDisplayTarget(display.id)}>
+                          <Monitor size={14} />
+                          <span><strong>{display.label}{display.primary ? ' · 主屏' : ''}</strong><small>{display.bounds.width} × {display.bounds.height}</small></span>
+                        </button>
+                      ))}
+                      {displaySelectorError && <div className="display-target-picker__error">{displaySelectorError}</div>}
+                      <button className="display-target-picker__settings" onClick={() => { setDisplaySelectorOpen(false); setActivity('settings'); setSubPage('settings-displays') }}>打开显示器布局设置</button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </nav>
 
           <div className="page-content">
             {activity === 'library' && subPage === 'library' && (
-              <LibraryPage search={search} refreshKey={refreshKey} />
+              <LibraryPage search={search} refreshKey={refreshKey} targetDisplayId={targetDisplayId} />
             )}
             {activity === 'library' && subPage === 'store' && (
-              <OnlineWallpaperPage search={search} refreshKey={refreshKey} />
+              <OnlineWallpaperPage search={search} refreshKey={refreshKey} targetDisplayId={targetDisplayId} />
             )}
             {activity === 'library' && subPage === 'maker' && (
               <EmptyPage icon={<ImageIcon size={48} />} title="壁纸制作" subtitle="敬请期待…" />
