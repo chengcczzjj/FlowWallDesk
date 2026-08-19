@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-19 00:00] 发布 1.1.2 双显示器版本并更新本机客户端
+
+**变更摘要**: 将双显示器壁纸与组件支持升版为 1.1.2，生成 Windows 安装包并完成本机客户端更新。
+
+**涉及模块**:
+- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 同步 1.1.2 版本契约。
+- `doc/发布说明/1.1.2.md` / `TempFile/文档资料/project-status.md`: 记录双显示器功能、验证和安装信息。
+- `dist/lingyue-desk-1.1.2-setup.exe`: 生成未签名 Windows x64 NSIS 安装包并静默安装。
+
+**遇到的问题**:
+- 同版本安装器无法明确触发本地更新 → 升级到 1.1.2 后重新构建并使用安装器更新。
+
+**Git Commit**: `chore(release): publish LingyueDesk 1.1.2`
+
+---
+
 ## [2026-08-18 00:00] 发布 1.1.1 桌面交互稳定性版本
 
 **变更摘要**: 汇总在线壁纸库、Dock 自定义图标启动修复和便签/Canvas 输入层自愈，准备发布 1.1.1。
