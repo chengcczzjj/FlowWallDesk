@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem, WallpaperSettings, WallpaperResourceCatalog, WallpaperResourceProgress, WallpaperResourceActionResult, WallpaperOwnerStatus, WallpaperOwnerConfigInput, WallpaperPublishInput, WallpaperPublishProgress, WallpaperPublishResult, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
+import type { WallpaperItem, WallpaperSettings, WallpaperResourceCatalog, WallpaperResourceProgress, WallpaperResourceActionResult, WallpaperOwnerStatus, WallpaperOwnerConfigInput, WallpaperPublishInput, WallpaperPublishProgress, WallpaperPublishResult, WallpaperDisplayMode, WallpaperDisplaySettings, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
 
 const api = {
   app: {
@@ -59,6 +59,12 @@ const api = {
       ipcRenderer.invoke(IPC.WALLPAPER_SAVE_SETTINGS, wallpaperId, settings),
     updateSetting: (key: string, value: unknown): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WALLPAPER_UPDATE_SETTING, key, value),
+    getDisplaySettings: (): Promise<WallpaperDisplaySettings> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_GET_SETTINGS),
+    setDisplayMode: (mode: WallpaperDisplayMode): Promise<WallpaperDisplaySettings> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_SET_MODE, mode),
+    setDisplayAssignment: (displayId: number, wallpaperId: string | null): Promise<WallpaperDisplaySettings> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_SET_ASSIGNMENT, displayId, wallpaperId),
     import: (
       filePath: string,
       meta: { name: string; desc: string; author: string; contact: string }

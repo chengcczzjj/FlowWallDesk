@@ -26,8 +26,8 @@ export function FrostedGlassBackground({
   const pos = useContext(WidgetPosCtx)
   const screenX = window.screenX || 0
   const screenY = window.screenY || 0
-  const frameWidth = window.screen.width || window.innerWidth
-  const frameHeight = window.screen.height || window.innerHeight
+  const frameWidth = window.innerWidth || window.screen.width
+  const frameHeight = window.innerHeight || window.screen.height
   const extraBlurPx = Math.sqrt(Math.max(0, blurPx ** 2 - BASE_WALLPAPER_FRAME_BLUR_PX ** 2))
 
   useLayoutEffect(() => {

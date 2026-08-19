@@ -21,6 +21,7 @@ import { WidgetsPage } from './pages/WidgetsPage'
 import { PixelPetPage } from './pages/pet/PixelPetPage'
 import { ChatPage } from './pages/chat/ChatPage'
 import { SettingsGeneralPage } from './pages/settings/SettingsGeneralPage'
+import { DisplaySettingsPage } from './pages/settings/DisplaySettingsPage'
 import { AddWallpaperDialog } from './components/AddWallpaperDialog'
 import { SidebarUpdateButton } from './components/SidebarUpdateButton'
 import {
@@ -67,6 +68,7 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
     label: '设置',
     pages: [
       { id: 'settings-general', label: '通用' },
+      { id: 'settings-displays', label: '显示器' },
       { id: 'settings-performance', label: '性能' },
       { id: 'settings-wallpaper', label: '壁纸' },
       { id: 'settings-screensaver', label: '屏保' },
@@ -304,6 +306,9 @@ export function App() {
             {activity === 'pet' && subPage === 'pet-pixel' && <PixelPetPage />}
             {activity === 'settings' && subPage === 'settings-general' && (
               <SettingsGeneralPage />
+            )}
+            {activity === 'settings' && subPage === 'settings-displays' && (
+              <DisplaySettingsPage />
             )}
             {activity === 'settings' && subPage !== 'settings-general' && (
               <EmptyPage icon={<Settings size={48} />} title="设置" subtitle="即将到来…" />

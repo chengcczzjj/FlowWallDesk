@@ -3,6 +3,8 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { attachWindowAsWallpaperNative } from './attachWallpaperNative'
 import { secureWindowNavigation } from './navigationSecurity'
+import { getDesktopRenderBounds } from './displayLayout'
+import { IPC } from '@shared/ipc-channels'
 
 let wallpaperWindow: BrowserWindow | null = null
 let attached = false
@@ -18,14 +20,8 @@ export function getAttachHint(): string {
   return attachHint
 }
 
-function getPrimaryDisplayBounds(): { x: number; y: number; width: number; height: number } {
-  const display = screen.getPrimaryDisplay()
-  const { x, y, width, height } = display.bounds
-  return { x, y, width, height }
-}
-
 function getAttachStagingBounds(): { x: number; y: number; width: number; height: number } {
-  const target = getPrimaryDisplayBounds()
+  const target = getWallpaperRenderBounds()
   const displays = screen.getAllDisplays()
   const maxRight = Math.max(...displays.map((display) => display.bounds.x + display.bounds.width))
   const maxBottom = Math.max(...displays.map((display) => display.bounds.y + display.bounds.height))
@@ -40,7 +36,7 @@ function getAttachStagingBounds(): { x: number; y: number; width: number; height
 function syncWallpaperBoundsToPrimaryDisplay(force = false): void {
   const win = getWallpaperWindow()
   if (!win) return
-  const bounds = getPrimaryDisplayBounds()
+  const bounds = getWallpaperRenderBounds()
   const current = win.getBounds()
   if (
     !force &&
@@ -52,6 +48,10 @@ function syncWallpaperBoundsToPrimaryDisplay(force = false): void {
     return
   }
   win.setBounds(bounds, false)
+}
+
+function getWallpaperRenderBounds(): { x: number; y: number; width: number; height: number } {
+  return getDesktopRenderBounds()
 }
 
 function refreshWallpaperComposition(win: BrowserWindow): void {
@@ -79,6 +79,8 @@ function registerDisplayBoundsListener(): void {
   const sync = (): void => {
     syncWallpaperBoundsToPrimaryDisplay(true)
     refreshWallpaperAttach()
+    const win = getWallpaperWindow()
+    if (win && !win.webContents.isDestroyed()) win.webContents.send(IPC.WALLPAPER_DISPLAY_LAYOUT_CHANGED)
   }
   screen.on('display-metrics-changed', sync)
   screen.on('display-added', sync)
@@ -93,7 +95,7 @@ function registerDisplayBoundsListener(): void {
 export function createWallpaperWindow(): BrowserWindow {
   if (wallpaperWindow && !wallpaperWindow.isDestroyed()) return wallpaperWindow
 
-  const { x, y, width, height } = getPrimaryDisplayBounds()
+  const { x, y, width, height } = getWallpaperRenderBounds()
 
   wallpaperWindow = new BrowserWindow({
     width,
@@ -161,6 +163,11 @@ export function createWallpaperWindow(): BrowserWindow {
 
 export function getWallpaperWindow(): BrowserWindow | null {
   return wallpaperWindow && !wallpaperWindow.isDestroyed() ? wallpaperWindow : null
+}
+
+/** Re-apply the virtual desktop bounds after a display mode change. */
+export function refreshWallpaperBounds(): void {
+  syncWallpaperBoundsToPrimaryDisplay(true)
 }
 
 /**

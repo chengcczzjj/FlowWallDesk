@@ -38,6 +38,7 @@ import {
 import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIconIpc'
 import { assertTrustedIpcSender } from './ipcSecurity'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
+import { getDesktopRenderBounds, getDesktopRenderWorkArea } from '../windows/displayLayout'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
@@ -88,6 +89,7 @@ const widgetInstanceSchema = z.object({
   height: z.number().finite().min(0).max(4096),
   enabled: z.boolean(),
   config: widgetConfigSchema.optional(),
+  displayId: z.number().int().optional(),
 })
 
 function parseWidgetList(value: unknown): WidgetInstance[] {
@@ -253,18 +255,29 @@ export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<Wid
   return merged
 }
 
+/** Keep persisted widget positions stable when the virtual desktop origin changes. */
+export function ensureWidgetCoordinateOrigin(): void {
+  const current = getDesktopRenderBounds()
+  const previous = store.get('widgetCoordinateOrigin') ?? screen.getPrimaryDisplay().bounds
+  const dx = previous.x - current.x
+  const dy = previous.y - current.y
+  if (dx !== 0 || dy !== 0) {
+    const widgets = store.get('widgets').map((widget) => ({ ...widget, x: widget.x + dx, y: widget.y + dy }))
+    persistWidgets(widgets)
+  }
+  store.set('widgetCoordinateOrigin', { x: current.x, y: current.y })
+}
+
 /** 根据 workArea 和已有组件，自动计算不重叠的放置位置 */
 function findPlacement(
   w: number,
   h: number,
   existing: WidgetInstance[]
 ): { x: number; y: number } {
-  const display = screen.getPrimaryDisplay()
-  const bounds = display.bounds
-  const workArea = display.workArea
+  const workArea = getDesktopRenderWorkArea()
   return findSmartWidgetPlacement(w, h, existing, {
-    x: workArea.x - bounds.x,
-    y: workArea.y - bounds.y,
+    x: workArea.x,
+    y: workArea.y,
     width: workArea.width,
     height: workArea.height,
   }, {
@@ -275,8 +288,7 @@ function findPlacement(
 }
 
 function getDockPlacement(width: number, height: number): { x: number; y: number } {
-  const display = screen.getPrimaryDisplay()
-  const area = display.bounds
+  const area = getDesktopRenderBounds()
   const maxX = area.width - EDGE_PADDING - width
   const maxY = area.height - BOTTOM_EDGE_PADDING - height
   return {
@@ -286,7 +298,7 @@ function getDockPlacement(width: number, height: number): { x: number; y: number
 }
 
 function clampStickyNotePosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
-  const area = screen.getPrimaryDisplay().bounds
+  const area = getDesktopRenderBounds()
   return {
     x: Math.round(Math.max(-width + STICKY_NOTE_GRAB_EDGE, Math.min(x, area.width - STICKY_NOTE_GRAB_EDGE))),
     y: Math.round(Math.max(-height + STICKY_NOTE_GRAB_EDGE, Math.min(y, area.height - STICKY_NOTE_GRAB_EDGE))),
@@ -295,14 +307,12 @@ function clampStickyNotePosition(x: number, y: number, width: number, height: nu
 
 /** 新便利贴有意错落叠放，避免把“可重叠”又退化成普通组件自动排版。 */
 function findStickyNotePlacement(width: number, height: number, existing: WidgetInstance[]): { x: number; y: number } {
-  const display = screen.getPrimaryDisplay()
-  const area = display.workArea
-  const bounds = display.bounds
+  const area = getDesktopRenderWorkArea()
   const count = existing.filter((widget) => widget.type === 'todo-board' && widget.enabled).length
   const column = count % 6
   const row = Math.floor(count / 6) % 3
-  const x = Math.round(area.x - bounds.x + area.width * 0.66 - width / 2 + column * 28 - row * 36)
-  const y = Math.round(area.y - bounds.y + Math.min(150, area.height * 0.17) + column * 22 + row * 34)
+  const x = Math.round(area.x + area.width * 0.66 - width / 2 + column * 28 - row * 36)
+  const y = Math.round(area.y + Math.min(150, area.height * 0.17) + column * 22 + row * 34)
   return clampStickyNotePosition(x, y, width, height)
 }
 
@@ -327,8 +337,7 @@ function resolvePosition(
   allWidgets: WidgetInstance[],
   snapPosition = true
 ): { x: number; y: number } {
-  const display = screen.getPrimaryDisplay()
-  const area = display.bounds
+  const area = getDesktopRenderBounds()
 
   // 1. 网格吸附
   let sx = snapPosition ? Math.round(x / GRID_GAP) * GRID_GAP : x
@@ -920,6 +929,7 @@ const WIDGET_SIZE_MAP: Record<string, { w: number; h: number }> = {
 export async function restoreWidgets(): Promise<void> {
   const current = store.get('wallpaper')?.current
   await loadWidgetsForWallpaper(current?.id)
+  ensureWidgetCoordinateOrigin()
 
   // 迁移旧版组件尺寸到标准尺寸
   const widgets = store.get('widgets') as WidgetInstance[]

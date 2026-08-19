@@ -46,7 +46,7 @@ async function processPendingFrames(): Promise<void> {
           continue
         }
 
-        const screenWidth = Math.max(1, window.screen.width || window.innerWidth)
+        const screenWidth = Math.max(1, window.innerWidth || window.screen.width)
         const sourceBlurPx = Math.max(1.5, BASE_WALLPAPER_FRAME_BLUR_PX * bitmap.width / screenWidth)
         const bleed = Math.ceil(sourceBlurPx * 3)
         ctx.clearRect(0, 0, canvas.width, canvas.height)

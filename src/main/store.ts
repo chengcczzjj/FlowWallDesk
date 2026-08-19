@@ -1,5 +1,5 @@
 import Store from 'electron-store'
-import type { WallpaperState, WidgetInstance, ModelProfile } from '@shared/types'
+import type { WallpaperState, WidgetInstance, ModelProfile, WallpaperDisplayMode } from '@shared/types'
 import type { DesktopSceneSnapshot } from '@shared/desktop-scene'
 
 interface ModelSettings {
@@ -15,8 +15,15 @@ interface AppSettings {
   launchAtLogin: boolean
 }
 
+interface WallpaperDisplaySettingsStore {
+  mode: WallpaperDisplayMode
+  /** display id -> wallpaper id; absent entries fall back to wallpaper.current */
+  assignments: Record<string, string>
+}
+
 interface Schema {
   wallpaper: WallpaperState
+  wallpaperDisplay: WallpaperDisplaySettingsStore
   widgets: WidgetInstance[]
   /** 跨壁纸保存的图标收纳与 Dock 组件 */
   globalIconWidgets?: WidgetInstance[]
@@ -24,6 +31,8 @@ interface Schema {
   desktopSceneSnapshots?: DesktopSceneSnapshot[]
   /** 主界面窗口最后位置 */
   mainWindowBounds?: { x: number; y: number; width: number; height: number }
+  /** Origin of persisted widget coordinates in virtual desktop DIP space. */
+  widgetCoordinateOrigin?: { x: number; y: number }
   /** AI 模型配置 */
   modelSettings: ModelSettings
   /** AI 人设 */
@@ -36,6 +45,7 @@ interface Schema {
 
 const defaults: Schema = {
   wallpaper: { volume: 0.5, muted: true },
+  wallpaperDisplay: { mode: 'primary', assignments: {} },
   widgets: [],
   modelSettings: {
     profiles: [

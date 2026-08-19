@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { WallpaperItem } from '@shared/types'
+import type { WallpaperItem, WallpaperDisplayLayout } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
 
 /** 将 scaling 名称映射为 CSS object-fit */
@@ -85,6 +85,7 @@ function drawWallpaperFrame(
 /** 壁纸窗口：根据 type 渲染 video / image / web(iframe)。 */
 export function Wallpaper() {
   const [item, setItem] = useState<WallpaperItem | null>(null)
+  const [layout, setLayout] = useState<WallpaperDisplayLayout | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [mediaReady, setMediaReady] = useState(false)
   const [videoStarted, setVideoStarted] = useState(false)
@@ -162,7 +163,7 @@ export function Wallpaper() {
 
   useEffect(() => {
     const c = document.createElement('canvas')
-    const aspect = Math.max(0.1, window.screen.height / Math.max(1, window.screen.width))
+    const aspect = Math.max(0.1, window.innerHeight / Math.max(1, window.innerWidth))
     c.width = 768
     c.height = Math.max(1, Math.round(c.width * aspect))
     captureCanvasRef.current = c
@@ -312,7 +313,16 @@ export function Wallpaper() {
         if (it.settings.flip !== undefined) setFlip(it.settings.flip)
       }
     })
+    const offLayout = window.wallpaperBridge?.onDisplayLayout?.(setLayout)
+    const offLayoutChanged = window.wallpaperBridge?.onDisplayLayoutChanged?.(() => {
+      window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
+        if (next) setLayout(next)
+      })
+    })
     // 主动拉取当前壁纸（防止启动时错过 LOAD 事件）
+    window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
+      if (next) setLayout(next)
+    })
     window.wallpaperBridge?.getCurrent?.().then((state) => {
       if (state?.current) {
         console.log('[wallpaper] initial pull', state.current)
@@ -329,7 +339,11 @@ export function Wallpaper() {
         }
       }
     })
-    return off
+    return () => {
+      off?.()
+      offLayout?.()
+      offLayoutChanged?.()
+    }
   }, [])
 
   // 监听实时设置更新
@@ -371,8 +385,6 @@ export function Wallpaper() {
     return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
   }
 
-  const src = toAssetUrl(item.source) ?? ''
-
   const errorOverlay = err ? (
     <div
       style={{
@@ -402,83 +414,28 @@ export function Wallpaper() {
     transition: 'opacity 120ms ease-out',
   }
 
-  if (item.type === 'video') {
-    return (
-      <>
-        <video
-          key={item.source}
-          ref={videoRef}
-          crossOrigin="anonymous"
-          src={src}
-          autoPlay
-          muted={volume === 0 || !videoStarted}
-          loop
-          playsInline
-          preload="auto"
-          onLoadedData={() => {
-            markMediaReady()
-            captureFrame()
-            playVideo()
-          }}
-          onCanPlay={() => {
-            markMediaReady()
-            playVideo()
-          }}
-          onPlaying={() => {
-            markMediaReady()
-            setVideoStarted(true)
-          }}
-          onError={() => {
-            setErr(`video 加载失败 (${item.source})`)
-            markMediaReady()
-          }}
-          style={mediaStyle}
-        />
-        {errorOverlay}
-      </>
-    )
+  const surfaces = layout?.displays?.length
+    ? layout.displays
+    : [{ displayId: -1, bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item }]
+
+  const renderSurface = (surface: (typeof surfaces)[number], index: number) => {
+    const surfaceItem = surface.item ?? item
+    const surfaceSrc = toAssetUrl(surfaceItem.source) ?? ''
+    const surfaceMediaStyle = { ...mediaStyle, display: 'block' as const }
+    if (surfaceItem.type === 'video') {
+      return <video key={`${surface.displayId}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
+    }
+    if (surfaceItem.type === 'image') {
+      return <img key={`${surface.displayId}:${surfaceItem.source}`} ref={index === 0 ? imgRef : undefined} crossOrigin="anonymous" src={surfaceSrc} onLoad={() => { if (index === 0) { markMediaReady(); captureFrame() } }} onError={() => { if (index === 0) { setErr(`image 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} alt="" />
+    }
+    if (surfaceItem.type === 'web') {
+      return <iframe key={`${surface.displayId}:${surfaceItem.source}`} src={surfaceSrc} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
+    }
+    return null
   }
 
-  if (item.type === 'image') {
-    return (
-      <>
-        <img
-          key={item.source}
-          ref={imgRef}
-          crossOrigin="anonymous"
-          src={src}
-          onLoad={() => {
-            markMediaReady()
-            captureFrame()
-          }}
-          onError={() => {
-            setErr(`image 加载失败 (${item.source})`)
-            markMediaReady()
-          }}
-          style={mediaStyle}
-        />
-        {errorOverlay}
-      </>
-    )
-  }
-
-  if (item.type === 'web') {
-    return (
-      <>
-        <iframe
-          key={item.source}
-          src={src}
-          onLoad={markMediaReady}
-          onError={() => {
-            setErr(`iframe 加载失败 (${item.source})`)
-            markMediaReady()
-          }}
-          style={{ ...mediaStyle, border: 0 }}
-        />
-        {errorOverlay}
-      </>
-    )
-  }
-
-  return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
+  return <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'transparent' }}>
+    {surfaces.map((surface, index) => <div key={`${surface.displayId}:${surface.localBounds.x}:${surface.localBounds.y}`} style={{ position: 'absolute', left: surface.localBounds.x, top: surface.localBounds.y, width: surface.localBounds.width, height: surface.localBounds.height, overflow: 'hidden' }}>{renderSurface(surface, index)}</div>)}
+    {errorOverlay}
+  </div>
 }

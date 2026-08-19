@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem } from '@shared/types'
+import type { WallpaperItem, WallpaperDisplayLayout } from '@shared/types'
 
 const api = {
   /** 监听主进程下发的壁纸切换 */
@@ -32,6 +32,18 @@ const api = {
     ipcRenderer.on(IPC.WALLPAPER_PAUSE_CAPTURE, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_PAUSE_CAPTURE, handler)
   },
+  onDisplayLayout: (cb: (layout: WallpaperDisplayLayout) => void): (() => void) => {
+    const handler = (_: unknown, layout: WallpaperDisplayLayout) => cb(layout)
+    ipcRenderer.on(IPC.WALLPAPER_DISPLAY_LAYOUT, handler)
+    return () => ipcRenderer.off(IPC.WALLPAPER_DISPLAY_LAYOUT, handler)
+  },
+  onDisplayLayoutChanged: (cb: () => void): (() => void) => {
+    const handler = () => cb()
+    ipcRenderer.on(IPC.WALLPAPER_DISPLAY_LAYOUT_CHANGED, handler)
+    return () => ipcRenderer.off(IPC.WALLPAPER_DISPLAY_LAYOUT_CHANGED, handler)
+  },
+  getDisplayLayout: (): Promise<WallpaperDisplayLayout | null> =>
+    ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_GET_LAYOUT),
   onCaptureDemand: (cb: (enabled: boolean) => void): (() => void) => {
     const handler = (_: unknown, enabled: boolean) => cb(enabled)
     ipcRenderer.on(IPC.WALLPAPER_CAPTURE_DEMAND, handler)

@@ -31,6 +31,44 @@ export interface WallpaperState {
   muted: boolean
 }
 
+/** Windows 多显示器壁纸布局模式。与 Lively 的 per / span / duplicate 对齐。 */
+export type WallpaperDisplayMode = 'primary' | 'duplicate' | 'per-display' | 'span'
+
+export interface DisplayBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface DisplayDescriptor {
+  id: number
+  label: string
+  primary: boolean
+  bounds: DisplayBounds
+  workArea: DisplayBounds
+  scaleFactor: number
+}
+
+export interface WallpaperDisplaySegment {
+  displayId: number
+  bounds: DisplayBounds
+  localBounds: DisplayBounds
+  item: WallpaperItem
+}
+
+export interface WallpaperDisplayLayout {
+  mode: WallpaperDisplayMode
+  virtualBounds: DisplayBounds
+  displays: WallpaperDisplaySegment[]
+}
+
+export interface WallpaperDisplaySettings {
+  mode: WallpaperDisplayMode
+  assignments: Record<string, string>
+  displays: DisplayDescriptor[]
+}
+
 /** 在线壁纸资源清单中的单项。资源包版本独立于应用版本。 */
 export interface WallpaperResourceEntry {
   id: string
@@ -140,6 +178,8 @@ export interface WidgetInstance {
   height: number
   enabled: boolean
   config?: Record<string, unknown>
+  /** Optional Windows display id for future per-screen widget pinning. */
+  displayId?: number
 }
 
 export type TodoTaskCategory = 'work' | 'study' | 'life' | 'health' | 'other'

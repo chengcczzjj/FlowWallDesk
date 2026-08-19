@@ -14,6 +14,7 @@ import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared
 import { secureWindowNavigation } from './navigationSecurity'
 import { store } from '../store'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
+import { getDesktopRenderBounds } from './displayLayout'
 
 
 let koffi: any
@@ -156,20 +157,26 @@ function checkDesktopOccluded(): boolean {
 
     const rect = { left: 0, top: 0, right: 0, bottom: 0 }
     u32.GetWindowRect(fgHwnd, rect)
-    const primary = screen.getPrimaryDisplay()
+    const displays = screen.getAllDisplays()
     const dipRect = screen.screenToDipRect(null, {
       x: rect.left,
       y: rect.top,
       width: rect.right - rect.left,
       height: rect.bottom - rect.top,
     })
-    // 只在窗口真正覆盖主屏时暂停，避免副屏全屏误伤主屏 Dock。
-    return finish(rectCoversDisplay({
+    // In a virtual multi-display canvas, pause only when every display is
+    // covered. A fullscreen app on the secondary screen must not blank the
+    // still-visible primary desktop.
+    const coverage = {
       left: dipRect.x,
       top: dipRect.y,
       right: dipRect.x + dipRect.width,
       bottom: dipRect.y + dipRect.height,
-    }, primary.bounds), 'display-coverage', { dipRect })
+    }
+    const covered = displays.length > 1
+      ? displays.every((display) => rectCoversDisplay(coverage, display.bounds))
+      : rectCoversDisplay(coverage, displays[0]?.bounds ?? getDesktopRenderBounds())
+    return finish(covered, 'display-coverage', { dipRect, displayCount: displays.length })
   } catch {
     lastOcclusionDiagnostic = { reason: 'occlusion-check-failed' }
     return false
@@ -340,10 +347,10 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
 }
 
 function refreshCanvasCursorHitTest(): void {
-  const display = screen.getPrimaryDisplay()
+  const displayBounds = getDesktopRenderBounds()
   const cursor = screen.getCursorScreenPoint()
   const widgets = store.get('widgets')
-  const widget = findInteractiveWidgetAtPoint(cursor, display.bounds, widgets)
+  const widget = findInteractiveWidgetAtPoint(cursor, displayBounds, widgets)
   const widgetSurface = widget && (isDesktopIconWidgetType(widget.type) || rendererMousePassthrough)
     ? inspectNativeCursorSurface()
     : null
@@ -622,7 +629,7 @@ function finishNativeIconGesture(
 function syncCanvasBoundsToPrimaryDisplay(): void {
   const win = getCanvasWindow()
   if (!win) return
-  const bounds = screen.getPrimaryDisplay().bounds
+  const bounds = getDesktopRenderBounds()
   const current = win.getBounds()
   if (
     current.x === bounds.x && current.y === bounds.y &&
@@ -635,7 +642,13 @@ function syncCanvasBoundsToPrimaryDisplay(): void {
 function registerCanvasDisplayListener(): void {
   if (boundsListenerRegistered) return
   boundsListenerRegistered = true
-  const sync = () => syncCanvasBoundsToPrimaryDisplay()
+  const sync = () => {
+    syncCanvasBoundsToPrimaryDisplay()
+    // Display topology can move the virtual desktop origin (e.g. a monitor
+    // added on the left). Migrate persisted widget coordinates asynchronously
+    // to avoid a static widgetIpc <-> canvasWindow import cycle.
+    void import('../ipc/widgetIpc').then(({ ensureWidgetCoordinateOrigin }) => ensureWidgetCoordinateOrigin()).catch(() => undefined)
+  }
   screen.on('display-metrics-changed', sync)
   screen.on('display-added', sync)
   screen.on('display-removed', sync)
@@ -650,8 +663,7 @@ function registerCanvasDisplayListener(): void {
 export function createCanvasWindow(): BrowserWindow {
   if (canvasWindow && !canvasWindow.isDestroyed()) return canvasWindow
 
-  const display = screen.getPrimaryDisplay()
-  const { x, y, width, height } = display.bounds
+  const { x, y, width, height } = getDesktopRenderBounds()
 
   canvasWindow = new BrowserWindow({
     width,
@@ -804,6 +816,11 @@ export function setCanvasMousePassthrough(ignore: boolean): void {
   rendererMousePassthrough = ignore
   rendererMousePassthroughAt = Date.now()
   applyCanvasMousePassthrough()
+}
+
+/** Re-apply the transparent canvas rectangle after switching display mode. */
+export function refreshCanvasBounds(): void {
+  syncCanvasBoundsToPrimaryDisplay()
 }
 
 export function setCanvasPointerActive(active: boolean): void {
