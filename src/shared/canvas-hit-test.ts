@@ -72,7 +72,13 @@ export function shouldRepairCanvasInteraction(options: {
   alreadyAttempted: boolean
 }): boolean {
   if (options.desktopOccluded || options.recompositing || options.alreadyAttempted) return false
-  if (options.nativeMousePassthrough !== false || !options.rendererMousePassthrough) return false
+  if (options.nativeMousePassthrough !== false) return false
+  // A renderer hover acknowledgement is normally enough to avoid a repair,
+  // but it is not proof that Windows will route the next pointer event to the
+  // transparent HWND.  When the native hit surface is the desktop shell we
+  // can safely re-enter the compositor even if Chromium currently reports the
+  // widget as interactive.
+  if (!options.rendererMousePassthrough && !options.desktopSurface) return false
   if (options.captureRequestedAt <= 0 || options.now - options.captureRequestedAt < CANVAS_INTERACTION_REPAIR_DELAY_MS) {
     return false
   }

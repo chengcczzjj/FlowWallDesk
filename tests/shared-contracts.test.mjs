@@ -214,6 +214,12 @@ test('canvas interaction repair is limited to a missing renderer capture on desk
   }
   assert.equal(shouldRepairCanvasInteraction(base), true)
   assert.equal(shouldRepairCanvasInteraction({ ...base, canvasTopmost: false, desktopSurface: true }), true)
+  // The renderer can report a healthy hover while the native HWND is still
+  // behind the desktop compositor after a fullscreen transition.
+  assert.equal(
+    shouldRepairCanvasInteraction({ ...base, rendererMousePassthrough: false, canvasTopmost: false, desktopSurface: true }),
+    true,
+  )
   assert.equal(shouldRepairCanvasInteraction({ ...base, canvasTopmost: false, desktopSurface: false }), false)
   assert.equal(shouldRepairCanvasInteraction({ ...base, rendererMousePassthrough: false }), false)
   assert.equal(shouldRepairCanvasInteraction({ ...base, nativeMousePassthrough: true }), false)

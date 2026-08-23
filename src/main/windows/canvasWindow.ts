@@ -300,9 +300,19 @@ function isDesktopShellSurface(hitHwnd: number, rootHwnd: number, rootClassName:
   const progman = Number(u32.FindWindowExA(0, 0, 'Progman', 0))
   const defView = findDefView()
   const desktopRoot = defView ? Number(u32.GetAncestor(defView, GA_ROOT)) : 0
+  let wallpaperHwnd = 0
+  const wallpaper = getWallpaperWindow()
+  if (wallpaper && !wallpaper.isDestroyed()) {
+    try {
+      wallpaperHwnd = Number(wallpaper.getNativeWindowHandle().readBigInt64LE(0))
+    } catch {
+      wallpaperHwnd = 0
+    }
+  }
   return (
     hitHwnd === progman || rootHwnd === progman ||
     hitHwnd === defView || rootHwnd === desktopRoot ||
+    (wallpaperHwnd !== 0 && (hitHwnd === wallpaperHwnd || rootHwnd === wallpaperHwnd)) ||
     rootClassName === 'Progman' || rootClassName === 'WorkerW'
   )
 }
@@ -351,9 +361,13 @@ function refreshCanvasCursorHitTest(): void {
   const cursor = screen.getCursorScreenPoint()
   const widgets = store.get('widgets')
   const widget = findInteractiveWidgetAtPoint(cursor, displayBounds, widgets)
-  const widgetSurface = widget && (isDesktopIconWidgetType(widget.type) || rendererMousePassthrough)
-    ? inspectNativeCursorSurface()
-    : null
+  // Sample the native surface for every widget, not only Dock.  A fullscreen
+  // transition can leave Chromium's renderer hover state looking healthy
+  // while Windows still routes the point to the wallpaper/desktop surface.
+  // Sticky notes have no native click fallback, so they otherwise remain
+  // visibly present but completely inert until another Dock hover repairs the
+  // shared canvas HWND.
+  const widgetSurface = widget ? inspectNativeCursorSurface() : null
   const iconSurface = widget && isDesktopIconWidgetType(widget.type) ? widgetSurface : null
   const previousIconSurface = lastNativeIconSurfaceSample
   const nextWidgetId = widget?.id ?? null
