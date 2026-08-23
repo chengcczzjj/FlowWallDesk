@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-23 00:00] 发布 1.1.3 双显示器选择器修复版
+
+**变更摘要**: 将显示器选择器和启动稳定性修复升版为 1.1.3，构建 Windows 安装包并准备发布。
+
+**涉及模块**:
+- `src/renderer/main-ui/App.tsx` / `src/renderer/main-ui/styles.css`: 壁纸页显示器按钮改为可选择目标显示器的下拉菜单。
+- `src/renderer/main-ui/pages/LibraryPage.tsx` / `src/renderer/main-ui/pages/OnlineWallpaperPage.tsx`: 支持向选定显示器应用壁纸并显示失败原因。
+- `src/main/windows/displayLayout.ts`: 防护启动和显示器拓扑变化期间的 screen API 短暂不可用场景。
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.3.md`: 同步 1.1.3 发布元数据和说明。
+
+**遇到的问题**:
+- 显示器按钮原先只是无行为占位按钮，且错误处理缺少用户反馈 → 改为目标选择器并为显示器 IPC 和壁纸应用增加错误边界。
+
+**Git Commit**: `chore(release): publish LingyueDesk 1.1.3`
+
+---
+
 ## [2026-08-19 00:00] 发布 1.1.2 双显示器版本并更新本机客户端
 
 **变更摘要**: 将双显示器壁纸与组件支持升版为 1.1.2，生成 Windows 安装包并完成本机客户端更新。
