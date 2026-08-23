@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-23 00:00] 发布 1.1.4 全屏返回便利贴交互修复版
+
+**变更摘要**: 将全屏游戏返回后便利贴输入/拖动失效的 Canvas 原生命中自愈修复升版为 1.1.4，构建并推送 Windows 自动更新资产。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts` / `src/shared/canvas-hit-test.ts`: 对所有桌面组件采样原生命中表面，识别壁纸层并在透明 Canvas HWND 失去命中时自动重建层级。
+- `tests/shared-contracts.test.mjs` / `tests/release-contracts.test.mjs`: 增加全屏返回交互修复回归契约并同步 1.1.4 版本。
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.4.md`: 同步发布元数据、安装包校验信息和更新说明。
+
+**遇到的问题**:
+- Renderer 的 `elementFromPoint` 仍显示便利贴可交互，但 Windows 实际将鼠标路由到桌面/壁纸层 → 扩展原先仅针对 Dock 的原生命中修复，并允许安全桌面表面触发 Canvas 重组合。
+
+**Git Commit**: `chore(release): publish LingyueDesk 1.1.4`
+
+---
+
 ## [2026-08-23 00:00] 发布 1.1.3 双显示器选择器修复版
 
 **变更摘要**: 将显示器选择器和启动稳定性修复升版为 1.1.3，构建 Windows 安装包并准备发布。
