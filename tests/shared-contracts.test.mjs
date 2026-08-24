@@ -35,7 +35,9 @@ import { createShowDesktopInputEvents } from '../src/main/windows/windowsDesktop
 import {
   CANVAS_INTERACTION_REPAIR_DELAY_MS,
   findInteractiveWidgetAtPoint,
+  isCanvasInteractiveWidgetType,
   isDesktopIconWidgetType,
+  isPassiveWidgetType,
   shouldIgnoreCanvasMouse,
   shouldRepairCanvasInteraction,
 } from '../src/shared/canvas-hit-test.ts'
@@ -198,6 +200,14 @@ test('native canvas hit testing follows visual z-order and keeps widgets alive w
   assert.equal(isDesktopIconWidgetType('desktop-icons-adaptive'), true)
   assert.equal(isDesktopIconWidgetType('desktop-icons-dock'), true)
   assert.equal(isDesktopIconWidgetType('clock'), false)
+  assert.equal(isPassiveWidgetType('clock'), true)
+  assert.equal(isPassiveWidgetType('graphicdatetime'), true)
+  assert.equal(isPassiveWidgetType('weather'), true)
+  assert.equal(isCanvasInteractiveWidgetType('clock'), false)
+  assert.equal(isCanvasInteractiveWidgetType('todo-board'), true)
+  assert.equal(findInteractiveWidgetAtPoint({ x: 180, y: 150 }, display, [{
+    id: 'clock-1', type: 'clock', x: 100, y: 100, width: 220, height: 190, enabled: true, config: {},
+  }]), undefined)
 })
 
 test('canvas interaction repair is limited to a missing renderer capture on desktop surfaces', () => {

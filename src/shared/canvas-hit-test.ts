@@ -7,6 +7,24 @@ const DESKTOP_ICON_WIDGET_TYPES = new Set([
   'desktop-icons-dock',
 ])
 
+// These widgets only paint changing information. They belong to the settled
+// desktop layer and should not make the transparent canvas capture the mouse
+// or trigger a temporary always-on-top repair during app/window switches.
+const PASSIVE_WIDGET_TYPES = new Set([
+  'clock',
+  'elegantclock',
+  'pixelclock',
+  'graphicdatetime',
+  'audio',
+  'weather',
+  'text',
+  'stocks',
+  'news',
+  'calendar',
+  'pet',
+  'sysmonitor',
+])
+
 export interface CanvasPoint {
   x: number
   y: number
@@ -23,6 +41,14 @@ export const CANVAS_INTERACTION_REPAIR_DELAY_MS = 140
 
 export function isDesktopIconWidgetType(type: string): boolean {
   return DESKTOP_ICON_WIDGET_TYPES.has(type)
+}
+
+export function isPassiveWidgetType(type: string): boolean {
+  return PASSIVE_WIDGET_TYPES.has(type)
+}
+
+export function isCanvasInteractiveWidgetType(type: string): boolean {
+  return !isPassiveWidgetType(type)
 }
 
 export function findInteractiveWidgetAtPoint(
@@ -43,7 +69,7 @@ export function findInteractiveWidgetAtPoint(
       clientX <= widget.x + widget.width + padding &&
       clientY >= widget.y - padding &&
       clientY <= widget.y + widget.height + padding
-    ) return widget
+    ) return isCanvasInteractiveWidgetType(widget.type) ? widget : undefined
   }
   return undefined
 }

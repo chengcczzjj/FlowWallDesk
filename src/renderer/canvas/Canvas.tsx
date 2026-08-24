@@ -6,6 +6,7 @@ import { FloatingToolbar } from '../widgets/FloatingToolbar'
 import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
 import { setWallpaperFrame } from './wallpaperFrameStore'
 import { CanvasPointerGate } from '@shared/canvas-pointer-gate'
+import { isCanvasInteractiveWidgetType } from '@shared/canvas-hit-test'
 
 const GRID = 16
 const EDGE_PADDING = 24
@@ -379,7 +380,8 @@ export function Canvas() {
     if (desktopOccludedRef.current) return
 
     const target = document.elementFromPoint(clientX, clientY) as Element | null
-    const overWidget = Boolean(target?.closest('[data-widget]'))
+    const widgetElement = target?.closest<HTMLElement>('[data-widget]')
+    const overWidget = widgetElement?.dataset.widgetInteractive === 'true'
     const ignore = pointerGateRef.current.shouldIgnoreMouse(overWidget, editingRef.current)
     if (!force && lastMousePassthroughRef.current === ignore) return
     lastMousePassthroughRef.current = ignore
@@ -1430,6 +1432,7 @@ function DraggableWidget({
     <div
       ref={elRef}
       data-widget={widget.id}
+      data-widget-interactive={isCanvasInteractiveWidgetType(widget.type) ? 'true' : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
