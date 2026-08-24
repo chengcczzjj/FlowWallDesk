@@ -31,6 +31,7 @@ test('sticky notes use direct freeform drag and resize without edit mode or coll
   const canvasSource = await readFile(new URL('../src/renderer/canvas/Canvas.tsx', import.meta.url), 'utf8')
   const canvasWindowSource = await readFile(new URL('../src/main/windows/canvasWindow.ts', import.meta.url), 'utf8')
   const mainSource = await readFile(new URL('../src/main/ipc/widgetIpc.ts', import.meta.url), 'utf8')
+  const preloadSource = await readFile(new URL('../src/preload/canvas.ts', import.meta.url), 'utf8')
   const todoSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/TodoBoard.tsx', import.meta.url), 'utf8')
   assert.match(canvasSource, /directManipulation && !isWidgetInteractionTarget\(target\)/)
   assert.match(canvasSource, /resizeEdge && canResize && \(editing \|\| directManipulation\)/)
@@ -41,6 +42,8 @@ test('sticky notes use direct freeform drag and resize without edit mode or coll
   assert.match(mainSource, /findStickyNotePlacement/)
   assert.match(todoSource, /data-widget-drag-handle/)
   assert.match(todoSource, /data-resize="br"/)
+  assert.match(todoSource, /className="sticky-note__add-button"/)
+  assert.match(preloadSource, /addWidget: \(w: WidgetInstance\): Promise<WidgetInstance\[\]>/)
   assert.match(canvasSource, /onPointerReset\(\(\) =>/)
   assert.match(canvasSource, /pointerGateRef\.current\.reset\(\)/)
   assert.match(canvasWindowSource, /CANVAS_POINTER_RESET/)
@@ -53,8 +56,11 @@ test('desktop note editing opens a scoped keyboard-focus session without enterin
   const ipcSource = await readFile(new URL('../src/shared/ipc-channels.ts', import.meta.url), 'utf8')
   assert.match(ipcSource, /CANVAS_SET_TEXT_INPUT_ACTIVE/)
   assert.match(preloadSource, /setTextInputActive: \(active: boolean\): Promise<boolean>/)
-  assert.match(todoSource, /setTextInputActive\(true\)[\s\S]*inputRef\.current\?\.focus\(\)/)
+  assert.match(todoSource, /setTextInputActive\(true\)[\s\S]*editorRef\.current\?\.focus\(\)/)
   assert.match(todoSource, /setTextInputActive\(false\)/)
+  assert.match(todoSource, /contentEditable/)
+  assert.match(todoSource, /className="sticky-note__formatbar"/)
+  assert.match(todoSource, /document\.execCommand\(FORMAT_COMMANDS\[format\]/)
   assert.match(canvasWindowSource, /editing: isEditing \|\| canvasTextInputActive/)
   assert.match(canvasWindowSource, /export function setCanvasTextInputActive[\s\S]*win\.setFocusable\(true\)[\s\S]*win\.webContents\.focus\(\)/)
   assert.doesNotMatch(todoSource, /setEditMode\(/)
@@ -62,11 +68,12 @@ test('desktop note editing opens a scoped keyboard-focus session without enterin
 
 test('sticky note typography and controls reflow for narrow, short and large paper sizes', async () => {
   const cssSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/todo-board.css', import.meta.url), 'utf8')
-  assert.match(cssSource, /font-size: clamp\(14px, min\(7\.4cqw, 9cqh\), 22px\)/)
+  assert.match(cssSource, /font-size: clamp\(12px, min\(var\(--sticky-font-size\), 9cqh\), 36px\)/)
   assert.match(cssSource, /@container \(max-width: 185px\)/)
-  assert.match(cssSource, /@container \(max-height: 140px\)[\s\S]*sticky-note__topbar \{ height: 31px;/)
+  assert.match(cssSource, /@container \(max-height: 140px\)[\s\S]*sticky-note__topbar \{ height: 28px;/)
   assert.match(cssSource, /@container \(min-width: 300px\) and \(min-height: 240px\)/)
   assert.match(cssSource, /sticky-note\[data-empty="true"\]/)
+  assert.match(cssSource, /sticky-note__formatbar/)
 })
 
 test('desktop note uses system typography and exposes simple color and category controls', async () => {
@@ -91,7 +98,21 @@ test('one sticky note stores one task and keeps physical paper choices', () => {
   assert.equal(normalized.color, 'mint')
   assert.equal(normalized.paperStyle, 'pin')
   assert.equal(normalized.rotation, 2.2)
+  assert.equal(normalized.textStyle.fontFamily, 'system')
+  assert.equal(normalized.textStyle.bold, false)
   assert.equal('tasks' in normalized, false)
+})
+
+test('sticky note text style and rich body content normalize within bounds', () => {
+  const normalized = normalizeTodoWidgetConfig({
+    version: 2,
+    textStyle: { fontFamily: 'mono', fontSize: 80, bold: true, italic: true, underline: true, strike: true },
+    bodyHtml: '<b>保留</b><script>丢弃</script>',
+  })
+  assert.equal(normalized.textStyle.fontFamily, 'mono')
+  assert.equal(normalized.textStyle.fontSize, 36)
+  assert.equal(normalized.textStyle.bold, true)
+  assert.equal(normalized.bodyHtml, '<b>保留</b><script>丢弃</script>')
 })
 
 test('legacy task boards migrate into overlapping independent notes without losing completed history', () => {

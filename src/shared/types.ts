@@ -195,6 +195,18 @@ export type TodoNoteColor = 'butter' | 'rose' | 'mint' | 'sky' | 'lilac'
 
 export type TodoNotePaperStyle = 'tape' | 'pin' | 'plain'
 
+export type TodoNoteFontFamily = 'system' | 'serif' | 'mono' | 'handwritten'
+
+/** 便利贴编辑器的直接文字样式；正文 HTML 另存于 TodoWidgetConfig.bodyHtml。 */
+export interface TodoTextStyle {
+  fontFamily: TodoNoteFontFamily
+  fontSize: number
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strike: boolean
+}
+
 /** 桌面任务便笺中的单项任务。时间戳使用本地设备的 Unix 毫秒值。 */
 export interface TodoTask {
   id: string
@@ -225,6 +237,8 @@ export interface TodoWidgetConfig {
   color: TodoNoteColor
   paperStyle: TodoNotePaperStyle
   rotation: number
+  textStyle: TodoTextStyle
+  bodyHtml?: string
   tearRequestedAt?: number
 }
 

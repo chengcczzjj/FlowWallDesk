@@ -43,6 +43,7 @@ const api = {
     return () => ipcRenderer.off(IPC.CANVAS_POINTER_RESET, handler)
   },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
+  addWidget: (w: WidgetInstance): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_ADD, w),
   getFilePath: (file: File): string | undefined => {
     try {
       return webUtils.getPathForFile(file)

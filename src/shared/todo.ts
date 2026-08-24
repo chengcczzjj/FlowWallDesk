@@ -1,10 +1,12 @@
 import type {
   LegacyTodoWidgetConfig,
   TodoNoteColor,
+  TodoNoteFontFamily,
   TodoNotePaperStyle,
   TodoTask,
   TodoTaskCategory,
   TodoTaskPriority,
+  TodoTextStyle,
   TodoWidgetConfig,
   WidgetInstance,
 } from './types'
@@ -22,12 +24,23 @@ export const TODO_CATEGORY_META: Record<TodoTaskCategory, { label: string; short
 
 export const TODO_NOTE_COLORS: TodoNoteColor[] = ['butter', 'rose', 'mint', 'sky', 'lilac']
 export const TODO_NOTE_PAPER_STYLES: TodoNotePaperStyle[] = ['tape', 'pin', 'plain']
+export const TODO_NOTE_FONT_FAMILIES: TodoNoteFontFamily[] = ['system', 'serif', 'mono', 'handwritten']
+
+export const DEFAULT_TODO_TEXT_STYLE: TodoTextStyle = {
+  fontFamily: 'system',
+  fontSize: 18,
+  bold: false,
+  italic: false,
+  underline: false,
+  strike: false,
+}
 
 export const DEFAULT_TODO_WIDGET_CONFIG: TodoWidgetConfig = {
   version: 2,
   color: 'butter',
   paperStyle: 'tape',
   rotation: -1.4,
+  textStyle: DEFAULT_TODO_TEXT_STYLE,
 }
 
 const CATEGORY_KEYWORDS: Record<Exclude<TodoTaskCategory, 'other'>, RegExp> = {
@@ -61,6 +74,25 @@ function readNoteColor(value: unknown): TodoNoteColor {
 
 function readPaperStyle(value: unknown): TodoNotePaperStyle {
   return TODO_NOTE_PAPER_STYLES.includes(value as TodoNotePaperStyle) ? value as TodoNotePaperStyle : 'tape'
+}
+
+function readFontFamily(value: unknown): TodoNoteFontFamily {
+  return TODO_NOTE_FONT_FAMILIES.includes(value as TodoNoteFontFamily)
+    ? value as TodoNoteFontFamily
+    : DEFAULT_TODO_TEXT_STYLE.fontFamily
+}
+
+function readTextStyle(value: unknown): TodoTextStyle {
+  const source = isRecord(value) ? value : {}
+  const rawSize = readFiniteNumber(source.fontSize) ?? DEFAULT_TODO_TEXT_STYLE.fontSize
+  return {
+    fontFamily: readFontFamily(source.fontFamily),
+    fontSize: Math.round(Math.max(12, Math.min(36, rawSize))),
+    bold: source.bold === true,
+    italic: source.italic === true,
+    underline: source.underline === true,
+    strike: source.strike === true,
+  }
 }
 
 function clampRotation(value: unknown): number {
@@ -140,12 +172,15 @@ export function normalizeLegacyTodoWidgetConfig(value: unknown, now = Date.now()
 export function normalizeTodoWidgetConfig(value: unknown, now = Date.now()): TodoWidgetConfig {
   const source = isRecord(value) ? value : {}
   const legacyTasks = source.version === 1 ? normalizeTodoTasks(source.tasks, now) : []
+  const rawBodyHtml = typeof source.bodyHtml === 'string' ? source.bodyHtml.slice(0, 512 * 1024) : undefined
   return {
     version: 2,
     task: normalizeTodoTask(source.task, 0, now) ?? legacyTasks[0] ?? undefined,
     color: readNoteColor(source.color),
     paperStyle: readPaperStyle(source.paperStyle),
     rotation: clampRotation(source.rotation),
+    textStyle: readTextStyle(source.textStyle),
+    bodyHtml: rawBodyHtml,
     tearRequestedAt: readFiniteNumber(source.tearRequestedAt),
   }
 }
@@ -155,6 +190,8 @@ export function createTodoWidgetConfig(params: {
   color?: TodoNoteColor
   paperStyle?: TodoNotePaperStyle
   rotation?: number
+  textStyle?: Partial<TodoTextStyle>
+  bodyHtml?: string
   tearRequestedAt?: number
 } = {}): TodoWidgetConfig {
   return normalizeTodoWidgetConfig({
@@ -163,6 +200,8 @@ export function createTodoWidgetConfig(params: {
     color: params.color ?? DEFAULT_TODO_WIDGET_CONFIG.color,
     paperStyle: params.paperStyle ?? DEFAULT_TODO_WIDGET_CONFIG.paperStyle,
     rotation: params.rotation ?? DEFAULT_TODO_WIDGET_CONFIG.rotation,
+    textStyle: { ...DEFAULT_TODO_TEXT_STYLE, ...(params.textStyle ?? {}) },
+    bodyHtml: params.bodyHtml,
     tearRequestedAt: params.tearRequestedAt,
   })
 }

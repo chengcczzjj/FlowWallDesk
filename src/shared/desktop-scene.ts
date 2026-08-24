@@ -477,6 +477,7 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
       { key: 'color', type: 'enum', label: '纸张颜色', options: ['butter', 'rose', 'mint', 'sky', 'lilac'] },
       { key: 'paperStyle', type: 'enum', label: '固定方式', options: ['tape', 'pin', 'plain'] },
       { key: 'rotation', type: 'number', label: '自然倾斜角度' },
+      { key: 'textStyle', type: 'object', label: '文字样式' },
     ],
     presets: [{ id: 'blank-note', label: '空白便利贴', intent: ['todo', 'note'], config: { version: 2, color: 'butter', paperStyle: 'tape', rotation: -1.4 } }],
     layoutHints: { preferredAnchors: ['top-right', 'center-right', 'top-left'], avoidCenter: true },

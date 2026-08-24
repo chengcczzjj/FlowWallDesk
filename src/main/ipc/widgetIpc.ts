@@ -664,8 +664,11 @@ export function registerWidgetIpc(): void {
   })
 
   ipcMain.handle(IPC.WIDGET_ADD, (_e, w: WidgetInstance) => {
-    assertTrustedIpcSender(_e, ['main'])
+    assertTrustedIpcSender(_e, ['main', 'canvas'])
     w = widgetInstanceSchema.parse(w)
+    if (_e.sender.id === getCanvasWindow()?.webContents.id && w.type !== 'todo-board') {
+      throw new Error('画布窗口只能新增便利贴')
+    }
     const list = store.get('widgets')
     // Most widget types are single-instance; icon storage containers can have multiple copies.
     if (!canAddMultipleWidgetType(w.type) && list.some((existing) => existing.type === w.type)) {
