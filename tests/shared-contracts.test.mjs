@@ -203,6 +203,7 @@ test('native canvas hit testing follows visual z-order and keeps widgets alive w
   assert.equal(isPassiveWidgetType('clock'), true)
   assert.equal(isPassiveWidgetType('graphicdatetime'), true)
   assert.equal(isPassiveWidgetType('weather'), true)
+  assert.equal(isPassiveWidgetType('quicktools'), true)
   assert.equal(isCanvasInteractiveWidgetType('clock'), false)
   assert.equal(isCanvasInteractiveWidgetType('todo-board'), true)
   assert.equal(findInteractiveWidgetAtPoint({ x: 180, y: 150 }, display, [{

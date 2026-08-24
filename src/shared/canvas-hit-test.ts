@@ -21,6 +21,7 @@ const PASSIVE_WIDGET_TYPES = new Set([
   'stocks',
   'news',
   'calendar',
+  'quicktools',
   'pet',
   'sysmonitor',
 ])
