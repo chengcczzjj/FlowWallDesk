@@ -4,6 +4,7 @@ import {
   buildWallpaperLayoutForTarget,
   getWallpaperWindowTargets,
   planWallpaperApplication,
+  resolveWallpaperObjectFit,
   unionDisplayBounds,
 } from '../src/shared/wallpaper-display-layout.ts'
 
@@ -50,6 +51,16 @@ test('span is the only mode that creates a virtual-desktop window', () => {
   assert.equal(targets.length, 1)
   assert.equal(targets[0].kind, 'span')
   assert.deepEqual(targets[0].bounds, { x: -1920, y: 0, width: 4480, height: 1440 })
+})
+
+test('span always covers the virtual desktop regardless of saved wallpaper scaling', () => {
+  assert.equal(resolveWallpaperObjectFit('span', '居中'), 'cover')
+  assert.equal(resolveWallpaperObjectFit('span', '填充'), 'cover')
+  assert.equal(resolveWallpaperObjectFit('span', '自由'), 'cover')
+
+  assert.equal(resolveWallpaperObjectFit('per-display', '居中'), 'none')
+  assert.equal(resolveWallpaperObjectFit('duplicate', '填充'), 'contain')
+  assert.equal(resolveWallpaperObjectFit('primary', '拉伸'), 'fill')
 })
 
 test('per-display layouts resolve independent assignments in window-local coordinates', () => {

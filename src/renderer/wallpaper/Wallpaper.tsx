@@ -1,22 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WallpaperItem, WallpaperDisplayLayout } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
-
-/** 将 scaling 名称映射为 CSS object-fit */
-function scalingToFit(s?: string): React.CSSProperties['objectFit'] {
-  switch (s) {
-    case '填充':
-      return 'contain'
-    case '居中':
-      return 'none'
-    case '拉伸':
-      return 'fill'
-    case '自由':
-      return 'scale-down'
-    default:
-      return 'cover' // 覆盖
-  }
-}
+import { resolveWallpaperObjectFit } from '@shared/wallpaper-display-layout'
 
 /** 将 flip 名称映射为 CSS transform */
 function flipToTransform(f?: string): string {
@@ -106,7 +91,7 @@ export function Wallpaper() {
   const [speed, setSpeed] = useState(1.0)
   const [scaling, setScaling] = useState('覆盖')
   const [flip, setFlip] = useState('无')
-  const objectFit = scalingToFit(scaling)
+  const objectFit = resolveWallpaperObjectFit(layout?.mode, scaling)
   const transform = flipToTransform(flip)
 
   const clearPlayRetry = useCallback(() => {

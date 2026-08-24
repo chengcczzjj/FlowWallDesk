@@ -15,6 +15,29 @@ export interface WallpaperWindowTarget {
   bounds: DisplayBounds
 }
 
+export type WallpaperObjectFit = 'cover' | 'contain' | 'none' | 'fill' | 'scale-down'
+
+/** Span always fills the virtual desktop; saved per-wallpaper scaling applies to other modes. */
+export function resolveWallpaperObjectFit(
+  mode: WallpaperDisplayMode | undefined,
+  scaling?: string,
+): WallpaperObjectFit {
+  if (mode === 'span') return 'cover'
+
+  switch (scaling) {
+    case '填充':
+      return 'contain'
+    case '居中':
+      return 'none'
+    case '拉伸':
+      return 'fill'
+    case '自由':
+      return 'scale-down'
+    default:
+      return 'cover'
+  }
+}
+
 export function planWallpaperApplication(params: {
   target: WallpaperApplyTarget
   mode: WallpaperDisplayMode
