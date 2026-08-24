@@ -99,6 +99,7 @@ export function Wallpaper() {
   const pausedRef = useRef(false)
   const [captureDemanded, setCaptureDemanded] = useState(false)
   const [capturePaused, setCapturePaused] = useState(false)
+  const activeItem = layout?.displays[0]?.item ?? item
 
   // 实时设置状态
   const [volume, setVolume] = useState(50)
@@ -116,9 +117,9 @@ export function Wallpaper() {
   }, [])
 
   const markMediaReady = useCallback(() => {
-    if (!item) return
+    if (!activeItem) return
     setMediaReady(true)
-  }, [item])
+  }, [activeItem])
 
   const playVideo = useCallback(
     (attempt = 0, requestGeneration?: number) => {
@@ -128,7 +129,7 @@ export function Wallpaper() {
         return
       }
       const v = videoRef.current
-      if (!v || item?.type !== 'video') return
+      if (!v || activeItem?.type !== 'video') return
       clearPlayRetry()
       v.volume = Math.max(0, Math.min(1, volume / 100))
       v.muted = volume === 0 || !videoStarted || attempt > 0
@@ -154,7 +155,7 @@ export function Wallpaper() {
           )
         })
     },
-    [clearPlayRetry, item?.type, speed, videoStarted, volume]
+    [activeItem?.type, clearPlayRetry, speed, videoStarted, volume]
   )
 
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
@@ -181,11 +182,11 @@ export function Wallpaper() {
     captureErrorKeyRef.current = null
     playRequestGenerationRef.current += 1
     clearPlayRetry()
-  }, [clearPlayRetry, item?.id, item?.source])
+  }, [activeItem?.id, activeItem?.source, clearPlayRetry])
 
   useEffect(() => {
-    if (!mediaReady || !item) return
-    const readyKey = `${item.id}:${item.source}`
+    if (!mediaReady || !activeItem) return
+    const readyKey = `${activeItem.id}:${activeItem.source}`
     if (readyReportedRef.current === readyKey) return
 
     // READY must be sent after React commits the visible media frame. Attaching the
@@ -195,14 +196,14 @@ export function Wallpaper() {
     const frame = window.requestAnimationFrame(() => {
       timer = window.setTimeout(() => {
         readyReportedRef.current = readyKey
-        window.wallpaperBridge?.notifyReady?.(item.id, item.source)
+        window.wallpaperBridge?.notifyReady?.(activeItem.id, activeItem.source)
       }, 140)
     })
     return () => {
       window.cancelAnimationFrame(frame)
       if (timer !== null) window.clearTimeout(timer)
     }
-  }, [item, mediaReady])
+  }, [activeItem, mediaReady])
 
   const captureFrame = useCallback(() => {
     if (!captureDemandRef.current || pausedRef.current) return
@@ -223,13 +224,13 @@ export function Wallpaper() {
       captureErrorKeyRef.current = null
       window.wallpaperBridge?.sendFrame?.(data)
     } catch (error) {
-      const errorKey = `${item?.id ?? 'unknown'}:${error instanceof Error ? error.name : 'capture-error'}`
+      const errorKey = `${activeItem?.id ?? 'unknown'}:${error instanceof Error ? error.name : 'capture-error'}`
       if (captureErrorKeyRef.current !== errorKey) {
         captureErrorKeyRef.current = errorKey
         console.warn('[wallpaper] renderer frame capture failed; main fallback will take over:', error)
       }
     }
-  }, [item?.id, objectFit, transform])
+  }, [activeItem?.id, objectFit, transform])
 
   // 根据壁纸类型启动/停止抽帧
   const startCapture = useCallback(() => {
@@ -272,31 +273,31 @@ export function Wallpaper() {
 
   // Full-screen occlusion owns video playback independently from frame demand.
   useEffect(() => {
-    if (item?.type !== 'video') return
+    if (activeItem?.type !== 'video') return
     if (capturePaused) {
       clearPlayRetry()
       if (videoRef.current && !videoRef.current.paused) videoRef.current.pause()
       return
     }
     playVideo()
-  }, [capturePaused, clearPlayRetry, item?.type, playVideo])
+  }, [activeItem?.type, capturePaused, clearPlayRetry, playVideo])
 
   // Frame capture has one idempotent owner, so repeated pause/resume cannot
   // leave duplicate intervals or revive a stopped timer.
   useEffect(() => {
     stopCapture()
-    if (!item || capturePaused || !captureDemanded) return
-    if (item.type === 'video') {
+    if (!activeItem || capturePaused || !captureDemanded) return
+    if (activeItem.type === 'video') {
       startCapture()
       return () => stopCapture()
     }
-    if (item.type === 'image') {
+    if (activeItem.type === 'image') {
       captureFrame()
       const timer = window.setTimeout(captureFrame, 1500)
       return () => window.clearTimeout(timer)
     }
     return undefined
-  }, [captureDemanded, captureFrame, capturePaused, item, startCapture, stopCapture])
+  }, [activeItem, captureDemanded, captureFrame, capturePaused, startCapture, stopCapture])
 
   useEffect(() => {
     const off = window.wallpaperBridge?.onLoad((it) => {
@@ -346,6 +347,17 @@ export function Wallpaper() {
     }
   }, [])
 
+  // Per-monitor assignments can have their own media settings and may change
+  // without changing wallpaper.current in another monitor window.
+  useEffect(() => {
+    if (!activeItem) return
+    const settings = activeItem.settings
+    setVolume(settings?.volume ?? 50)
+    setSpeed(settings?.speed ?? 1)
+    setScaling(settings?.scaling ?? '覆盖')
+    setFlip(settings?.flip ?? '无')
+  }, [activeItem])
+
   // 监听实时设置更新
   useEffect(() => {
     const off = window.wallpaperBridge?.onSettingUpdate?.((key: string, value: unknown) => {
@@ -373,15 +385,15 @@ export function Wallpaper() {
       videoRef.current.volume = Math.max(0, Math.min(1, volume / 100))
       videoRef.current.muted = volume === 0 || !videoStarted
     }
-  }, [volume, item, videoStarted])
+  }, [activeItem, videoStarted, volume])
 
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.playbackRate = speed
     }
-  }, [speed, item])
+  }, [activeItem, speed])
 
-  if (!item) {
+  if (!activeItem) {
     return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
   }
 
@@ -416,10 +428,10 @@ export function Wallpaper() {
 
   const surfaces = layout?.displays?.length
     ? layout.displays
-    : [{ displayId: -1, bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item }]
+    : [{ displayId: -1, bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item: activeItem }]
 
   const renderSurface = (surface: (typeof surfaces)[number], index: number) => {
-    const surfaceItem = surface.item ?? item
+    const surfaceItem = surface.item ?? activeItem
     const surfaceSrc = toAssetUrl(surfaceItem.source) ?? ''
     const surfaceMediaStyle = { ...mediaStyle, display: 'block' as const }
     if (surfaceItem.type === 'video') {

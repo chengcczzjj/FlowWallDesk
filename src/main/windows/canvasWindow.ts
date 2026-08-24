@@ -1,7 +1,7 @@
 import { BrowserWindow, desktopCapturer, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { getWallpaperWindow, refreshWallpaperAttach } from './wallpaperWindow'
+import { getWallpaperWindows, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
 import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occlusion'
 import {
@@ -300,19 +300,18 @@ function isDesktopShellSurface(hitHwnd: number, rootHwnd: number, rootClassName:
   const progman = Number(u32.FindWindowExA(0, 0, 'Progman', 0))
   const defView = findDefView()
   const desktopRoot = defView ? Number(u32.GetAncestor(defView, GA_ROOT)) : 0
-  let wallpaperHwnd = 0
-  const wallpaper = getWallpaperWindow()
-  if (wallpaper && !wallpaper.isDestroyed()) {
+  const wallpaperHwnds = new Set(getWallpaperWindows().flatMap((wallpaper) => {
+    if (wallpaper.isDestroyed()) return []
     try {
-      wallpaperHwnd = Number(wallpaper.getNativeWindowHandle().readBigInt64LE(0))
+      return [Number(wallpaper.getNativeWindowHandle().readBigInt64LE(0))]
     } catch {
-      wallpaperHwnd = 0
+      return []
     }
-  }
+  }))
   return (
     hitHwnd === progman || rootHwnd === progman ||
     hitHwnd === defView || rootHwnd === desktopRoot ||
-    (wallpaperHwnd !== 0 && (hitHwnd === wallpaperHwnd || rootHwnd === wallpaperHwnd)) ||
+    wallpaperHwnds.has(hitHwnd) || wallpaperHwnds.has(rootHwnd) ||
     rootClassName === 'Progman' || rootClassName === 'WorkerW'
   )
 }
@@ -527,9 +526,10 @@ function commitDesktopOcclusion(occluded: boolean): void {
   }
   applyCanvasMousePassthrough()
 
-  const wp = getWallpaperWindow()
-  if (wp && !wp.isDestroyed() && !wp.webContents.isDestroyed()) {
-    wp.webContents.send(IPC.WALLPAPER_PAUSE_CAPTURE, occluded)
+  for (const wallpaper of getWallpaperWindows()) {
+    if (!wallpaper.isDestroyed() && !wallpaper.webContents.isDestroyed()) {
+      wallpaper.webContents.send(IPC.WALLPAPER_PAUSE_CAPTURE, occluded)
+    }
   }
   const canvas = getCanvasWindow()
   if (canvas && !canvas.webContents.isDestroyed()) {

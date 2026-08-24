@@ -1,21 +1,24 @@
 import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron'
 import { getMainWindow } from '../windows/mainWindow'
 import { getCanvasWindow } from '../windows/canvasWindow'
-import { getWallpaperWindow } from '../windows/wallpaperWindow'
+import { isWallpaperWebContents } from '../windows/wallpaperWindow'
 
 export type IpcWindowRole = 'main' | 'canvas' | 'wallpaper'
 
-function roleWebContents(role: IpcWindowRole): WebContents | null {
+function roleWebContents(role: Exclude<IpcWindowRole, 'wallpaper'>): WebContents | null {
   if (role === 'main') return getMainWindow()?.webContents ?? null
-  if (role === 'canvas') return getCanvasWindow()?.webContents ?? null
-  return getWallpaperWindow()?.webContents ?? null
+  return getCanvasWindow()?.webContents ?? null
 }
 
 export function isTrustedIpcSender(
   event: IpcMainEvent | IpcMainInvokeEvent,
   allowedRoles: readonly IpcWindowRole[],
 ): boolean {
-  return allowedRoles.some((role) => roleWebContents(role)?.id === event.sender.id)
+  return allowedRoles.some((role) => (
+    role === 'wallpaper'
+      ? isWallpaperWebContents(event.sender.id)
+      : roleWebContents(role)?.id === event.sender.id
+  ))
 }
 
 export function assertTrustedIpcSender(

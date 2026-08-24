@@ -1,5 +1,23 @@
 # 灵月桌面 开发日志
 
+## [2026-08-24 21:45] 重做双显示器壁纸与设置链路
+
+**变更摘要**: 修复显示器设置页和壁纸库目标选择器实际不可见的问题，并将普通多屏壁纸从跨屏单窗口重构为每台显示器独立原生窗口。
+
+**涉及模块**:
+- `src/main/windows/wallpaperWindow.ts` / `src/shared/wallpaper-display-layout.ts`: 复制和按屏模式按显示器创建、贴合和热更新独立窗口，只有延展模式使用虚拟桌面窗口。
+- `src/main/ipc/wallpaperIpc.ts` / `src/renderer/wallpaper/Wallpaper.tsx`: 按发送窗口下发布局，原子应用到单屏/全部屏幕，并让每屏独立加载壁纸与设置。
+- `src/renderer/main-ui/App.tsx` / `src/renderer/main-ui/pages/settings/DisplaySettingsPage.tsx`: 修复占位页覆盖和菜单层级，增加常驻目标选择器、显示器型号、拓扑图与按屏壁纸分配。
+- `tests/wallpaper-display.test.mjs`: 覆盖负坐标、混合缩放、独立窗口、跨屏延展和单屏分配保留行为。
+
+**遇到的问题**:
+- 显示器设置组件已挂载却被后渲染的“即将到来”占位页完全覆盖，壁纸目标菜单又被详情侧栏盖住 → 修正路由互斥条件和顶层层级，并用运行时截图复核。
+- 单个 BrowserWindow 横跨混合 DPI 显示器会继续产生拉伸和坐标风险 → 普通多屏改为独立窗口，跨屏窗口只保留给显式延展模式。
+
+**Git Commit**: 已提交 — `feat(display): rebuild multi-monitor wallpaper support`
+
+---
+
 ## [2026-08-23 00:00] 发布 1.1.4 全屏返回便利贴交互修复版
 
 **变更摘要**: 将全屏游戏返回后便利贴输入/拖动失效的 Canvas 原生命中自愈修复升版为 1.1.4，构建并推送 Windows 自动更新资产。

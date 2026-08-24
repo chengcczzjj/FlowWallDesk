@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { WallpaperItem, WallpaperSettings, WallpaperResourceCatalog, WallpaperResourceProgress, WallpaperResourceActionResult, WallpaperOwnerStatus, WallpaperOwnerConfigInput, WallpaperPublishInput, WallpaperPublishProgress, WallpaperPublishResult, WallpaperDisplayMode, WallpaperDisplaySettings, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
+import type { WallpaperApplyTarget, WallpaperItem, WallpaperSettings, WallpaperResourceCatalog, WallpaperResourceProgress, WallpaperResourceActionResult, WallpaperOwnerStatus, WallpaperOwnerConfigInput, WallpaperPublishInput, WallpaperPublishProgress, WallpaperPublishResult, WallpaperDisplayMode, WallpaperDisplaySettings, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMessage, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentRunEvent, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
 
 const api = {
   app: {
@@ -49,8 +49,8 @@ const api = {
   wallpaper: {
     list: (): Promise<WallpaperItem[]> => ipcRenderer.invoke(IPC.WALLPAPER_LIST),
     getCurrent: () => ipcRenderer.invoke(IPC.WALLPAPER_GET_CURRENT),
-    apply: (item: WallpaperItem): Promise<boolean> =>
-      ipcRenderer.invoke(IPC.WALLPAPER_APPLY, item),
+    apply: (item: WallpaperItem, target: WallpaperApplyTarget = 'current'): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_APPLY, item, target),
     pickFile: (): Promise<WallpaperItem | null> => ipcRenderer.invoke(IPC.WALLPAPER_PICK_FILE),
     grantPreview: (filePath: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WALLPAPER_GRANT_PREVIEW, filePath),
@@ -65,6 +65,11 @@ const api = {
       ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_SET_MODE, mode),
     setDisplayAssignment: (displayId: number, wallpaperId: string | null): Promise<WallpaperDisplaySettings> =>
       ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_SET_ASSIGNMENT, displayId, wallpaperId),
+    onDisplaySettingsChanged: (cb: () => void): (() => void) => {
+      const handler = () => cb()
+      ipcRenderer.on(IPC.WALLPAPER_DISPLAY_LAYOUT_CHANGED, handler)
+      return () => ipcRenderer.off(IPC.WALLPAPER_DISPLAY_LAYOUT_CHANGED, handler)
+    },
     import: (
       filePath: string,
       meta: { name: string; desc: string; author: string; contact: string }

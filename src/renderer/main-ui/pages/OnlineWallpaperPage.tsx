@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import type {
+  WallpaperApplyTarget,
   WallpaperItem,
   WallpaperOwnerStatus,
   WallpaperResourceCatalog,
@@ -41,7 +42,7 @@ function stateLabel(item: WallpaperResourceCatalogItem): string {
   return `版本 ${item.version}`
 }
 
-export function OnlineWallpaperPage({ search, refreshKey, targetDisplayId = null }: { search: string; refreshKey?: number; targetDisplayId?: number | null }) {
+export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'current' }: { search: string; refreshKey?: number; wallpaperTarget?: WallpaperApplyTarget }) {
   const [catalog, setCatalog] = useState<WallpaperResourceCatalog>(EMPTY_CATALOG)
   const [localItems, setLocalItems] = useState<WallpaperItem[]>([])
   const [currentId, setCurrentId] = useState<string>()
@@ -56,23 +57,26 @@ export function OnlineWallpaperPage({ search, refreshKey, targetDisplayId = null
   const load = useCallback(async (force = false) => {
     if (force) setRefreshing(true)
     try {
-      const [nextCatalog, nextLocal, current, owner] = await Promise.all([
+      const [nextCatalog, nextLocal, current, owner, displaySettings] = await Promise.all([
         force
           ? window.lingyue.wallpaper.refreshResourceCatalog()
           : window.lingyue.wallpaper.getResourceCatalog(),
         window.lingyue.wallpaper.list(),
         window.lingyue.wallpaper.getCurrent(),
         window.lingyue.wallpaper.getOwnerStatus(),
+        window.lingyue.wallpaper.getDisplaySettings(),
       ])
       setCatalog(nextCatalog)
       setLocalItems(nextLocal)
-      setCurrentId(current?.current?.id)
+      setCurrentId(typeof wallpaperTarget === 'number'
+        ? displaySettings.assignments[String(wallpaperTarget)] ?? current?.current?.id
+        : current?.current?.id)
       setOwnerStatus(owner)
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [])
+  }, [wallpaperTarget])
 
   useEffect(() => {
     void load(false)
@@ -115,12 +119,7 @@ export function OnlineWallpaperPage({ search, refreshKey, targetDisplayId = null
     const local = item.localWallpaperId ? localById.get(item.localWallpaperId) : undefined
     if (!local) return
     try {
-      if (targetDisplayId !== null) {
-        await window.lingyue.wallpaper.setDisplayMode('per-display')
-        await window.lingyue.wallpaper.setDisplayAssignment(targetDisplayId, local.id)
-      } else {
-        await window.lingyue.wallpaper.apply(local)
-      }
+      await window.lingyue.wallpaper.apply(local, wallpaperTarget)
       setCurrentId(local.id)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '应用壁纸失败')

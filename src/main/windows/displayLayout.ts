@@ -1,5 +1,6 @@
 import { screen } from 'electron'
 import type { DisplayBounds, DisplayDescriptor, WallpaperDisplayMode } from '@shared/types'
+import { unionDisplayBounds } from '@shared/wallpaper-display-layout'
 import { store } from '../store'
 
 function rectFromElectron(rect: Electron.Rectangle): DisplayBounds {
@@ -14,7 +15,8 @@ export function getDisplayDescriptors(): DisplayDescriptor[] {
       .sort((a, b) => (a.id === primaryId ? -1 : b.id === primaryId ? 1 : a.bounds.x - b.bounds.x))
       .map((display, index) => ({
         id: display.id,
-        label: display.id === primaryId ? '主显示器' : `显示器 ${index + 1}`,
+        label: `显示器 ${index + 1}`,
+        name: display.label?.trim() || undefined,
         primary: display.id === primaryId,
         bounds: rectFromElectron(display.bounds),
         workArea: rectFromElectron(display.workArea),
@@ -37,11 +39,7 @@ export function getDesktopRenderBounds(mode = getWallpaperDisplayMode()): Displa
   const displays = getDisplayDescriptors()
   if (displays.length === 0) return { x: 0, y: 0, width: 1, height: 1 }
   if (mode === 'primary') return displays.find((item) => item.primary)?.bounds ?? displays[0].bounds
-  const left = Math.min(...displays.map((item) => item.bounds.x))
-  const top = Math.min(...displays.map((item) => item.bounds.y))
-  const right = Math.max(...displays.map((item) => item.bounds.x + item.bounds.width))
-  const bottom = Math.max(...displays.map((item) => item.bounds.y + item.bounds.height))
-  return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
+  return unionDisplayBounds(displays)
 }
 
 /** Union of monitor work areas, expressed in the virtual render coordinate space. */

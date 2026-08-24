@@ -44,6 +44,8 @@ export interface DisplayBounds {
 export interface DisplayDescriptor {
   id: number
   label: string
+  /** Windows/Electron reported monitor model name when available. */
+  name?: string
   primary: boolean
   bounds: DisplayBounds
   workArea: DisplayBounds
@@ -68,6 +70,9 @@ export interface WallpaperDisplaySettings {
   assignments: Record<string, string>
   displays: DisplayDescriptor[]
 }
+
+/** Wallpaper-library target. `all` means independently fill every monitor. */
+export type WallpaperApplyTarget = 'current' | 'all' | number
 
 /** 在线壁纸资源清单中的单项。资源包版本独立于应用版本。 */
 export interface WallpaperResourceEntry {

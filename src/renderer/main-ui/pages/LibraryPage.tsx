@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { WallpaperItem } from '@shared/types'
+import type { WallpaperApplyTarget, WallpaperItem } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
 import { WallpaperSidebar } from '../components/WallpaperSidebar'
 import { ImageOff, Plus } from 'lucide-react'
@@ -14,12 +14,12 @@ const TYPE_LABEL: Record<WallpaperItem['type'], string> = {
 export function LibraryPage({
   search,
   refreshKey,
-  targetDisplayId = null,
+  wallpaperTarget = 'current',
   onDropFile,
 }: {
   search: string
   refreshKey?: number
-  targetDisplayId?: number | null
+  wallpaperTarget?: WallpaperApplyTarget
   onDropFile?: (file: InitialFile) => void
 }) {
   const [list, setList] = useState<WallpaperItem[]>([])
@@ -31,14 +31,21 @@ export function LibraryPage({
   useEffect(() => {
     let alive = true
     setLoading(true)
-    Promise.all([window.lingyue.wallpaper.list(), window.lingyue.wallpaper.getCurrent()]).then(
-      ([items, current]) => {
+    Promise.all([
+      window.lingyue.wallpaper.list(),
+      window.lingyue.wallpaper.getCurrent(),
+      window.lingyue.wallpaper.getDisplaySettings(),
+    ]).then(
+      ([items, current, displaySettings]) => {
         if (!alive) return
         setList(items)
         setLoading(false)
-        if (current?.current) {
-          setAppliedId(current.current.id)
-          setSelectedId(current.current.id)
+        const effectiveId = typeof wallpaperTarget === 'number'
+          ? displaySettings.assignments[String(wallpaperTarget)] ?? current?.current?.id
+          : current?.current?.id
+        if (effectiveId) {
+          setAppliedId(effectiveId)
+          setSelectedId(effectiveId)
         } else if (items[0]) {
           setSelectedId(items[0].id)
         }
@@ -47,7 +54,7 @@ export function LibraryPage({
     return () => {
       alive = false
     }
-  }, [refreshKey])
+  }, [refreshKey, wallpaperTarget])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return list
@@ -62,12 +69,7 @@ export function LibraryPage({
 
   const apply = async (item: WallpaperItem) => {
     try {
-      if (targetDisplayId !== null) {
-        await window.lingyue.wallpaper.setDisplayMode('per-display')
-        await window.lingyue.wallpaper.setDisplayAssignment(targetDisplayId, item.id)
-      } else {
-        await window.lingyue.wallpaper.apply(item)
-      }
+      await window.lingyue.wallpaper.apply(item, wallpaperTarget)
       setAppliedId(item.id)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '应用壁纸失败')
