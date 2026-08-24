@@ -69,7 +69,7 @@ test('desktop note editing opens a scoped keyboard-focus session without enterin
 
 test('sticky note typography and controls reflow for narrow, short and large paper sizes', async () => {
   const cssSource = await readFile(new URL('../src/renderer/widgets/TodoBoard/todo-board.css', import.meta.url), 'utf8')
-  assert.match(cssSource, /font-size: clamp\(11px, min\(var\(--sticky-font-size\), 7\.2cqh, 6\.8cqw\), 30px\)/)
+  assert.match(cssSource, /font-size: clamp\(10px, min\(var\(--sticky-font-size\), 6cqh, 5\.8cqw\), 24px\)/)
   assert.match(cssSource, /@container \(max-width: 185px\)/)
   assert.match(cssSource, /@container \(max-height: 140px\)[\s\S]*sticky-note__topbar \{ height: 28px;/)
   assert.match(cssSource, /@container \(min-width: 300px\) and \(min-height: 240px\)/)
@@ -78,8 +78,8 @@ test('sticky note typography and controls reflow for narrow, short and large pap
 })
 
 test('new sticky notes use a compact default body font size', () => {
-  assert.equal(DEFAULT_TODO_TEXT_STYLE.fontSize, 14)
-  assert.equal(createTodoWidgetConfig().textStyle.fontSize, 14)
+  assert.equal(DEFAULT_TODO_TEXT_STYLE.fontSize, 12)
+  assert.equal(createTodoWidgetConfig().textStyle.fontSize, 12)
 })
 
 test('desktop note uses system typography and exposes simple color and category controls', async () => {

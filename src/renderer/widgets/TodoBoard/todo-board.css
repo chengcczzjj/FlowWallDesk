@@ -289,8 +289,8 @@
   color: var(--sticky-ink);
   background: transparent;
   font-family: var(--sticky-font-family);
-  /* Keep the default readable on compact notes while still scaling up on larger paper. */
-  font-size: clamp(11px, min(var(--sticky-font-size), 7.2cqh, 6.8cqw), 30px);
+  /* Keep body text close to the compact 8-10px note title instead of oversized defaults. */
+  font-size: clamp(10px, min(var(--sticky-font-size), 6cqh, 5.8cqw), 24px);
   font-weight: var(--sticky-font-weight);
   font-style: var(--sticky-font-style);
   text-decoration: var(--sticky-text-decoration);
@@ -311,7 +311,7 @@
   align-items: center;
   justify-content: center;
   color: rgba(59, 56, 47, 0.34);
-  font-size: clamp(12px, min(var(--sticky-font-size), 6.8cqh, 6.4cqw), 20px);
+  font-size: clamp(10px, min(var(--sticky-font-size), 5.8cqh, 5.4cqw), 18px);
   font-weight: 400;
 }
 .sticky-note__body textarea::placeholder { color: rgba(59, 56, 47, 0.38); }

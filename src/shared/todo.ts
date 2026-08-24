@@ -28,7 +28,7 @@ export const TODO_NOTE_FONT_FAMILIES: TodoNoteFontFamily[] = ['system', 'serif',
 
 export const DEFAULT_TODO_TEXT_STYLE: TodoTextStyle = {
   fontFamily: 'system',
-  fontSize: 14,
+  fontSize: 12,
   bold: false,
   italic: false,
   underline: false,
