@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-24 23:57] 发布 1.1.5 便利贴与被动组件层级修复版
+
+**变更摘要**: 汇总便利贴字号/富文本体验与 Canvas 被动组件层级修复，构建 Windows 安装包并发布 GitHub 自动更新资产。
+
+**涉及模块**:
+- `src/shared/todo.ts` / `src/renderer/widgets/TodoBoard/todo-board.css`: 将便利贴正文默认字号调整为 12px，并收紧窄纸张的响应式字号上限。
+- `src/shared/canvas-hit-test.ts` / `src/renderer/canvas/Canvas.tsx`: 将时间、天气、文字、行情等只读组件从正常鼠标命中和临时置顶修复链路中排除。
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.5.md`: 同步 1.1.5 发布元数据、安装包校验信息和更新说明。
+
+**遇到的问题**:
+- 窗口切换时鼠标停在时间组件会触发透明 Canvas 的 always-on-top 自愈 → 将只读组件留在壁纸上方的稳定层，仅交互组件参与命中修复。
+
+**Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.5`
+
+---
+
 ## [2026-08-24 22:02] 修复跨屏延展壁纸未铺满桌面
 
 **变更摘要**: 跨屏延展模式固定以 `cover` 等比放大壁纸并铺满整个虚拟桌面，不再受壁纸保存的“居中/填充/自由”缩放设置影响。
