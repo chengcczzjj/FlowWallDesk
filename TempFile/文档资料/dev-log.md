@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-27 00:30] 发布 1.1.6 按显示器独立壁纸分配修复版
+
+**变更摘要**: 将显示器选择和壁纸分配统一收敛到本地壁纸页面，修复多显示器窗口、持久化和右侧详情栏遮挡问题，并准备 Windows 自动更新发布。
+
+**涉及模块**:
+- `src/renderer/main-ui/App.tsx` / `src/renderer/main-ui/pages/LibraryPage.tsx`: 移除设置页显示器冲突入口，在壁纸页面按显示器选择并通过“应用并保存”保存分配。
+- `src/main/windows/displayLayout.ts` / `src/main/ipc/wallpaperIpc.ts` / `src/shared/wallpaper-display-layout.ts`: 固定 per-display 窗口布局，兼容旧配置并清理已删除壁纸的显示器分配。
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.6.md`: 同步 1.1.6 发布元数据和更新说明。
+
+**遇到的问题**:
+- 设置页模式与壁纸页目标选择器同时写入不同布局状态，导致分屏设置不生效 → 取消可配置布局模式，统一由壁纸页按显示器写入 assignment。
+
+**Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.6`
+
+---
+
 ## [2026-08-24 23:57] 发布 1.1.5 便利贴与被动组件层级修复版
 
 **变更摘要**: 汇总便利贴字号/富文本体验与 Canvas 被动组件层级修复，构建 Windows 安装包并发布 GitHub 自动更新资产。
