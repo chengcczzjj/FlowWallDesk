@@ -49,7 +49,11 @@ export function planWallpaperApplication(params: {
   const { target, displays, itemId } = params
   const assignments = { ...params.assignments }
   if (target === 'all') {
-    return { mode: displays.length > 1 ? 'duplicate' : 'primary', assignments, currentId: itemId }
+    // Legacy callers may still pass "all".  Treat it as assigning the same
+    // wallpaper to every monitor instead of switching to a separate layout
+    // mode that is no longer exposed by the UI.
+    for (const display of displays) assignments[String(display.id)] = itemId
+    return { mode: 'per-display', assignments, currentId: itemId }
   }
   if (typeof target === 'number') {
     const selectedDisplay = displays.find((display) => display.id === target)
@@ -69,7 +73,7 @@ export function planWallpaperApplication(params: {
     const primaryId = displays.find((display) => display.primary)?.id
     if (primaryId !== undefined) assignments[String(primaryId)] = itemId
   }
-  return { mode: params.mode, assignments, currentId: itemId }
+  return { mode: 'per-display', assignments, currentId: itemId }
 }
 
 export function unionDisplayBounds(displays: readonly DisplayDescriptor[]): DisplayBounds {

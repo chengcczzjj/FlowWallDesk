@@ -88,7 +88,7 @@ test('per-display layouts resolve independent assignments in window-local coordi
   assert.deepEqual(secondaryLayout.displays[0].localBounds, { x: 0, y: 0, width: 1920, height: 1080 })
 })
 
-test('single-monitor targeting preserves other screens and all-monitor targeting selects duplicate mode', () => {
+test('single-monitor targeting preserves other screens and legacy all-targeting assigns every screen', () => {
   const secondaryPlan = planWallpaperApplication({
     target: 202,
     mode: 'span',
@@ -109,6 +109,7 @@ test('single-monitor targeting preserves other screens and all-monitor targeting
     currentId: current.id,
     itemId: secondary.id,
   })
-  assert.equal(allPlan.mode, 'duplicate')
+  assert.equal(allPlan.mode, 'per-display')
   assert.equal(allPlan.currentId, secondary.id)
+  assert.deepEqual(allPlan.assignments, { 101: secondary.id, 202: secondary.id })
 })

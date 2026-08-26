@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { WallpaperApplyTarget, WallpaperItem } from '@shared/types'
+import type { WallpaperApplyTarget, WallpaperDisplaySettings, WallpaperItem } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
 import { WallpaperSidebar } from '../components/WallpaperSidebar'
-import { ImageOff, Plus } from 'lucide-react'
+import { ImageOff, Monitor, Plus } from 'lucide-react'
 import type { InitialFile } from '../components/AddWallpaperDialog'
 
 const TYPE_LABEL: Record<WallpaperItem['type'], string> = {
@@ -15,14 +15,19 @@ export function LibraryPage({
   search,
   refreshKey,
   wallpaperTarget = 'current',
+  displaySettings,
+  onDisplaySelect,
   onDropFile,
 }: {
   search: string
   refreshKey?: number
   wallpaperTarget?: WallpaperApplyTarget
+  displaySettings?: WallpaperDisplaySettings | null
+  onDisplaySelect?: (target: WallpaperApplyTarget) => void
   onDropFile?: (file: InitialFile) => void
 }) {
   const [list, setList] = useState<WallpaperItem[]>([])
+  const [loadedDisplaySettings, setLoadedDisplaySettings] = useState<WallpaperDisplaySettings | null>(displaySettings ?? null)
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [appliedId, setAppliedId] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
@@ -36,12 +41,17 @@ export function LibraryPage({
       window.lingyue.wallpaper.getCurrent(),
       window.lingyue.wallpaper.getDisplaySettings(),
     ]).then(
-      ([items, current, displaySettings]) => {
+      ([items, current, nextDisplaySettings]) => {
         if (!alive) return
         setList(items)
+        setLoadedDisplaySettings(nextDisplaySettings)
         setLoading(false)
-        const effectiveId = typeof wallpaperTarget === 'number'
-          ? displaySettings.assignments[String(wallpaperTarget)] ?? current?.current?.id
+        const displayId = typeof wallpaperTarget === 'number' && nextDisplaySettings.displays.some((display) => display.id === wallpaperTarget)
+          ? wallpaperTarget
+          : nextDisplaySettings.displays.find((display) => display.primary)?.id ?? nextDisplaySettings.displays[0]?.id
+        if (displayId !== undefined && displayId !== wallpaperTarget) onDisplaySelect?.(displayId)
+        const effectiveId = displayId !== undefined
+          ? nextDisplaySettings.assignments[String(displayId)] ?? current?.current?.id
           : current?.current?.id
         if (effectiveId) {
           setAppliedId(effectiveId)
@@ -54,7 +64,13 @@ export function LibraryPage({
     return () => {
       alive = false
     }
-  }, [refreshKey, wallpaperTarget])
+  }, [refreshKey, wallpaperTarget, displaySettings, onDisplaySelect])
+
+  const activeSettings = displaySettings ?? loadedDisplaySettings
+  const activeDisplayId = typeof wallpaperTarget === 'number' && activeSettings?.displays.some((display) => display.id === wallpaperTarget)
+    ? wallpaperTarget
+    : activeSettings?.displays.find((display) => display.primary)?.id ?? activeSettings?.displays[0]?.id
+  const activeDisplay = activeSettings?.displays.find((display) => display.id === activeDisplayId)
 
   const filtered = useMemo(() => {
     if (!search.trim()) return list
@@ -69,8 +85,11 @@ export function LibraryPage({
 
   const apply = async (item: WallpaperItem) => {
     try {
-      await window.lingyue.wallpaper.apply(item, wallpaperTarget)
+      await window.lingyue.wallpaper.apply(item, activeDisplayId ?? 'current')
       setAppliedId(item.id)
+      setLoadedDisplaySettings((settings) => settings
+        ? { ...settings, mode: 'per-display', assignments: { ...settings.assignments, ...(activeDisplayId === undefined ? {} : { [String(activeDisplayId)]: item.id }) } }
+        : settings)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '应用壁纸失败')
     }
@@ -142,6 +161,30 @@ export function LibraryPage({
       </div>
 
       <div className="library-content" style={{ marginRight: selected ? 320 : 0 }}>
+        <div className="library-toolbar">
+          <div className="library-toolbar__copy">
+            <span className="library-toolbar__eyebrow">WALLPAPER DISPLAY</span>
+            <strong>{activeDisplay ? `${activeDisplay.label}${activeDisplay.primary ? ' · 主屏' : ''}` : '选择显示器'}</strong>
+            <small>{activeDisplay ? '选择壁纸后点击“应用并保存”，只会替换这台显示器。' : '正在读取 Windows 显示器…'}</small>
+          </div>
+          <label className="library-display-select">
+            <Monitor size={15} />
+            <span className="sr-only">选择壁纸显示器</span>
+            <select
+              value={activeDisplayId ?? ''}
+              onChange={(event) => onDisplaySelect?.(Number(event.target.value))}
+              disabled={!activeSettings?.displays.length}
+              aria-label="选择壁纸显示器"
+            >
+              {!activeSettings?.displays.length && <option value="">读取中…</option>}
+              {(activeSettings?.displays ?? []).map((display) => (
+                <option key={display.id} value={display.id}>
+                  {display.label}{display.primary ? ' · 主屏' : ''} · {display.bounds.width} × {display.bounds.height}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         {loading ? (
           <div className="empty-page">加载中…</div>
         ) : filtered.length === 0 ? (

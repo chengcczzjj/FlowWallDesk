@@ -199,9 +199,9 @@ export function WallpaperSidebar(props: {
       </div>
 
       <div className="sidebar__footer">
-        <button className="btn btn--primary" onClick={props.onApply} title="应用为桌面壁纸">
+        <button className="btn btn--primary" onClick={props.onApply} title="应用并保存到当前显示器">
           {isApplied ? <Check size={14} /> : <Monitor size={14} />}
-          <span>{isApplied ? '已应用' : '应用'}</span>
+          <span>{isApplied ? '已应用并保存' : '应用并保存'}</span>
         </button>
         <button
           className="btn"

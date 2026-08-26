@@ -16,6 +16,7 @@ interface AppSettings {
 }
 
 interface WallpaperDisplaySettingsStore {
+  /** Kept for config compatibility; runtime always uses per-display windows. */
   mode: WallpaperDisplayMode
   /** display id -> wallpaper id; absent entries fall back to wallpaper.current */
   assignments: Record<string, string>
@@ -45,7 +46,9 @@ interface Schema {
 
 const defaults: Schema = {
   wallpaper: { volume: 0.5, muted: true },
-  wallpaperDisplay: { mode: 'primary', assignments: {} },
+  // A wallpaper window is created for every connected monitor.  Individual
+  // assignments are persisted by display id and fall back to wallpaper.current.
+  wallpaperDisplay: { mode: 'per-display', assignments: {} },
   widgets: [],
   modelSettings: {
     profiles: [

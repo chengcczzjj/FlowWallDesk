@@ -31,7 +31,7 @@ export interface WallpaperState {
   muted: boolean
 }
 
-/** Windows 多显示器壁纸布局模式。与 Lively 的 per / span / duplicate 对齐。 */
+/** Legacy layout values kept for config/IPC compatibility; the UI uses per-display assignments only. */
 export type WallpaperDisplayMode = 'primary' | 'duplicate' | 'per-display' | 'span'
 
 export interface DisplayBounds {
