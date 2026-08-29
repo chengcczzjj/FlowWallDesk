@@ -14,6 +14,8 @@
 - 本机 EXE、`app.asar` 和卸载注册表均更新到 1.1.7，8 个壁纸组件、2 个全局图标组件和当前壁纸配置完整保留。
 
 **Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.7`
+**Git Tag**: `v1.1.7`（已推送）
+**GitHub Release**: `https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.7`（安装包、blockmap、`latest.yml` 大小与 SHA-256 均已校验）
 
 ---
 
