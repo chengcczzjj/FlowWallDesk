@@ -39,6 +39,8 @@ export interface CanvasBounds {
 }
 
 export const CANVAS_INTERACTION_REPAIR_DELAY_MS = 140
+export const CANVAS_STARTUP_OCCLUSION_GRACE_MS = 5_000
+export const CANVAS_STARTUP_OCCLUSION_RECREATE_MS = 3_000
 
 export function isDesktopIconWidgetType(type: string): boolean {
   return DESKTOP_ICON_WIDGET_TYPES.has(type)
@@ -64,7 +66,7 @@ export function findInteractiveWidgetAtPoint(
   for (let index = widgets.length - 1; index >= 0; index -= 1) {
     const widget = widgets[index]
     if (widget.enabled === false) continue
-    const padding = widget.type === 'desktop-icons-dock' ? 28 : 2
+    const padding = widget.type === 'desktop-icons-dock' ? 28 : 0
     if (
       clientX >= widget.x - padding &&
       clientX <= widget.x + widget.width + padding &&
@@ -109,7 +111,22 @@ export function shouldRepairCanvasInteraction(options: {
   if (options.captureRequestedAt <= 0 || options.now - options.captureRequestedAt < CANVAS_INTERACTION_REPAIR_DELAY_MS) {
     return false
   }
-  // Repair only when the cursor is on our canvas or a desktop shell surface.
-  // A normal application covering the same coordinates must never be raised over.
-  return options.canvasTopmost || options.desktopSurface
+  // If WindowFromPoint already resolves to the canvas, Windows has restored the
+  // native input surface. Renderer disagreement then usually means the cursor is
+  // only inside a coarse/padded native hit region, not that z-order is broken.
+  // Recompose only when Windows still routes the point to the desktop shell.
+  return options.desktopSurface
+}
+
+export function shouldRecreateCanvasAfterInitialOcclusion(options: {
+  canvasAgeAtOcclusionMs: number
+  occlusionDurationMs: number
+  rendererPointerDownObserved: boolean
+}): boolean {
+  return (
+    !options.rendererPointerDownObserved &&
+    options.canvasAgeAtOcclusionMs >= 0 &&
+    options.canvasAgeAtOcclusionMs <= CANVAS_STARTUP_OCCLUSION_GRACE_MS &&
+    options.occlusionDurationMs >= CANVAS_STARTUP_OCCLUSION_RECREATE_MS
+  )
 }

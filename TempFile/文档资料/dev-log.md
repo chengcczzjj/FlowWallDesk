@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-29 12:58] 修复开机长时间锁屏后便利贴输入失效
+
+**变更摘要**: 根据本机安装态日志定位 Canvas 在开机后长时间停留锁屏界面时丢失 `pointerdown` 的根因，改为桌面返回后无损重建输入窗口，并增加真实点击丢失后的自动恢复。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts`: 识别启动期长时间遮挡并重建 Canvas；监测原生按下与 renderer 回执，丢失时自动重建输入窗口并记录诊断事件。
+- `src/shared/canvas-hit-test.ts`: 仅在原生命中仍落到桌面 Shell 时执行 z-order 重组合，移除便利贴边缘的扩大误命中区域。
+- `tests/shared-contracts.test.mjs` / `tests/release-contracts.test.mjs`: 覆盖启动锁屏重建、桌面表面修复边界和输入恢复契约。
+
+**遇到的问题**:
+- 本机实际安装仍为 1.1.5；开机后锁屏约 26 分钟的会话中记录到 289 次原生鼠标变化和 24 次 `pointerup`，但 `pointerdown` 为 0，证明故障不在便利贴业务逻辑，而是透明 Canvas 在锁屏遮挡期间初始化后输入表面失效 → 长遮挡返回直接重建 BrowserWindow，并以真实按键回执提供运行时兜底。
+- 原自愈会在 `WindowFromPoint` 已命中 Canvas、鼠标仅位于便利贴 2px 或 Dock 28px 扩大边缘时反复执行 always-on-top 重组合 → 只允许桌面 Shell 原生命中触发重组合，避免全屏透明窗口无效抬升造成卡顿。
+
+**Git Commit**: 已提交 — `fix(canvas): rebuild stale input surface after startup lock`
+
+---
+
 ## [2026-08-27 00:30] 发布 1.1.6 按显示器独立壁纸分配修复版
 
 **变更摘要**: 将显示器选择和壁纸分配统一收敛到本地壁纸页面，修复多显示器窗口、持久化和右侧详情栏遮挡问题，并准备 Windows 自动更新发布。

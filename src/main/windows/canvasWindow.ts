@@ -7,6 +7,7 @@ import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occl
 import {
   findInteractiveWidgetAtPoint,
   isDesktopIconWidgetType,
+  shouldRecreateCanvasAfterInitialOcclusion,
   shouldRepairCanvasInteraction,
   shouldIgnoreCanvasMouse,
 } from '@shared/canvas-hit-test'
@@ -73,8 +74,11 @@ const WS_EX_TOOLWINDOW = 0x00000080
 // matching pointerup. Do not let a lost gesture keep the transparent canvas
 // intercepting the whole desktop indefinitely.
 const RENDERER_POINTER_STALE_MS = 180
+const RENDERER_POINTER_DELIVERY_CHECK_MS = 80
 const INTERACTION_REPAIR_COOLDOWN_MS = 450
 const INTERACTION_REPAIR_MAX_ATTEMPTS = 4
+const CANVAS_WINDOW_RECREATE_DELAY_MS = 180
+const CANVAS_WINDOW_RECREATE_COOLDOWN_MS = 2_000
 
 const GW_OWNER = 4
 const GA_ROOT = 2
@@ -408,8 +412,31 @@ function refreshCanvasCursorHitTest(): void {
             startSurface: iconSurface,
           }
         : null
+      const win = getCanvasWindow()
+      nativeExpectedPointerDown = (
+        win &&
+        !desktopOccluded &&
+        !isEditing &&
+        !canvasRecompositing &&
+        !rendererPointerActive &&
+        widget &&
+        widgetSurface?.canvasTopmost &&
+        nativeMousePassthrough === false &&
+        rendererMousePassthrough === false
+      )
+        ? {
+            widgetId: widget.id,
+            widgetType: widget.type,
+            startedAt: now,
+            webContentsId: win.webContents.id,
+            startSurface: widgetSurface,
+          }
+        : null
     } else if (!currentlyDown && nativeLeftButtonDown) {
       finishNativeIconGesture(cursor, nextWidgetId, now, iconSurface)
+      const expected = nativeExpectedPointerDown
+      nativeExpectedPointerDown = null
+      if (expected) verifyNativePointerDelivery(expected, now)
     } else if (!currentlyDown && pressedSinceLastSample && !nativeLeftButtonDown) {
       // A complete fast click can happen between two polling samples.
       if (!desktopOccluded && !isEditing && widget && isDesktopIconWidgetType(widget.type)) {
@@ -494,6 +521,85 @@ function settleCanvasOnDesktop(win: BrowserWindow): void {
   sendToBottom(win)
 }
 
+function requestCanvasWindowRecreation(reason: string): void {
+  const win = getCanvasWindow()
+  if (!win || canvasWindowRecreationPending) return
+  const now = Date.now()
+  if (now - lastCanvasWindowRecreationAt < CANVAS_WINDOW_RECREATE_COOLDOWN_MS) {
+    logDockDiagnostic('canvas.window-recreation-skipped', { reason: 'cooldown', requestedReason: reason })
+    return
+  }
+
+  canvasWindowRecreationPending = true
+  cancelCanvasZOrderRefresh()
+  canvasRecompositing = true
+  nativeExpectedPointerDown = null
+  if (pointerDeliveryCheckTimer) {
+    clearTimeout(pointerDeliveryCheckTimer)
+    pointerDeliveryCheckTimer = null
+  }
+  applyCanvasMousePassthrough()
+  logDockDiagnostic('canvas.window-recreation-requested', {
+    reason,
+    webContentsId: win.webContents.id,
+  })
+
+  setTimeout(() => {
+    if (desktopOccluded) {
+      canvasWindowRecreationPending = false
+      canvasWindowRecreationDeferredReason = reason
+      canvasRecompositing = false
+      applyCanvasMousePassthrough()
+      logDockDiagnostic('canvas.window-recreation-deferred', { reason })
+      return
+    }
+    const stale = getCanvasWindow()
+    const createReplacement = () => setTimeout(() => {
+      try {
+        const replacement = getCanvasWindow() ?? createCanvasWindow()
+        lastCanvasWindowRecreationAt = Date.now()
+        logDockDiagnostic('canvas.window-recreation-completed', {
+          reason,
+          webContentsId: replacement.webContents.id,
+        })
+      } catch (error) {
+        logDockDiagnostic('canvas.window-recreation-failed', {
+          reason,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        canvasWindowRecreationPending = false
+      }
+    }, 60)
+    if (stale) {
+      stale.once('closed', createReplacement)
+      stale.destroy()
+    } else {
+      createReplacement()
+    }
+  }, CANVAS_WINDOW_RECREATE_DELAY_MS)
+}
+
+function verifyNativePointerDelivery(
+  expected: NonNullable<typeof nativeExpectedPointerDown>,
+  endedAt: number,
+): void {
+  if (pointerDeliveryCheckTimer) clearTimeout(pointerDeliveryCheckTimer)
+  pointerDeliveryCheckTimer = setTimeout(() => {
+    pointerDeliveryCheckTimer = null
+    const win = getCanvasWindow()
+    if (!win || win.webContents.id !== expected.webContentsId) return
+    if (lastRendererPointerDownAt >= expected.startedAt) return
+    logDockDiagnostic('canvas.pointer-delivery-missed', {
+      widgetId: expected.widgetId,
+      widgetType: expected.widgetType,
+      durationMs: endedAt - expected.startedAt,
+      startSurface: expected.startSurface,
+    })
+    requestCanvasWindowRecreation('native-pointerdown-missed')
+  }, RENDERER_POINTER_DELIVERY_CHECK_MS)
+}
+
 function recoverCanvasAfterDesktopReturn(): void {
   refreshWallpaperAttach()
   refreshCanvasZOrder('desktop-return')
@@ -506,8 +612,26 @@ function recoverCanvasAfterDesktopReturn(): void {
 }
 
 function commitDesktopOcclusion(occluded: boolean): void {
+  const now = Date.now()
+  const canvasAgeAtOcclusionMs = occluded ? now - canvasCreatedAt : initialOcclusionCanvasAgeMs
+  const occlusionDurationMs = !occluded && desktopOccludedSince > 0 ? now - desktopOccludedSince : 0
+  const recreateAfterStartupOcclusion = !occluded && shouldRecreateCanvasAfterInitialOcclusion({
+    canvasAgeAtOcclusionMs,
+    occlusionDurationMs,
+    rendererPointerDownObserved: rendererPointerDownObservedSinceCreation,
+  })
+  const deferredRecreationReason = !occluded ? canvasWindowRecreationDeferredReason : null
+
   desktopOccluded = occluded
+  if (occluded) {
+    desktopOccludedSince = now
+    initialOcclusionCanvasAgeMs = canvasAgeAtOcclusionMs
+  } else {
+    desktopOccludedSince = 0
+    initialOcclusionCanvasAgeMs = Number.POSITIVE_INFINITY
+  }
   nativeIconGesture = null
+  nativeExpectedPointerDown = null
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
@@ -539,13 +663,31 @@ function commitDesktopOcclusion(occluded: boolean): void {
     })
   }
 
-  if (!occluded) recoverCanvasAfterDesktopReturn()
+  if (!occluded) {
+    if (deferredRecreationReason || recreateAfterStartupOcclusion) {
+      canvasWindowRecreationDeferredReason = null
+      refreshWallpaperAttach()
+      requestCanvasWindowRecreation(deferredRecreationReason ?? 'long-startup-occlusion')
+    } else {
+      recoverCanvasAfterDesktopReturn()
+    }
+  }
   console.log(`[canvas] desktop ${occluded ? 'occluded' : 'visible'}; interaction state reset`)
-  logDockDiagnostic('canvas.occlusion-changed', { occluded, foreground: lastOcclusionDiagnostic })
+  logDockDiagnostic('canvas.occlusion-changed', {
+    occluded,
+    foreground: lastOcclusionDiagnostic,
+    occlusionDurationMs,
+    recreateCanvas: Boolean(deferredRecreationReason) || recreateAfterStartupOcclusion,
+  })
 }
 
 let canvasWindow: BrowserWindow | null = null
 let isEditing = false
+let canvasCreatedAt = 0
+let desktopOccludedSince = 0
+let initialOcclusionCanvasAgeMs = Number.POSITIVE_INFINITY
+let rendererPointerDownObservedSinceCreation = false
+let lastRendererPointerDownAt = 0
 let canvasTextInputActive = false
 let rendererMousePassthrough = true
 let rendererMousePassthroughAt = 0
@@ -567,6 +709,13 @@ let nativeIconGesture: {
   canvasTopmostAtStart: boolean
   startSurface: NativeCursorSurface | null
 } | null = null
+let nativeExpectedPointerDown: {
+  widgetId: string
+  widgetType: string
+  startedAt: number
+  webContentsId: number
+  startSurface: NativeCursorSurface
+} | null = null
 let lastNativeIconSurfaceSample: {
   widgetId: string
   sampledAt: number
@@ -576,6 +725,10 @@ let canvasHealthTimer: ReturnType<typeof setInterval> | null = null
 let cursorHitTestTimer: ReturnType<typeof setInterval> | null = null
 let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let desktopReturnRecoveryTimer: ReturnType<typeof setTimeout> | null = null
+let pointerDeliveryCheckTimer: ReturnType<typeof setTimeout> | null = null
+let canvasWindowRecreationPending = false
+let canvasWindowRecreationDeferredReason: string | null = null
+let lastCanvasWindowRecreationAt = 0
 let zOrderRefreshGeneration = 0
 let boundsListenerRegistered = false
 
@@ -709,6 +862,11 @@ export function createCanvasWindow(): BrowserWindow {
       console.log(`[canvas:renderer] ${details.message}`)
     })
   }
+  canvasCreatedAt = Date.now()
+  desktopOccludedSince = 0
+  initialOcclusionCanvasAgeMs = Number.POSITIVE_INFINITY
+  rendererPointerDownObservedSinceCreation = false
+  lastRendererPointerDownAt = 0
   rendererMousePassthrough = true
   rendererMousePassthroughAt = Date.now()
   rendererPointerActive = false
@@ -723,6 +881,7 @@ export function createCanvasWindow(): BrowserWindow {
   interactionRepairAttempts = 0
   interactionRepairLastAt = 0
   nativeIconGesture = null
+  nativeExpectedPointerDown = null
   lastNativeIconSurfaceSample = null
   lastRendererActionPointerDownAt = 0
   applyCanvasMousePassthrough()
@@ -789,6 +948,7 @@ export function createCanvasWindow(): BrowserWindow {
   canvasWindow.on('closed', () => {
     if (canvasHealthTimer) { clearInterval(canvasHealthTimer); canvasHealthTimer = null }
     if (cursorHitTestTimer) { clearInterval(cursorHitTestTimer); cursorHitTestTimer = null }
+    if (pointerDeliveryCheckTimer) { clearTimeout(pointerDeliveryCheckTimer); pointerDeliveryCheckTimer = null }
     cancelCanvasZOrderRefresh()
     rendererPointerActive = false
     rendererPointerReleaseCandidateAt = 0
@@ -802,6 +962,7 @@ export function createCanvasWindow(): BrowserWindow {
     interactionRepairAttempts = 0
     interactionRepairLastAt = 0
     nativeIconGesture = null
+    nativeExpectedPointerDown = null
     lastNativeIconSurfaceSample = null
     lastRendererActionPointerDownAt = 0
     canvasWindow = null
@@ -839,6 +1000,11 @@ export function refreshCanvasBounds(): void {
 
 export function setCanvasPointerActive(active: boolean): void {
   if (desktopOccluded && active) return
+  if (active) {
+    lastRendererPointerDownAt = Date.now()
+    rendererPointerDownObservedSinceCreation = true
+    nativeExpectedPointerDown = null
+  }
   if (rendererPointerActive === active) return
   rendererPointerActive = active
   rendererPointerReleaseCandidateAt = 0

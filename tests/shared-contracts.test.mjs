@@ -34,11 +34,14 @@ import {
 import { createShowDesktopInputEvents } from '../src/main/windows/windowsDesktop.ts'
 import {
   CANVAS_INTERACTION_REPAIR_DELAY_MS,
+  CANVAS_STARTUP_OCCLUSION_GRACE_MS,
+  CANVAS_STARTUP_OCCLUSION_RECREATE_MS,
   findInteractiveWidgetAtPoint,
   isCanvasInteractiveWidgetType,
   isDesktopIconWidgetType,
   isPassiveWidgetType,
   shouldIgnoreCanvasMouse,
+  shouldRecreateCanvasAfterInitialOcclusion,
   shouldRepairCanvasInteraction,
 } from '../src/shared/canvas-hit-test.ts'
 import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
@@ -183,6 +186,7 @@ test('native canvas hit testing follows visual z-order and keeps widgets alive w
   assert.equal(findInteractiveWidgetAtPoint({ x: 810, y: 890 }, display, [dock])?.id, dock.id)
   assert.equal(findInteractiveWidgetAtPoint({ x: 400, y: 400 }, display, [dock]), undefined)
   assert.equal(findInteractiveWidgetAtPoint({ x: 180, y: 150 }, display, [lowerNote, upperNote])?.id, upperNote.id)
+  assert.equal(findInteractiveWidgetAtPoint({ x: 99, y: 150 }, display, [lowerNote]), undefined)
   assert.equal(shouldIgnoreCanvasMouse({
     desktopOccluded: false, editing: false, pointerActive: false, widgetUnderCursor: true,
   }), false)
@@ -211,7 +215,7 @@ test('native canvas hit testing follows visual z-order and keeps widgets alive w
   }]), undefined)
 })
 
-test('canvas interaction repair is limited to a missing renderer capture on desktop surfaces', () => {
+test('canvas interaction repair only recomposes when Windows still hits the desktop shell', () => {
   const base = {
     desktopOccluded: false,
     recompositing: false,
@@ -223,7 +227,7 @@ test('canvas interaction repair is limited to a missing renderer capture on desk
     desktopSurface: false,
     alreadyAttempted: false,
   }
-  assert.equal(shouldRepairCanvasInteraction(base), true)
+  assert.equal(shouldRepairCanvasInteraction(base), false)
   assert.equal(shouldRepairCanvasInteraction({ ...base, canvasTopmost: false, desktopSurface: true }), true)
   // The renderer can report a healthy hover while the native HWND is still
   // behind the desktop compositor after a fullscreen transition.
@@ -238,6 +242,27 @@ test('canvas interaction repair is limited to a missing renderer capture on desk
   assert.equal(shouldRepairCanvasInteraction({ ...base, recompositing: true }), false)
   assert.equal(shouldRepairCanvasInteraction({ ...base, alreadyAttempted: true }), false)
   assert.equal(shouldRepairCanvasInteraction({ ...base, now: base.now - 1 }), false)
+})
+
+test('a canvas created behind a long startup lock screen is rebuilt on desktop return', () => {
+  const base = {
+    canvasAgeAtOcclusionMs: CANVAS_STARTUP_OCCLUSION_GRACE_MS,
+    occlusionDurationMs: CANVAS_STARTUP_OCCLUSION_RECREATE_MS,
+    rendererPointerDownObserved: false,
+  }
+  assert.equal(shouldRecreateCanvasAfterInitialOcclusion(base), true)
+  assert.equal(shouldRecreateCanvasAfterInitialOcclusion({
+    ...base,
+    canvasAgeAtOcclusionMs: CANVAS_STARTUP_OCCLUSION_GRACE_MS + 1,
+  }), false)
+  assert.equal(shouldRecreateCanvasAfterInitialOcclusion({
+    ...base,
+    occlusionDurationMs: CANVAS_STARTUP_OCCLUSION_RECREATE_MS - 1,
+  }), false)
+  assert.equal(shouldRecreateCanvasAfterInitialOcclusion({
+    ...base,
+    rendererPointerDownObserved: true,
+  }), false)
 })
 
 test('native desktop icon click fallback only runs when the renderer missed a short stationary click', () => {
