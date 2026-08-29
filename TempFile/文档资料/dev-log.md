@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-29 13:26] 发布 1.1.7 启动锁屏输入恢复版
+
+**变更摘要**: 将长时间启动锁屏后 Canvas 丢失 `pointerdown` 的根因修复升版为 1.1.7，生成自动更新资产并完成本机覆盖安装验证。
+
+**涉及模块**:
+- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 将应用版本和发布契约同步升级到 1.1.7。
+- `doc/发布说明/1.1.7.md`: 记录锁屏输入恢复策略、验证结果、安装包大小和 SHA-256/SHA-512 校验值。
+- `dist/`: 生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`；构建产物不进入 Git。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 51 项测试；`npm.cmd run build:win` 成功。
+- 本机 EXE、`app.asar` 和卸载注册表均更新到 1.1.7，8 个壁纸组件、2 个全局图标组件和当前壁纸配置完整保留。
+
+**Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.7`
+
+---
+
 ## [2026-08-29 12:58] 修复开机长时间锁屏后便利贴输入失效
 
 **变更摘要**: 根据本机安装态日志定位 Canvas 在开机后长时间停留锁屏界面时丢失 `pointerdown` 的根因，改为桌面返回后无损重建输入窗口，并增加真实点击丢失后的自动恢复。
