@@ -1,5 +1,24 @@
 # 灵月桌面 开发日志
 
+## [2026-08-30 20:15] 发布 1.1.9 便利贴即时置顶与画布性能优化版
+
+**变更摘要**: 将便利贴置顶触发提前到 `pointerdown` 捕获阶段，并以显式层级持久化和自适应原生命中轮询优化重叠交互与空闲性能。
+
+**涉及模块**:
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.9.md` / `tests/release-contracts.test.mjs`: 升级 1.1.9 版本元数据、发布说明和自动更新契约。
+- `src/renderer/canvas/Canvas.tsx`: 使用捕获阶段 + 同步提交确保按下即置顶。
+- `src/shared/widget-order.ts` / `src/shared/canvas-hit-test.ts` / `src/main/ipc/widgetIpc.ts` / `src/main/windows/canvasWindow.ts`: 显式层级、置顶 IPC、按视觉层级命中和自适应轮询。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 54 项测试；`npm.cmd run build:win` 成功生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`。
+- 安装包 `dist/lingyue-desk-1.1.9-setup.exe`：369,418,473 bytes，SHA-256 `E4F2D75682E3AE67935D0FAE5A91AC0AD78B0475D8961985E899D99C4110F92E`，electron-updater SHA-512 `QOh5kbqq5CNzz1E+a0ZiooG5Aat3NNGM1MVv2wjP8pNal3aY4MWYaK8mQRw7gQrZbkQc7TccTSaGgeZxpvkYFg==`。
+- 本机已停止旧进程并静默覆盖安装 1.1.9；EXE 版本、运行目录和卸载注册表入口更新，8 个组件、2 个全局图标组件、当前壁纸及组件层级数据保留，安装后进程正常运行。
+- GitHub Release：待上传安装包、blockmap 和 `latest.yml` 后补充链接。
+
+**Git Commit**: 待发布提交
+
+---
+
 ## [2026-08-30] 优化便利贴桌面交互宿主的层级与空闲性能
 
 **变更摘要**: 在保留单 Canvas 透明窗口架构的前提下，将组件视觉顺序从数组位置升级为显式 `stackOrder`，并为便利贴增加独立置顶 IPC；Canvas 原生命中轮询改为手势/命中区域高频、空闲低频调度，降低常驻唤醒。
