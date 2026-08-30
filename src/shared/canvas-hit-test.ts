@@ -1,5 +1,11 @@
 import type { WidgetInstance } from './types'
 
+function getWidgetStackOrder(widget: WidgetInstance, fallbackIndex = 0): number {
+  return typeof widget.stackOrder === 'number' && Number.isFinite(widget.stackOrder)
+    ? widget.stackOrder
+    : fallbackIndex
+}
+
 const DESKTOP_ICON_WIDGET_TYPES = new Set([
   'desktop-icons-box',
   'desktop-icons-horizontal',
@@ -97,8 +103,9 @@ export function findInteractiveWidgetAtPoint(
   const clientX = point.x - displayBounds.x
   const clientY = point.y - displayBounds.y
 
-  // Widgets render in array order, so the last matching item is visually on top.
-  for (let index = widgets.length - 1; index >= 0; index -= 1) {
+  let topWidget: WidgetInstance | undefined
+  let topOrder = Number.NEGATIVE_INFINITY
+  for (let index = 0; index < widgets.length; index += 1) {
     const widget = widgets[index]
     if (widget.enabled === false) continue
     const padding = widget.type === 'desktop-icons-dock' ? 28 : 0
@@ -107,9 +114,15 @@ export function findInteractiveWidgetAtPoint(
       clientX <= widget.x + widget.width + padding &&
       clientY >= widget.y - padding &&
       clientY <= widget.y + widget.height + padding
-    ) return isCanvasInteractiveWidgetType(widget.type) ? widget : undefined
+    ) {
+      const order = getWidgetStackOrder(widget, index)
+      if (order >= topOrder) {
+        topOrder = order
+        topWidget = widget
+      }
+    }
   }
-  return undefined
+  return topWidget && isCanvasInteractiveWidgetType(topWidget.type) ? topWidget : undefined
 }
 
 export function shouldIgnoreCanvasMouse(options: {

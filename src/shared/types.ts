@@ -183,6 +183,8 @@ export interface WidgetInstance {
   height: number
   enabled: boolean
   config?: Record<string, unknown>
+  /** Explicit sibling stacking order; larger values render above smaller ones. */
+  stackOrder?: number
   /** Optional Windows display id for future per-screen widget pinning. */
   displayId?: number
 }

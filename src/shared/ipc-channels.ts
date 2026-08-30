@@ -70,6 +70,7 @@ export const IPC = {
   WIDGET_ADD: 'widget:add',
   WIDGET_REMOVE: 'widget:remove',
   WIDGET_UPDATE: 'widget:update',
+  WIDGET_BRING_TO_FRONT: 'widget:bring-to-front',
   WIDGET_UPDATE_CONFIG: 'widget:update-config',
   WIDGET_CONFIG_SAVE: 'widget:config-save',
   WIDGET_CONFIG_LOAD: 'widget:config-load',

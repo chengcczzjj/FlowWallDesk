@@ -40,7 +40,7 @@ test('sticky notes use direct freeform drag and resize without edit mode or coll
   assert.match(canvasSource, /if \(!directManipulation\) onResolveCollisions/)
   assert.match(canvasSource, /if \(directManipulation\) onBringToFront\(\)/)
   assert.match(canvasSource, /moveWidgetToFront\(current, id\)/)
-  assert.match(canvasSource, /void window\.canvasBridge\?\.updateWidget\(target\)/)
+  assert.match(canvasSource, /void window\.canvasBridge\?\.bringWidgetToFront\(id\)/)
   assert.match(mainSource, /'generated-widget', 'todo-board'/)
   assert.match(mainSource, /isFreeformStickyNote\(w\.type\)[\s\S]*clampStickyNotePosition/)
   assert.match(mainSource, /findStickyNotePlacement/)

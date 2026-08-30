@@ -39,6 +39,7 @@ import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIcon
 import { assertTrustedIpcSender } from './ipcSecurity'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
 import { getDesktopRenderBounds, getDesktopRenderWorkArea } from '../windows/displayLayout'
+import { normalizeWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
@@ -89,6 +90,7 @@ const widgetInstanceSchema = z.object({
   height: z.number().finite().min(0).max(4096),
   enabled: z.boolean(),
   config: widgetConfigSchema.optional(),
+  stackOrder: z.number().finite().optional(),
   displayId: z.number().int().optional(),
 })
 
@@ -125,7 +127,7 @@ function withDefaultWidgetConfig(widget: WidgetInstance): WidgetInstance {
 }
 
 function withDefaultWidgetConfigs(widgets: WidgetInstance[]): WidgetInstance[] {
-  return widgets.flatMap((widget) => migrateTodoWidgetInstance(withDefaultWidgetConfig(widget)))
+  return normalizeWidgetStackOrder(widgets.flatMap((widget) => migrateTodoWidgetInstance(withDefaultWidgetConfig(widget))))
 }
 
 function getWallpaperScopedWidgets(widgets: WidgetInstance[]): WidgetInstance[] {
@@ -142,8 +144,9 @@ function readStoredGlobalIconWidgets(): WidgetInstance[] | undefined {
 }
 
 function persistWidgets(widgets: WidgetInstance[]): void {
-  store.set('widgets', widgets)
-  store.set('globalIconWidgets', getIconWidgets(widgets))
+  const normalized = normalizeWidgetStackOrder(widgets)
+  store.set('widgets', normalized)
+  store.set('globalIconWidgets', getIconWidgets(normalized))
 }
 
 function hasConfigKey(config: Record<string, unknown>, key: string): boolean {
@@ -174,7 +177,13 @@ function mergeConfigUpdate(currentWidget: WidgetInstance, incomingConfig: Record
 }
 
 function mergeWidgetUpdate(currentWidget: WidgetInstance, incomingWidget: WidgetInstance): WidgetInstance {
-  const nextWidget = { ...currentWidget, ...incomingWidget }
+  const nextWidget = {
+    ...currentWidget,
+    ...incomingWidget,
+    // Position/config updates from a stale renderer must not undo a newer
+    // explicit stacking action.
+    stackOrder: currentWidget.stackOrder ?? incomingWidget.stackOrder,
+  }
   if (!isGlobalIconWidgetType(currentWidget.type) && !isGlobalIconWidgetType(incomingWidget.type)) return nextWidget
 
   const incomingConfig = incomingWidget.config ?? {}
@@ -709,6 +718,20 @@ export function registerWidgetIpc(): void {
     const updated = isFreeformStickyNote(w.type)
       ? [...list.filter((item) => item.id !== w.id), mergeWidgetUpdate(list.find((item) => item.id === w.id) ?? w, w)]
       : list.map((it) => (it.id === w.id ? mergeWidgetUpdate(it, w) : it))
+    persistWidgets(updated)
+    syncToCanvas()
+    autoSaveToWallpaper()
+    return updated
+  })
+
+  ipcMain.handle(IPC.WIDGET_BRING_TO_FRONT, (_e, id: string) => {
+    assertTrustedIpcSender(_e, ['main', 'canvas'])
+    id = z.string().min(1).max(160).parse(id)
+    const list = store.get('widgets')
+    const target = list.find((widget) => widget.id === id)
+    if (!target) return list
+    const updated = moveWidgetToFront(list, id)
+    if (updated === list) return list
     persistWidgets(updated)
     syncToCanvas()
     autoSaveToWallpaper()

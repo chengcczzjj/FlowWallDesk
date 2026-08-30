@@ -1,5 +1,21 @@
 # 灵月桌面 开发日志
 
+## [2026-08-30] 优化便利贴桌面交互宿主的层级与空闲性能
+
+**变更摘要**: 在保留单 Canvas 透明窗口架构的前提下，将组件视觉顺序从数组位置升级为显式 `stackOrder`，并为便利贴增加独立置顶 IPC；Canvas 原生命中轮询改为手势/命中区域高频、空闲低频调度，降低常驻唤醒。
+
+**涉及模块**:
+- `src/shared/types.ts` / `src/shared/widget-order.ts` / `src/shared/canvas-hit-test.ts`: 增加组件层级字段、旧数据顺序迁移、按显式层级命中和便利贴置顶纯函数。
+- `src/main/ipc/widgetIpc.ts` / `src/shared/ipc-channels.ts` / `src/preload/canvas.ts`: 增加 `WIDGET_BRING_TO_FRONT`，防止位置或配置更新覆盖较新的层级操作。
+- `src/renderer/canvas/Canvas.tsx` / `src/main/windows/canvasWindow.ts`: 使用 CSS `z-index` 渲染显式层级，便利贴点击置顶；原生命中检测空闲从 25ms 降至 80ms，交互期间保持 25ms，并以 React.memo 保留未变化组件。
+- `tests/shared-contracts.test.mjs` / `tests/todo-widget.test.mjs` / `tests/release-contracts.test.mjs`: 增加层级顺序、置顶 IPC、显式命中和自适应轮询契约。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 54 项测试；`npm.cmd run build:check` 成功。
+- 未拆分为多个 Electron 窗口，未改变全屏恢复、锁屏 Canvas 重建或 ToDesk 前台保护链路。
+
+---
+
 ## [2026-08-30 14:30] 修复 ToDesk 远程控制时桌面组件前台闪烁并发布 1.1.8
 
 **变更摘要**: 定位到 Canvas 在任意“桌面未遮挡”前台状态都执行 `alwaysOnTop` z-order 自愈，ToDesk 的 `H-SMILE-FRAME`/`TWINCONTROL` 窗口因此被桌面组件短暂盖住。现在仅在确认 Windows Shell 或无前台窗口时恢复层级，远程控制和普通应用前台状态跳过恢复。

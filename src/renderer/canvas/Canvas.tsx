@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan, PlannedSceneWidget } from '@shared/desktop-scene-layout'
 import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } from '../widgets'
@@ -7,7 +7,7 @@ import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
 import { setWallpaperFrame } from './wallpaperFrameStore'
 import { CanvasPointerGate } from '@shared/canvas-pointer-gate'
 import { isCanvasInteractiveWidgetType } from '@shared/canvas-hit-test'
-import { moveWidgetToFront } from '@shared/widget-order'
+import { getWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
 
 const GRID = 16
 const EDGE_PADDING = 24
@@ -693,7 +693,7 @@ export function Canvas() {
     // Keep the visual order responsive while the main process persists it.
     widgetsRef.current = updated
     setWidgets(updated)
-    void window.canvasBridge?.updateWidget(target)
+    void window.canvasBridge?.bringWidgetToFront(id)
   }, [])
 
   /** 拖拽过程中实时计算吸附预览（每帧调用） */
@@ -745,7 +745,7 @@ export function Canvas() {
       <div style={{ width: '100%', height: '100%', position: 'relative' }} onClick={onBgClick} onContextMenu={onBgContextMenu}>
         {widgets
           .filter((w) => w.enabled)
-          .map((w) => (
+          .map((w, index) => (
             <DraggableWidget
               key={w.id}
               widget={w}
@@ -757,6 +757,7 @@ export function Canvas() {
                 if (editing) setSelectedId(w.id)
               }}
               onBringToFront={() => bringStickyNoteToFront(w.id)}
+              stackOrder={getWidgetStackOrder(w, index)}
               onEnterEdit={() => setEditing(true)}
               onUpdateConfig={(cfg, options) => updateWidgetConfig(w.id, cfg, options)}
               onDelete={async () => {
@@ -885,12 +886,13 @@ function DesktopScenePreviewGhost({ widget }: { widget: PlannedSceneWidget }) {
   )
 }
 
-function DraggableWidget({
+const DraggableWidget = memo(function DraggableWidget({
   widget,
   editing,
   selected,
   entering,
   previewDimmed,
+  stackOrder,
   onSelect,
   onBringToFront,
   onEnterEdit,
@@ -904,6 +906,7 @@ function DraggableWidget({
   selected: boolean
   entering: boolean
   previewDimmed?: boolean
+  stackOrder: number
   onSelect: () => void
   onBringToFront: () => void
   onEnterEdit: () => void
@@ -1469,6 +1472,7 @@ function DraggableWidget({
         pointerEvents: 'auto',
         cursor: editing || dragging ? (dragging ? 'grabbing' : 'grab') : 'default',
         opacity: previewDimmed ? 0.34 : 1,
+        zIndex: stackOrder,
         filter: previewDimmed ? 'saturate(0.65) blur(0.2px)' : undefined,
         transition:
           isActive || styleChanging ? 'none' : 'left 0.25s ease, top 0.25s ease, width 0.2s ease, height 0.2s ease, opacity 0.2s ease, filter 0.2s ease',
@@ -1577,7 +1581,14 @@ function DraggableWidget({
       </WidgetPosCtx.Provider>
     </div>
   )
-}
+}, (previous, next) => (
+  previous.widget === next.widget &&
+  previous.editing === next.editing &&
+  previous.selected === next.selected &&
+  previous.entering === next.entering &&
+  previous.previewDimmed === next.previewDimmed &&
+  previous.stackOrder === next.stackOrder
+))
 
 /** Resize 拖拽手柄 */
 function ResizeHandle({

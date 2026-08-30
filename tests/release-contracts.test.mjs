@@ -36,6 +36,7 @@ test('update and launch-at-login IPC channels are unique and complete', () => {
     IPC.APP_UPDATE_DOWNLOAD,
     IPC.APP_UPDATE_INSTALL,
     IPC.APP_UPDATE_STATE_CHANGED,
+    IPC.WIDGET_BRING_TO_FRONT,
   ]) {
     assert.ok(channels.includes(channel))
   }
@@ -104,7 +105,9 @@ test('updates are user-started from the activity sidebar and restart after downl
 test('desktop icon launches stay bound to their persisted widget record', async () => {
   const preloadSource = await readFile(new URL('../src/preload/canvas.ts', import.meta.url), 'utf8')
   const ipcSource = await readFile(new URL('../src/main/ipc/desktopIconIpc.ts', import.meta.url), 'utf8')
+  const widgetIpcSource = await readFile(new URL('../src/main/ipc/widgetIpc.ts', import.meta.url), 'utf8')
   const canvasSource = await readFile(new URL('../src/main/windows/canvasWindow.ts', import.meta.url), 'utf8')
+  const rendererCanvasSource = await readFile(new URL('../src/renderer/canvas/Canvas.tsx', import.meta.url), 'utf8')
   const diagnosticSource = await readFile(new URL('../src/main/runtime/diagnosticLog.ts', import.meta.url), 'utf8')
   const widgetSource = await readFile(new URL('../src/renderer/widgets/DesktopIcons/DesktopIcons.tsx', import.meta.url), 'utf8')
 
@@ -120,7 +123,13 @@ test('desktop icon launches stay bound to their persisted widget record', async 
     canvasSource.indexOf('}, 300)', canvasSource.indexOf('canvasHealthTimer = setInterval')),
   )
   assert.doesNotMatch(healthTimer, /sendToBottom/)
-  assert.match(canvasSource, /cursorHitTestTimer = setInterval\(refreshCanvasCursorHitTest, 25\)/)
+  assert.match(canvasSource, /CURSOR_HIT_TEST_ACTIVE_INTERVAL_MS = 25/)
+  assert.match(canvasSource, /CURSOR_HIT_TEST_IDLE_INTERVAL_MS = 80/)
+  assert.match(canvasSource, /scheduleCanvasCursorHitTest\(\)/)
+  assert.match(rendererCanvasSource, /bringWidgetToFront\(id\)/)
+  assert.match(rendererCanvasSource, /zIndex: stackOrder/)
+  assert.match(widgetIpcSource, /WIDGET_BRING_TO_FRONT/)
+  assert.match(preloadSource, /bringWidgetToFront: \(id: string\)/)
   assert.match(canvasSource, /CANVAS_NATIVE_DOCK_CLICK/)
   assert.match(canvasSource, /shouldFallbackNativeDockClick/)
   assert.match(canvasSource, /WindowFromPoint/)

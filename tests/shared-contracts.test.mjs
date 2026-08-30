@@ -176,6 +176,16 @@ test('canvas mouse passthrough stays locked until an active pointer gesture ends
   assert.equal(gate.shouldIgnoreMouse(false, true), false)
 })
 
+test('widget stack order is an explicit, persisted interaction contract', () => {
+  const widgets = [
+    { id: 'note-a', stackOrder: 4 },
+    { id: 'note-b', stackOrder: 8 },
+  ]
+  const updated = moveWidgetToFront(widgets, 'note-a')
+  assert.equal(updated[0].stackOrder, 9)
+  assert.equal(updated[1].stackOrder, 8)
+})
+
 test('native canvas hit testing follows visual z-order and keeps widgets alive without renderer mousemove events', () => {
   const dock = {
     id: 'dock-1', type: 'desktop-icons-dock', x: 800, y: 900, width: 600, height: 88, enabled: true, config: {},
@@ -188,6 +198,10 @@ test('native canvas hit testing follows visual z-order and keeps widgets alive w
   assert.equal(findInteractiveWidgetAtPoint({ x: 810, y: 890 }, display, [dock])?.id, dock.id)
   assert.equal(findInteractiveWidgetAtPoint({ x: 400, y: 400 }, display, [dock]), undefined)
   assert.equal(findInteractiveWidgetAtPoint({ x: 180, y: 150 }, display, [lowerNote, upperNote])?.id, upperNote.id)
+  assert.equal(findInteractiveWidgetAtPoint({ x: 180, y: 150 }, display, [
+    { ...upperNote, stackOrder: 1 },
+    { ...lowerNote, stackOrder: 8 },
+  ])?.id, lowerNote.id)
   assert.equal(findInteractiveWidgetAtPoint({ x: 99, y: 150 }, display, [lowerNote]), undefined)
   assert.equal(shouldIgnoreCanvasMouse({
     desktopOccluded: false, editing: false, pointerActive: false, widgetUnderCursor: true,
@@ -315,12 +329,16 @@ test('native desktop icon click fallback only runs when the renderer missed a sh
 })
 
 test('moving a widget to the front preserves the other widgets and source order', () => {
-  const first = { id: 'first' }
-  const second = { id: 'second' }
-  const third = { id: 'third' }
+  const first = { id: 'first', stackOrder: 0 }
+  const second = { id: 'second', stackOrder: 1 }
+  const third = { id: 'third', stackOrder: 2 }
   const widgets = [first, second, third]
-  assert.deepEqual(moveWidgetToFront(widgets, 'first').map((widget) => widget.id), ['second', 'third', 'first'])
-  assert.deepEqual(widgets.map((widget) => widget.id), ['first', 'second', 'third'])
+  const updated = moveWidgetToFront(widgets, 'first')
+  assert.deepEqual(updated.map((widget) => widget.id), ['first', 'second', 'third'])
+  assert.equal(updated[0].stackOrder, 3)
+  assert.equal(updated[1].stackOrder, 1)
+  assert.equal(updated[2].stackOrder, 2)
+  assert.deepEqual(widgets.map((widget) => widget.stackOrder), [0, 1, 2])
   assert.equal(moveWidgetToFront(widgets, 'third'), widgets)
   assert.equal(moveWidgetToFront(widgets, 'missing'), widgets)
 })

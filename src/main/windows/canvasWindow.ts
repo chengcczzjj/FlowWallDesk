@@ -80,6 +80,8 @@ const INTERACTION_REPAIR_COOLDOWN_MS = 450
 const INTERACTION_REPAIR_MAX_ATTEMPTS = 4
 const CANVAS_WINDOW_RECREATE_DELAY_MS = 180
 const CANVAS_WINDOW_RECREATE_COOLDOWN_MS = 2_000
+const CURSOR_HIT_TEST_ACTIVE_INTERVAL_MS = 25
+const CURSOR_HIT_TEST_IDLE_INTERVAL_MS = 80
 
 const GW_OWNER = 4
 const GA_ROOT = 2
@@ -502,6 +504,29 @@ function refreshCanvasCursorHitTest(): void {
   }
 }
 
+function getCursorHitTestInterval(): number {
+  return nativeLeftButtonDown || rendererPointerActive || cursorWidgetId !== null || canvasTextInputActive || isEditing
+    ? CURSOR_HIT_TEST_ACTIVE_INTERVAL_MS
+    : CURSOR_HIT_TEST_IDLE_INTERVAL_MS
+}
+
+/** Keep native hit testing responsive during gestures while reducing idle polling. */
+function scheduleCanvasCursorHitTest(delay = getCursorHitTestInterval()): void {
+  if (cursorHitTestTimer) return
+  cursorHitTestTimer = setTimeout(() => {
+    cursorHitTestTimer = null
+    if (!getCanvasWindow()) return
+    refreshCanvasCursorHitTest()
+    scheduleCanvasCursorHitTest()
+  }, Math.max(0, delay))
+}
+
+function restartCanvasCursorHitTest(): void {
+  if (cursorHitTestTimer) clearTimeout(cursorHitTestTimer)
+  cursorHitTestTimer = null
+  scheduleCanvasCursorHitTest(0)
+}
+
 function cancelCanvasZOrderRefresh(): void {
   zOrderRefreshGeneration += 1
   if (zOrderRefreshTimer) {
@@ -730,7 +755,7 @@ let lastNativeIconSurfaceSample: {
   surface: NativeCursorSurface
 } | null = null
 let canvasHealthTimer: ReturnType<typeof setInterval> | null = null
-let cursorHitTestTimer: ReturnType<typeof setInterval> | null = null
+let cursorHitTestTimer: ReturnType<typeof setTimeout> | null = null
 let zOrderRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let desktopReturnRecoveryTimer: ReturnType<typeof setTimeout> | null = null
 let pointerDeliveryCheckTimer: ReturnType<typeof setTimeout> | null = null
@@ -943,9 +968,7 @@ export function createCanvasWindow(): BrowserWindow {
           if (stableOcclusion !== null) commitDesktopOcclusion(stableOcclusion)
         }, 300)
       }
-      if (!cursorHitTestTimer) {
-        cursorHitTestTimer = setInterval(refreshCanvasCursorHitTest, 25)
-      }
+      scheduleCanvasCursorHitTest()
       refreshCanvasCursorHitTest()
       logDockDiagnostic('canvas.ready', { bounds: canvasWindow.getBounds() })
     }, 300)
@@ -955,7 +978,7 @@ export function createCanvasWindow(): BrowserWindow {
 
   canvasWindow.on('closed', () => {
     if (canvasHealthTimer) { clearInterval(canvasHealthTimer); canvasHealthTimer = null }
-    if (cursorHitTestTimer) { clearInterval(cursorHitTestTimer); cursorHitTestTimer = null }
+    if (cursorHitTestTimer) { clearTimeout(cursorHitTestTimer); cursorHitTestTimer = null }
     if (pointerDeliveryCheckTimer) { clearTimeout(pointerDeliveryCheckTimer); pointerDeliveryCheckTimer = null }
     cancelCanvasZOrderRefresh()
     rendererPointerActive = false
@@ -1018,6 +1041,7 @@ export function setCanvasPointerActive(active: boolean): void {
   rendererPointerReleaseCandidateAt = 0
   logDockDiagnostic('canvas.pointer-active-changed', { active, cursorWidgetId })
   applyCanvasMousePassthrough()
+  restartCanvasCursorHitTest()
 }
 
 /** 只为桌面内联编辑临时开启键盘焦点，不改变组件层级或全局编辑状态。 */
@@ -1049,6 +1073,7 @@ export function setCanvasTextInputActive(active: boolean): boolean {
     settleCanvasOnDesktop(win)
   }
   logDockDiagnostic('canvas.text-input-active-changed', { active })
+  restartCanvasCursorHitTest()
   return true
 }
 

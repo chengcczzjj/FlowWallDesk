@@ -68,6 +68,7 @@ const api = {
     ipcRenderer.send(IPC.CANVAS_DIAGNOSTIC, event, details)
   },
   updateWidget: (w: WidgetInstance) => ipcRenderer.invoke(IPC.WIDGET_UPDATE, w),
+  bringWidgetToFront: (id: string): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_BRING_TO_FRONT, id),
   /** 仅更新组件 config（不触发位置吸附） */
   updateWidgetConfig: (id: string, config: Record<string, unknown>) =>
     ipcRenderer.invoke(IPC.WIDGET_UPDATE_CONFIG, id, config),
