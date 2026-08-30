@@ -1,5 +1,24 @@
 # 灵月桌面 开发日志
 
+## [2026-08-30 21:23] 发布 1.1.10 多显示器壁纸布局恢复版
+
+**变更摘要**: 将多显示器模式链路修复升版为 1.1.10，生成自动更新资产、完成本机覆盖安装并发布 GitHub Release。
+
+**涉及模块**:
+- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 升级 1.1.10 版本元数据与发布契约。
+- `doc/发布说明/1.1.10.md` / `TempFile/文档资料/project-status.md`: 记录多显示器修复、验证结果、安装包校验和正式分发状态。
+- `dist/`: 生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`；构建产物不进入 Git。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 57 项测试；`npm.cmd run build:win` 成功。
+- 安装包 369,422,468 bytes，SHA-256 `2295587461FB99F36CD6E789ACE5A267EBC13B7591B393B9A5ED3BF059C60230`；blockmap 与 `latest.yml` 均完成哈希校验。
+- 本机 EXE、`app.asar` 和卸载注册表均更新为 1.1.10；当前壁纸、8 个桌面组件和 2 个全局图标组件完整保留，安装后进程正常运行。
+- GitHub Release：`https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.10`（安装包、blockmap、`latest.yml` 已上传并校验远端大小与 SHA-256）。
+
+**Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.10`
+
+---
+
 ## [2026-08-30 20:57] 恢复多显示器壁纸布局并修复模式覆盖
 
 **变更摘要**: 恢复仅主屏、复制、按屏独立和跨屏延展四种真实运行模式，修复壁纸应用后布局被强制改回按屏模式的问题。
