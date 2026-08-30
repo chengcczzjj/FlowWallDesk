@@ -8,6 +8,7 @@ import {
   findInteractiveWidgetAtPoint,
   isDesktopIconWidgetType,
   shouldRecreateCanvasAfterInitialOcclusion,
+  shouldRecoverCanvasAfterDesktopReturn,
   shouldRepairCanvasInteraction,
   shouldIgnoreCanvasMouse,
 } from '@shared/canvas-hit-test'
@@ -668,8 +669,15 @@ function commitDesktopOcclusion(occluded: boolean): void {
       canvasWindowRecreationDeferredReason = null
       refreshWallpaperAttach()
       requestCanvasWindowRecreation(deferredRecreationReason ?? 'long-startup-occlusion')
-    } else {
+    } else if (shouldRecoverCanvasAfterDesktopReturn(lastOcclusionDiagnostic)) {
       recoverCanvasAfterDesktopReturn()
+    } else {
+      // Do not briefly raise the transparent canvas over a normal foreground
+      // app. ToDesk uses a non-occluded foreground surface while remote control
+      // is active, so the old unconditional repair made every widget flash.
+      logDockDiagnostic('canvas.desktop-return-recovery-skipped', {
+        foreground: lastOcclusionDiagnostic,
+      })
     }
   }
   console.log(`[canvas] desktop ${occluded ? 'occluded' : 'visible'}; interaction state reset`)

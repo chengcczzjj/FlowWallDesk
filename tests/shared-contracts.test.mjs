@@ -42,6 +42,7 @@ import {
   isPassiveWidgetType,
   shouldIgnoreCanvasMouse,
   shouldRecreateCanvasAfterInitialOcclusion,
+  shouldRecoverCanvasAfterDesktopReturn,
   shouldRepairCanvasInteraction,
 } from '../src/shared/canvas-hit-test.ts'
 import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
@@ -263,6 +264,15 @@ test('a canvas created behind a long startup lock screen is rebuilt on desktop r
     ...base,
     rendererPointerDownObserved: true,
   }), false)
+})
+
+test('desktop-return z-order recovery only runs for the Windows shell', () => {
+  assert.equal(shouldRecoverCanvasAfterDesktopReturn({ reason: 'desktop-progman', className: 'Progman' }), true)
+  assert.equal(shouldRecoverCanvasAfterDesktopReturn({ reason: 'display-coverage', className: 'WorkerW' }), true)
+  assert.equal(shouldRecoverCanvasAfterDesktopReturn({ reason: 'no-foreground-window' }), true)
+  assert.equal(shouldRecoverCanvasAfterDesktopReturn({ reason: 'display-coverage', className: 'H-SMILE-FRAME' }), false)
+  assert.equal(shouldRecoverCanvasAfterDesktopReturn({ reason: 'display-coverage', className: 'TWINCONTROL' }), false)
+  assert.equal(shouldRecoverCanvasAfterDesktopReturn({ reason: 'display-coverage', className: 'Chrome_WidgetWin_1' }), false)
 })
 
 test('native desktop icon click fallback only runs when the renderer missed a short stationary click', () => {

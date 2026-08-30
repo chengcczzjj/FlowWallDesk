@@ -42,6 +42,41 @@ export const CANVAS_INTERACTION_REPAIR_DELAY_MS = 140
 export const CANVAS_STARTUP_OCCLUSION_GRACE_MS = 5_000
 export const CANVAS_STARTUP_OCCLUSION_RECREATE_MS = 3_000
 
+// A desktop-return z-order refresh briefly raises the transparent canvas above
+// every normal window. Only run it when Windows is actually showing the shell;
+// remote-control windows (notably ToDesk) can report the same non-occluded state
+// while they are still the active foreground surface.
+const DESKTOP_RETURN_SHELL_REASONS = new Set([
+  'no-foreground-window',
+  'desktop-progman',
+  'desktop-taskbar',
+  'desktop-root',
+])
+
+const DESKTOP_SHELL_WINDOW_CLASSES = new Set([
+  'PROGMAN',
+  'WORKERW',
+  'SHELL_TRAYWND',
+  'SHELL_SECONDARYTRAYWND',
+  'SHELLDLL_DEFVIEW',
+])
+
+const TODESK_WINDOW_CLASSES = new Set([
+  'H-SMILE-FRAME',
+  'TWINCONTROL',
+])
+
+export function shouldRecoverCanvasAfterDesktopReturn(options: {
+  reason?: string | null
+  className?: string | null
+}): boolean {
+  const reason = options.reason?.trim() ?? ''
+  const className = options.className?.trim().toUpperCase() ?? ''
+  if (TODESK_WINDOW_CLASSES.has(className)) return false
+  if (DESKTOP_RETURN_SHELL_REASONS.has(reason)) return true
+  return DESKTOP_SHELL_WINDOW_CLASSES.has(className)
+}
+
 export function isDesktopIconWidgetType(type: string): boolean {
   return DESKTOP_ICON_WIDGET_TYPES.has(type)
 }

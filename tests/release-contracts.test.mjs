@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.1.7')
+  assert.equal(packageJson.version, '1.1.8')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -134,6 +134,8 @@ test('desktop icon launches stay bound to their persisted widget record', async 
   assert.match(canvasSource, /RENDERER_POINTER_STALE_MS/)
   assert.match(canvasSource, /CANVAS_POINTER_RESET/)
   assert.match(canvasSource, /shouldRecreateCanvasAfterInitialOcclusion/)
+  assert.match(canvasSource, /shouldRecoverCanvasAfterDesktopReturn\(lastOcclusionDiagnostic\)/)
+  assert.match(canvasSource, /canvas\.desktop-return-recovery-skipped/)
   assert.match(canvasSource, /canvas\.pointer-delivery-missed/)
   assert.match(canvasSource, /stale\.once\('closed', createReplacement\)/)
   assert.match(preloadSource, /onPointerReset/)

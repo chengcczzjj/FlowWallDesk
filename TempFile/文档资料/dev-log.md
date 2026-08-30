@@ -1,5 +1,22 @@
 # 灵月桌面 开发日志
 
+## [2026-08-30 14:30] 修复 ToDesk 远程控制时桌面组件前台闪烁并发布 1.1.8
+
+**变更摘要**: 定位到 Canvas 在任意“桌面未遮挡”前台状态都执行 `alwaysOnTop` z-order 自愈，ToDesk 的 `H-SMILE-FRAME`/`TWINCONTROL` 窗口因此被桌面组件短暂盖住。现在仅在确认 Windows Shell 或无前台窗口时恢复层级，远程控制和普通应用前台状态跳过恢复。
+
+**涉及模块**:
+- `src/shared/canvas-hit-test.ts` / `src/main/windows/canvasWindow.ts`: 新增桌面 Shell 前台判定与 ToDesk 类名保护，记录跳过恢复的诊断事件。
+- `tests/shared-contracts.test.mjs` / `tests/release-contracts.test.mjs`: 增加 ToDesk/普通窗口不触发恢复、Shell 状态仍恢复的回归契约。
+- `package.json` / `package-lock.json` / `doc/发布说明/1.1.8.md`: 升级版本并记录发布校验信息。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 52 项测试；`npm.cmd run build:win` 成功生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`。
+- 本机已停止 1.1.7 并静默覆盖安装 1.1.8；EXE、`app.asar`、卸载注册表均为 1.1.8，8 个组件、2 个全局图标组件和当前壁纸配置保留，运行进程响应正常。
+
+**Git Commit**: 待提交 — `chore(release): publish LingyueDesk 1.1.8`
+
+---
+
 ## [2026-08-29 13:26] 发布 1.1.7 启动锁屏输入恢复版
 
 **变更摘要**: 将长时间启动锁屏后 Canvas 丢失 `pointerdown` 的根因修复升版为 1.1.7，生成自动更新资产并完成本机覆盖安装验证。
