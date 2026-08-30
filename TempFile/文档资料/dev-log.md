@@ -13,7 +13,7 @@
 - `npm.cmd test` 通过全部 52 项测试；`npm.cmd run build:win` 成功生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`。
 - 本机已停止 1.1.7 并静默覆盖安装 1.1.8；EXE、`app.asar`、卸载注册表均为 1.1.8，8 个组件、2 个全局图标组件和当前壁纸配置保留，运行进程响应正常。
 
-**Git Commit**: 待提交 — `chore(release): publish LingyueDesk 1.1.8`
+**Git Commit**: 已提交 — `9ab45d0 chore(release): publish LingyueDesk 1.1.8`
 
 ---
 
