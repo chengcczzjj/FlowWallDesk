@@ -1,4 +1,5 @@
 import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan, PlannedSceneWidget } from '@shared/desktop-scene-layout'
 import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } from '../widgets'
@@ -690,9 +691,13 @@ export function Canvas() {
     if (!target) return
     const updated = moveWidgetToFront(current, id)
     if (updated === current) return
-    // Keep the visual order responsive while the main process persists it.
-    widgetsRef.current = updated
-    setWidgets(updated)
+    // Commit the z-index before the pointerdown handler starts a drag. React's
+    // normal event batching can otherwise leave the old layer visible until
+    // the next pointer frame (or, on a fast click, until pointerup).
+    flushSync(() => {
+      widgetsRef.current = updated
+      setWidgets(updated)
+    })
     void window.canvasBridge?.bringWidgetToFront(id)
   }, [])
 
@@ -1159,7 +1164,6 @@ const DraggableWidget = memo(function DraggableWidget({
     (e: React.PointerEvent) => {
       if (e.button !== 0) return
       e.stopPropagation()
-      if (directManipulation) onBringToFront()
       const target = e.target as HTMLElement
       const resizeEdge = target.closest('[data-resize]')?.getAttribute('data-resize')
       if (resizeEdge && canResize && (editing || directManipulation)) {
@@ -1252,7 +1256,16 @@ const DraggableWidget = memo(function DraggableWidget({
         longPressDragRef.current = { startX, startY, pointerId, timer }
       }
     },
-    [editing, canResize, canLongPressDrag, directManipulation, getActualSize, onBringToFront, onSelect]
+    [editing, canResize, canLongPressDrag, directManipulation, getActualSize, onSelect]
+  )
+
+  // Capture before child controls can stop propagation so every left-button
+  // press on a sticky note changes its layer immediately.
+  const onPointerDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button === 0 && directManipulation) onBringToFront()
+    },
+    [directManipulation, onBringToFront]
   )
 
   const onPointerMove = useCallback(
@@ -1454,6 +1467,7 @@ const DraggableWidget = memo(function DraggableWidget({
       ref={elRef}
       data-widget={widget.id}
       data-widget-interactive={isCanvasInteractiveWidgetType(widget.type) ? 'true' : undefined}
+      onPointerDownCapture={onPointerDownCapture}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
