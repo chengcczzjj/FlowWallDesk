@@ -1,5 +1,24 @@
 # 灵月桌面 开发日志
 
+## [2026-08-30 20:57] 恢复多显示器壁纸布局并修复模式覆盖
+
+**变更摘要**: 恢复仅主屏、复制、按屏独立和跨屏延展四种真实运行模式，修复壁纸应用后布局被强制改回按屏模式的问题。
+
+**涉及模块**:
+- `src/main/windows/displayLayout.ts` / `src/main/ipc/wallpaperIpc.ts` / `src/shared/wallpaper-display-layout.ts`: 让持久化模式重新驱动原生窗口数量、renderer 布局与 IPC 返回值，并保证“应用到当前布局”不覆盖复制/延展模式。
+- `src/renderer/main-ui/App.tsx` / `src/renderer/main-ui/pages/LibraryPage.tsx` / `src/renderer/main-ui/pages/settings/DisplaySettingsPage.tsx`: 恢复显示器设置页，在壁纸库常驻展示布局选择；仅按屏模式向单台显示器应用壁纸。
+- `tests/wallpaper-display.test.mjs`: 覆盖模式持久化、单屏独立分配、跨屏窗口联合矩形、强制铺满和应用壁纸后保留布局。
+
+**遇到的问题**:
+- 1.1.6 为消除两个设置入口的冲突，把模式读取、模式写入和 renderer 布局全部硬编码成 `per-display`，同时库页面任何应用操作都使用显示器 id → 跨屏/复制配置必然失效，模式选择看似保存但窗口层从未采用；现统一为一个持久化模式状态，并按模式解析应用目标。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 57 项测试；`npm.cmd run build:check` 成功。
+
+**Git Commit**: 已提交 — `fix(wallpaper): restore multi-monitor wallpaper modes`
+
+---
+
 ## [2026-08-30 20:15] 发布 1.1.9 便利贴即时置顶与画布性能优化版
 
 **变更摘要**: 将便利贴置顶触发提前到 `pointerdown` 捕获阶段，并以显式层级持久化和自适应原生命中轮询优化重叠交互与空闲性能。

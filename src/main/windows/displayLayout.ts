@@ -1,6 +1,7 @@
 import { screen } from 'electron'
 import type { DisplayBounds, DisplayDescriptor, WallpaperDisplayMode } from '@shared/types'
-import { unionDisplayBounds } from '@shared/wallpaper-display-layout'
+import { normalizeWallpaperDisplayMode, unionDisplayBounds } from '@shared/wallpaper-display-layout'
+import { store } from '../store'
 
 function rectFromElectron(rect: Electron.Rectangle): DisplayBounds {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -29,11 +30,7 @@ export function getDisplayDescriptors(): DisplayDescriptor[] {
 }
 
 export function getWallpaperDisplayMode(): WallpaperDisplayMode {
-  // Display selection now lives exclusively in the wallpaper page.  Keep the
-  // persisted field for backwards compatibility, but always use one native
-  // wallpaper window per monitor so an old "primary"/"span" value cannot hide
-  // a connected display.
-  return 'per-display'
+  return normalizeWallpaperDisplayMode(store.get('wallpaperDisplay')?.mode)
 }
 
 /** The union rectangle is the coordinate space of the single transparent window. */

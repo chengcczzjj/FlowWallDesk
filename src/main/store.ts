@@ -16,7 +16,7 @@ interface AppSettings {
 }
 
 interface WallpaperDisplaySettingsStore {
-  /** Kept for config compatibility; runtime always uses per-display windows. */
+  /** Determines whether wallpaper windows target one monitor, every monitor, or the virtual desktop. */
   mode: WallpaperDisplayMode
   /** display id -> wallpaper id; absent entries fall back to wallpaper.current */
   assignments: Record<string, string>
@@ -46,8 +46,8 @@ interface Schema {
 
 const defaults: Schema = {
   wallpaper: { volume: 0.5, muted: true },
-  // A wallpaper window is created for every connected monitor.  Individual
-  // assignments are persisted by display id and fall back to wallpaper.current.
+  // Per-display is the most useful default. Individual assignments fall back
+  // to wallpaper.current until the user chooses a wallpaper for that monitor.
   wallpaperDisplay: { mode: 'per-display', assignments: {} },
   widgets: [],
   modelSettings: {

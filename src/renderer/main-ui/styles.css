@@ -602,6 +602,16 @@ textarea,
   background: rgba(255, 255, 255, .72);
   box-shadow: 0 5px 14px rgba(34, 52, 47, .06);
 }
+.library-display-controls {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.library-display-controls .library-display-select {
+  min-width: 168px;
+}
 .library-display-select select {
   min-width: 0;
   flex: 1;
@@ -3134,6 +3144,12 @@ textarea,
 
   .library-display-select {
     width: 100%;
+  }
+
+  .library-display-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

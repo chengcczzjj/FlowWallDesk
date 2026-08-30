@@ -12,7 +12,11 @@ import type {
   WallpaperItem,
   WallpaperSettings,
 } from '@shared/types'
-import { buildWallpaperLayoutForTarget, planWallpaperApplication } from '@shared/wallpaper-display-layout'
+import {
+  buildWallpaperLayoutForTarget,
+  normalizeWallpaperDisplayMode,
+  planWallpaperApplication,
+} from '@shared/wallpaper-display-layout'
 import { store } from '../store'
 import {
   getWallpaperWindow,
@@ -351,9 +355,7 @@ async function buildWallpaperDisplayLayout(webContentsId: number): Promise<Wallp
   const current = store.get('wallpaper').current
   if (!current) return null
   const settings = store.get('wallpaperDisplay')
-  // The wallpaper page owns monitor selection.  Always render one surface per
-  // connected display, even when an older config still contains another mode.
-  const mode: WallpaperDisplayMode = 'per-display'
+  const mode = normalizeWallpaperDisplayMode(settings?.mode)
   const catalog = await listAllWallpapers()
   const displays = getDisplayDescriptors()
   const target = getWallpaperWindowTarget(webContentsId)
@@ -371,7 +373,7 @@ async function buildWallpaperDisplayLayout(webContentsId: number): Promise<Wallp
 export async function getWallpaperDisplaySettings(): Promise<WallpaperDisplaySettings> {
   const settings = store.get('wallpaperDisplay')
   return {
-    mode: 'per-display',
+    mode: normalizeWallpaperDisplayMode(settings?.mode),
     assignments: { ...(settings?.assignments ?? {}) },
     displays: getDisplayDescriptors(),
   }
@@ -465,13 +467,10 @@ export function registerWallpaperIpc(): void {
   })
   ipcMain.handle(IPC.WALLPAPER_DISPLAY_SET_MODE, async (event, mode: WallpaperDisplayMode) => {
     assertTrustedIpcSender(event, ['main'])
-    // Kept as a compatibility IPC for old renderer builds.  Display modes are
-    // intentionally no longer configurable; selecting a monitor on the
-    // wallpaper page always uses per-display windows.
     if (mode !== 'primary' && mode !== 'duplicate' && mode !== 'per-display' && mode !== 'span') {
       throw new Error('不支持的显示器壁纸模式')
     }
-    store.set('wallpaperDisplay', { ...store.get('wallpaperDisplay'), mode: 'per-display' })
+    store.set('wallpaperDisplay', { ...store.get('wallpaperDisplay'), mode })
     ensureWidgetCoordinateOrigin()
     refreshWallpaperBounds()
     refreshCanvasBounds()
@@ -496,9 +495,7 @@ export function registerWallpaperIpc(): void {
         await loadWidgetsForWallpaper(selected.id)
       }
     }
-    // Assignment is the only display setting.  Normalize the mode here too so
-    // a config created by an older version immediately gets the per-display
-    // window layout when the user saves a monitor wallpaper.
+    // Choosing a wallpaper for one monitor is an explicit switch to independent mode.
     store.set('wallpaperDisplay', { mode: 'per-display', assignments })
     ensureWidgetCoordinateOrigin()
     refreshWallpaperBounds()
@@ -699,7 +696,10 @@ export function registerWallpaperIpc(): void {
         Object.entries(displaySettings?.assignments ?? {}).filter(([, assignedId]) => assignedId !== wallpaperId),
       )
       if (Object.keys(assignments).length !== Object.keys(displaySettings?.assignments ?? {}).length) {
-        store.set('wallpaperDisplay', { mode: 'per-display', assignments })
+        store.set('wallpaperDisplay', {
+          mode: normalizeWallpaperDisplayMode(displaySettings?.mode),
+          assignments,
+        })
         await broadcastWallpaperDisplayLayout()
         notifyDisplaySettingsChanged()
       }

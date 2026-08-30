@@ -31,7 +31,7 @@ export interface WallpaperState {
   muted: boolean
 }
 
-/** Legacy layout values kept for config/IPC compatibility; the UI uses per-display assignments only. */
+/** Wallpaper window layout across the Windows display topology. */
 export type WallpaperDisplayMode = 'primary' | 'duplicate' | 'per-display' | 'span'
 
 export interface DisplayBounds {

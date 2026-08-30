@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFile } from 'node:fs/promises'
+import { URL } from 'node:url'
 import {
   buildWallpaperLayoutForTarget,
   getWallpaperWindowTargets,
+  normalizeWallpaperDisplayMode,
   planWallpaperApplication,
   resolveWallpaperObjectFit,
   unionDisplayBounds,
@@ -63,6 +66,14 @@ test('span always covers the virtual desktop regardless of saved wallpaper scali
   assert.equal(resolveWallpaperObjectFit('primary', '拉伸'), 'fill')
 })
 
+test('persisted display modes remain authoritative and invalid legacy values fall back safely', () => {
+  for (const mode of ['primary', 'duplicate', 'per-display', 'span']) {
+    assert.equal(normalizeWallpaperDisplayMode(mode), mode)
+  }
+  assert.equal(normalizeWallpaperDisplayMode('unknown'), 'primary')
+  assert.equal(normalizeWallpaperDisplayMode(undefined), 'primary')
+})
+
 test('per-display layouts resolve independent assignments in window-local coordinates', () => {
   const targets = getWallpaperWindowTargets('per-display', displays)
   const primaryLayout = buildWallpaperLayoutForTarget({
@@ -112,4 +123,37 @@ test('single-monitor targeting preserves other screens and legacy all-targeting 
   assert.equal(allPlan.mode, 'per-display')
   assert.equal(allPlan.currentId, secondary.id)
   assert.deepEqual(allPlan.assignments, { 101: secondary.id, 202: secondary.id })
+})
+
+test('applying to the current layout preserves duplicate and span modes', () => {
+  for (const mode of ['primary', 'duplicate', 'span']) {
+    const plan = planWallpaperApplication({
+      target: 'current',
+      mode,
+      assignments: { 101: current.id, 202: secondary.id },
+      displays,
+      currentId: current.id,
+      itemId: secondary.id,
+    })
+    assert.equal(plan.mode, mode)
+    assert.equal(plan.currentId, secondary.id)
+    assert.deepEqual(plan.assignments, { 101: current.id, 202: secondary.id })
+  }
+})
+
+test('main and renderer callers do not bypass the persisted display mode', async () => {
+  const [displayLayoutSource, wallpaperIpcSource, appSource, librarySource] = await Promise.all([
+    readFile(new URL('../src/main/windows/displayLayout.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main/ipc/wallpaperIpc.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main-ui/App.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main-ui/pages/LibraryPage.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(displayLayoutSource, /normalizeWallpaperDisplayMode\(store\.get\('wallpaperDisplay'\)\?\.mode\)/)
+  assert.doesNotMatch(displayLayoutSource, /getWallpaperDisplayMode[\s\S]{0,200}return 'per-display'/)
+  assert.match(wallpaperIpcSource, /const mode = normalizeWallpaperDisplayMode\(settings\?\.mode\)/)
+  assert.match(wallpaperIpcSource, /store\.set\('wallpaperDisplay', \{ \.\.\.store\.get\('wallpaperDisplay'\), mode \}\)/)
+  assert.match(appSource, /displaySettings\?\.mode === 'per-display'[\s\S]{0,100}\? wallpaperTarget[\s\S]{0,50}: 'current'/)
+  assert.match(appSource, /<DisplaySettingsPage \/>/)
+  assert.match(librarySource, /activeMode === 'per-display'[\s\S]{0,120}\? activeDisplayId[\s\S]{0,50}: 'current'/)
 })

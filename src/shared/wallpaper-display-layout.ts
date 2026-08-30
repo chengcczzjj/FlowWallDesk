@@ -17,6 +17,12 @@ export interface WallpaperWindowTarget {
 
 export type WallpaperObjectFit = 'cover' | 'contain' | 'none' | 'fill' | 'scale-down'
 
+export function normalizeWallpaperDisplayMode(mode: unknown): WallpaperDisplayMode {
+  return mode === 'duplicate' || mode === 'per-display' || mode === 'span' || mode === 'primary'
+    ? mode
+    : 'primary'
+}
+
 /** Span always fills the virtual desktop; saved per-wallpaper scaling applies to other modes. */
 export function resolveWallpaperObjectFit(
   mode: WallpaperDisplayMode | undefined,
@@ -73,7 +79,9 @@ export function planWallpaperApplication(params: {
     const primaryId = displays.find((display) => display.primary)?.id
     if (primaryId !== undefined) assignments[String(primaryId)] = itemId
   }
-  return { mode: 'per-display', assignments, currentId: itemId }
+  // Applying to the current layout must not silently discard duplicate/span.
+  // Only an explicit monitor target changes the layout to per-display.
+  return { mode: params.mode, assignments, currentId: itemId }
 }
 
 export function unionDisplayBounds(displays: readonly DisplayDescriptor[]): DisplayBounds {
