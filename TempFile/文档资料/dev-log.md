@@ -13,9 +13,9 @@
 - `npm.cmd test` 通过全部 54 项测试；`npm.cmd run build:win` 成功生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`。
 - 安装包 `dist/lingyue-desk-1.1.9-setup.exe`：369,418,473 bytes，SHA-256 `E4F2D75682E3AE67935D0FAE5A91AC0AD78B0475D8961985E899D99C4110F92E`，electron-updater SHA-512 `QOh5kbqq5CNzz1E+a0ZiooG5Aat3NNGM1MVv2wjP8pNal3aY4MWYaK8mQRw7gQrZbkQc7TccTSaGgeZxpvkYFg==`。
 - 本机已停止旧进程并静默覆盖安装 1.1.9；EXE 版本、运行目录和卸载注册表入口更新，8 个组件、2 个全局图标组件、当前壁纸及组件层级数据保留，安装后进程正常运行。
-- GitHub Release：待上传安装包、blockmap 和 `latest.yml` 后补充链接。
+- GitHub Release：`https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.9`（安装包、blockmap、`latest.yml` 已上传并校验远端大小与 SHA-256）。
 
-**Git Commit**: 待发布提交
+**Git Commit**: `99f6a1a chore(release): publish LingyueDesk 1.1.9`
 
 ---
 
