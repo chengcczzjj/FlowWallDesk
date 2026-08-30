@@ -7,6 +7,7 @@ import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
 import { setWallpaperFrame } from './wallpaperFrameStore'
 import { CanvasPointerGate } from '@shared/canvas-pointer-gate'
 import { isCanvasInteractiveWidgetType } from '@shared/canvas-hit-test'
+import { moveWidgetToFront } from '@shared/widget-order'
 
 const GRID = 16
 const EDGE_PADDING = 24
@@ -682,6 +683,19 @@ export function Canvas() {
     })
   }, [])
 
+  /** 点击便利贴时提升到画布最上层，并持久化顺序供下次启动恢复。 */
+  const bringStickyNoteToFront = useCallback((id: string) => {
+    const current = widgetsRef.current
+    const target = current.find((widget) => widget.id === id && isFreeformStickyNote(widget.type))
+    if (!target) return
+    const updated = moveWidgetToFront(current, id)
+    if (updated === current) return
+    // Keep the visual order responsive while the main process persists it.
+    widgetsRef.current = updated
+    setWidgets(updated)
+    void window.canvasBridge?.updateWidget(target)
+  }, [])
+
   /** 拖拽过程中实时计算吸附预览（每帧调用） */
   const onDragPreview = useCallback((movedId: string, movedRect: { x: number; y: number; w: number; h: number }) => {
     const moved = getDomRect(movedId, movedRect)
@@ -742,6 +756,7 @@ export function Canvas() {
               onSelect={() => {
                 if (editing) setSelectedId(w.id)
               }}
+              onBringToFront={() => bringStickyNoteToFront(w.id)}
               onEnterEdit={() => setEditing(true)}
               onUpdateConfig={(cfg, options) => updateWidgetConfig(w.id, cfg, options)}
               onDelete={async () => {
@@ -877,6 +892,7 @@ function DraggableWidget({
   entering,
   previewDimmed,
   onSelect,
+  onBringToFront,
   onEnterEdit,
   onUpdateConfig,
   onDelete,
@@ -889,6 +905,7 @@ function DraggableWidget({
   entering: boolean
   previewDimmed?: boolean
   onSelect: () => void
+  onBringToFront: () => void
   onEnterEdit: () => void
   onUpdateConfig: (config: Record<string, unknown>, options?: ConfigUpdateOptions) => void
   onDelete: () => void
@@ -1139,6 +1156,7 @@ function DraggableWidget({
     (e: React.PointerEvent) => {
       if (e.button !== 0) return
       e.stopPropagation()
+      if (directManipulation) onBringToFront()
       const target = e.target as HTMLElement
       const resizeEdge = target.closest('[data-resize]')?.getAttribute('data-resize')
       if (resizeEdge && canResize && (editing || directManipulation)) {
@@ -1231,7 +1249,7 @@ function DraggableWidget({
         longPressDragRef.current = { startX, startY, pointerId, timer }
       }
     },
-    [editing, canResize, canLongPressDrag, directManipulation, getActualSize, onSelect]
+    [editing, canResize, canLongPressDrag, directManipulation, getActualSize, onBringToFront, onSelect]
   )
 
   const onPointerMove = useCallback(

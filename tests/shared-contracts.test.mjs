@@ -47,6 +47,7 @@ import {
 } from '../src/shared/canvas-hit-test.ts'
 import { selectAppWindowCandidate } from '../src/shared/window-activation.ts'
 import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '../src/shared/native-dock-click.ts'
+import { moveWidgetToFront } from '../src/shared/widget-order.ts'
 
 test('asset URLs preserve Windows paths and packaged public assets', () => {
   assert.equal(
@@ -311,6 +312,17 @@ test('native desktop icon click fallback only runs when the renderer missed a sh
   assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 10, rootHwnd: 10, canvasHwnd: 10 }), true)
   assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 21, rootHwnd: 20, canvasHwnd: 10 }), false)
   assert.equal(isNativeCanvasSurfaceHit({ hitHwnd: 0, rootHwnd: 0, canvasHwnd: 0 }), false)
+})
+
+test('moving a widget to the front preserves the other widgets and source order', () => {
+  const first = { id: 'first' }
+  const second = { id: 'second' }
+  const third = { id: 'third' }
+  const widgets = [first, second, third]
+  assert.deepEqual(moveWidgetToFront(widgets, 'first').map((widget) => widget.id), ['second', 'third', 'first'])
+  assert.deepEqual(widgets.map((widget) => widget.id), ['first', 'second', 'third'])
+  assert.equal(moveWidgetToFront(widgets, 'third'), widgets)
+  assert.equal(moveWidgetToFront(widgets, 'missing'), widgets)
 })
 
 test('show desktop emits a complete Win+D key sequence', () => {
