@@ -20,6 +20,10 @@ interface WallpaperDisplaySettingsStore {
   mode: WallpaperDisplayMode
   /** display id -> wallpaper id; absent entries fall back to wallpaper.current */
   assignments: Record<string, string>
+  /** Version of the persisted layout contract. Older releases used incompatible coordinates. */
+  schemaVersion?: number
+  /** Set after the user explicitly chooses a display layout. */
+  userConfigured?: boolean
 }
 
 interface Schema {
@@ -46,9 +50,9 @@ interface Schema {
 
 const defaults: Schema = {
   wallpaper: { volume: 0.5, muted: true },
-  // Per-display is the most useful default. Individual assignments fall back
-  // to wallpaper.current until the user chooses a wallpaper for that monitor.
-  wallpaperDisplay: { mode: 'per-display', assignments: {} },
+  // Start conservatively on the primary display. The user can opt into
+  // duplicate, per-display, or span layouts after the first frame is stable.
+  wallpaperDisplay: { mode: 'primary', assignments: {}, schemaVersion: 2, userConfigured: false },
   widgets: [],
   modelSettings: {
     profiles: [

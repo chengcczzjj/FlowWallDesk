@@ -6,6 +6,7 @@ import { IPC } from '@shared/ipc-channels'
 import { createMainWindow, getMainWindow } from './windows/mainWindow'
 import { createWallpaperWindow } from './windows/wallpaperWindow'
 import { createCanvasWindow } from './windows/canvasWindow'
+import { normalizePersistedWallpaperDisplay } from './windows/displayLayout'
 import { createTray } from './tray'
 import { registerAppIpc } from './ipc/appIpc'
 import { registerWallpaperIpc, restoreWallpaper } from './ipc/wallpaperIpc'
@@ -112,6 +113,11 @@ app.whenReady().then(async () => {
   registerDesktopIconIpc()
   registerDataIpc()
   registerChatIpc()
+
+  // Older releases stored monitor-relative coordinates and could leave a
+  // virtual-desktop window straddling two displays.  Normalize before any
+  // wallpaper or canvas window is created so the first frame is deterministic.
+  normalizePersistedWallpaperDisplay()
 
   // 初始化记忆系统（建库/建表）
   initMemorySystem()

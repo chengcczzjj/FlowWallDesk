@@ -17,7 +17,7 @@
  *
  * 所有 HWND 用 koffi 'intptr'（8 字节），避免 64 位截断。
  */
-import type { BrowserWindow } from 'electron'
+import { screen, type BrowserWindow } from 'electron'
 
 
 let koffi: any
@@ -33,6 +33,7 @@ interface User32 {
   SendMessageA: (hwnd: number, msg: number, wp: number, lp: number) => number
   SetParent: (child: number, parent: number) => number
   GetParent: (child: number) => number
+  GetWindowRect: (hwnd: number, rect: { left: number; top: number; right: number; bottom: number }) => number
   EnumWindows: (cb: unknown, lparam: number) => number
   GetClassNameA: (hwnd: number, buf: Uint8Array, max: number) => number
   IsWindowVisible: (hwnd: number) => number
@@ -65,6 +66,7 @@ function loadUser32(): User32 | null {
   if (!koffi) return null
   try {
     const lib = koffi.load('user32.dll')
+    const RECT = koffi.struct('WallpaperRect', { left: 'long', top: 'long', right: 'long', bottom: 'long' })
     user32 = {
       FindWindowExA: lib.func('__stdcall', 'FindWindowExA', 'intptr', [
         'intptr',
@@ -80,6 +82,7 @@ function loadUser32(): User32 | null {
       ]),
       SetParent: lib.func('__stdcall', 'SetParent', 'intptr', ['intptr', 'intptr']),
       GetParent: lib.func('__stdcall', 'GetParent', 'intptr', ['intptr']),
+      GetWindowRect: lib.func('__stdcall', 'GetWindowRect', 'int', ['intptr', koffi.out(koffi.pointer(RECT))]),
       EnumWindows: lib.func('__stdcall', 'EnumWindows', 'int', ['void*', 'intptr']),
       GetClassNameA: lib.func('__stdcall', 'GetClassNameA', 'int', ['intptr', 'void*', 'int']),
       IsWindowVisible: lib.func('__stdcall', 'IsWindowVisible', 'int', ['intptr']),
@@ -129,6 +132,50 @@ function hwndFromBuffer(buf: Buffer): number {
     return Number(big)
   }
   return buf.readUInt32LE(0)
+}
+
+const SWP_CHILD_NOZORDER = 0x0004
+const SWP_CHILD_NOACTIVATE = 0x0010
+
+/**
+ * BrowserWindow.setBounds uses screen coordinates while an attached wallpaper
+ * becomes a WS_CHILD. Positioning it through Electron afterwards interprets a
+ * secondary display's absolute x/y as parent-local and can clip half the image.
+ * Convert the target DIP rectangle to native pixels and position it relative to
+ * the actual desktop host window instead.
+ */
+export function setAttachedWallpaperBounds(
+  win: BrowserWindow,
+  bounds: { x: number; y: number; width: number; height: number },
+): boolean {
+  const u = loadUser32()
+  if (!u) return false
+  try {
+    const hwnd = hwndFromBuffer(win.getNativeWindowHandle())
+    const parent = Number(u.GetParent(hwnd))
+    if (!hwnd || !parent) return false
+    const parentRect = { left: 0, top: 0, right: 0, bottom: 0 }
+    if (!u.GetWindowRect(parent, parentRect)) return false
+    // Electron owns the DIP -> physical pixel conversion for the display the
+    // BrowserWindow currently occupies (including per-monitor scaling).
+    const screenRect = screen.dipToScreenRect(win, {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+    })
+    return Boolean(u.SetWindowPos(
+      hwnd,
+      0,
+      screenRect.x - parentRect.left,
+      screenRect.y - parentRect.top,
+      screenRect.width,
+      screenRect.height,
+      SWP_CHILD_NOZORDER | SWP_CHILD_NOACTIVATE,
+    ))
+  } catch {
+    return false
+  }
 }
 
 function wait(ms: number): Promise<void> {

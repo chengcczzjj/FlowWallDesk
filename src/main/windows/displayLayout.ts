@@ -3,6 +3,37 @@ import type { DisplayBounds, DisplayDescriptor, WallpaperDisplayMode } from '@sh
 import { normalizeWallpaperDisplayMode, unionDisplayBounds } from '@shared/wallpaper-display-layout'
 import { store } from '../store'
 
+/**
+ * The first multi-display implementation persisted coordinates in a different
+ * space.  Treat an unversioned layout as unsafe once, and boot on the primary
+ * display.  The user can still opt into any other layout from Display Settings;
+ * explicit choices are marked as configured and survive future restarts.
+ */
+export const WALLPAPER_DISPLAY_SCHEMA_VERSION = 2
+
+export function normalizePersistedWallpaperDisplay(): void {
+  const persisted = store.get('wallpaperDisplay')
+  if (persisted?.schemaVersion === WALLPAPER_DISPLAY_SCHEMA_VERSION) return
+
+  store.set('wallpaperDisplay', {
+    mode: 'primary',
+    assignments: {},
+    schemaVersion: WALLPAPER_DISPLAY_SCHEMA_VERSION,
+    userConfigured: false,
+  })
+  try {
+    const primary = screen.getPrimaryDisplay().bounds
+    // The migration intentionally treats existing widget positions as
+    // primary-local. Do not apply a stale virtual-desktop origin delta during
+    // the same startup, otherwise every component moves by the old secondary
+    // monitor offset before the user gets a chance to inspect the safe layout.
+    store.set('widgetCoordinateOrigin', { x: primary.x, y: primary.y })
+  } catch {
+    // screen can briefly be unavailable during an Explorer restart.
+  }
+  console.warn('[display] 已将旧版显示器布局安全恢复为主显示器模式')
+}
+
 function rectFromElectron(rect: Electron.Rectangle): DisplayBounds {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
 }

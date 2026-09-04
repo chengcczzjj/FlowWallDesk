@@ -28,7 +28,11 @@ import {
   refreshWallpaperBounds,
 } from '../windows/wallpaperWindow'
 import { refreshCanvasBounds, refreshCanvasZOrder, getCanvasWindow, isDesktopOccluded } from '../windows/canvasWindow'
-import { getDesktopRenderBounds, getDisplayDescriptors } from '../windows/displayLayout'
+import {
+  getDesktopRenderBounds,
+  getDisplayDescriptors,
+  WALLPAPER_DISPLAY_SCHEMA_VERSION,
+} from '../windows/displayLayout'
 import { getMainWindow } from '../windows/mainWindow'
 import {
   getUserWallpapersRoot,
@@ -470,7 +474,14 @@ export function registerWallpaperIpc(): void {
     if (mode !== 'primary' && mode !== 'duplicate' && mode !== 'per-display' && mode !== 'span') {
       throw new Error('不支持的显示器壁纸模式')
     }
+    // Keep the legacy write shape for older renderer builds, then stamp the
+    // versioned contract used by current startup recovery.
     store.set('wallpaperDisplay', { ...store.get('wallpaperDisplay'), mode })
+    store.set('wallpaperDisplay', {
+      ...store.get('wallpaperDisplay'),
+      schemaVersion: WALLPAPER_DISPLAY_SCHEMA_VERSION,
+      userConfigured: true,
+    })
     ensureWidgetCoordinateOrigin()
     refreshWallpaperBounds()
     refreshCanvasBounds()
@@ -496,7 +507,12 @@ export function registerWallpaperIpc(): void {
       }
     }
     // Choosing a wallpaper for one monitor is an explicit switch to independent mode.
-    store.set('wallpaperDisplay', { mode: 'per-display', assignments })
+    store.set('wallpaperDisplay', {
+      mode: 'per-display',
+      assignments,
+      schemaVersion: WALLPAPER_DISPLAY_SCHEMA_VERSION,
+      userConfigured: true,
+    })
     ensureWidgetCoordinateOrigin()
     refreshWallpaperBounds()
     refreshCanvasBounds()
@@ -589,8 +605,11 @@ export function registerWallpaperIpc(): void {
     const nextCurrent = applicationPlan.currentId === item.id ? item : state.current ?? item
     store.set('wallpaper', { ...state, current: nextCurrent })
     store.set('wallpaperDisplay', {
+      ...displaySettings,
       mode: applicationPlan.mode,
       assignments: applicationPlan.assignments,
+      schemaVersion: displaySettings?.schemaVersion ?? WALLPAPER_DISPLAY_SCHEMA_VERSION,
+      userConfigured: displaySettings?.userConfigured ?? false,
     })
     refreshWallpaperBounds()
     refreshCanvasBounds()
@@ -699,6 +718,8 @@ export function registerWallpaperIpc(): void {
         store.set('wallpaperDisplay', {
           mode: normalizeWallpaperDisplayMode(displaySettings?.mode),
           assignments,
+          schemaVersion: displaySettings?.schemaVersion ?? WALLPAPER_DISPLAY_SCHEMA_VERSION,
+          userConfigured: displaySettings?.userConfigured ?? true,
         })
         await broadcastWallpaperDisplayLayout()
         notifyDisplaySettingsChanged()

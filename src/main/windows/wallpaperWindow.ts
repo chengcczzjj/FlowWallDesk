@@ -4,7 +4,7 @@ import { is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/ipc-channels'
 import type { WallpaperWindowTarget } from '@shared/wallpaper-display-layout'
 import { getWallpaperWindowTargets } from '@shared/wallpaper-display-layout'
-import { attachWindowAsWallpaperNative } from './attachWallpaperNative'
+import { attachWindowAsWallpaperNative, setAttachedWallpaperBounds } from './attachWallpaperNative'
 import { secureWindowNavigation } from './navigationSecurity'
 import { getDisplayDescriptors, getWallpaperDisplayMode } from './displayLayout'
 import { getMainWindow } from './mainWindow'
@@ -75,6 +75,7 @@ function syncWallpaperBounds(entry: ManagedWallpaperWindow, force = false): void
   const win = entry.window
   if (win.isDestroyed()) return
   const bounds = entry.target.bounds
+  if (entry.attached && setAttachedWallpaperBounds(win, bounds)) return
   const current = win.getBounds()
   if (!force && current.x === bounds.x && current.y === bounds.y && current.width === bounds.width && current.height === bounds.height) return
   win.setBounds(bounds, false)
@@ -180,7 +181,19 @@ function detachManagedWallpaperWindow(entry: ManagedWallpaperWindow): void {
 
 /** Keep native wallpaper windows aligned with the current display mode and topology. */
 export function reconcileWallpaperWindows(): BrowserWindow[] {
-  const targets = getWallpaperWindowTargets(getWallpaperDisplayMode(), getDisplayDescriptors())
+  const mode = getWallpaperDisplayMode()
+  const displays = getDisplayDescriptors()
+  const targets = getWallpaperWindowTargets(mode, displays)
+  console.log('[wallpaper] reconcile display layout', {
+    mode,
+    displays: displays.map((display) => ({
+      id: display.id,
+      primary: display.primary,
+      bounds: display.bounds,
+      scaleFactor: display.scaleFactor,
+    })),
+    targets: targets.map((target) => ({ key: target.key, kind: target.kind, bounds: target.bounds })),
+  })
   const wanted = new Set(targets.map((target) => target.key))
 
   for (const [key, entry] of wallpaperWindows) {
@@ -277,7 +290,6 @@ async function tryAttachToDesktop(entry: ManagedWallpaperWindow): Promise<boolea
           forwardKeyboardInput: false,
           forwardMouseInput: false,
         })
-        syncWallpaperBounds(entry, true)
         entry.attachHint = 'electron-as-wallpaper'
         return true
       } catch (error) {
@@ -293,7 +305,6 @@ async function tryAttachToDesktop(entry: ManagedWallpaperWindow): Promise<boolea
     const result = await attachWindowAsWallpaperNative(win)
     entry.attachHint = `native:${result.hint}`
     if (result.ok) {
-      syncWallpaperBounds(entry, true)
       return true
     }
     console.warn(`[wallpaper:${entry.key}] native attach #${attempt + 1} 失败: ${result.hint}`)
@@ -309,8 +320,10 @@ async function ensureEntryAttached(entry: ManagedWallpaperWindow): Promise<boole
   entry.window.showInactive()
   const ok = await tryAttachToDesktop(entry)
   if (ok) {
-    syncWallpaperBounds(entry, true)
     entry.attached = true
+    // Once parented, bounds must be applied in the host's client coordinate
+    // space; the native helper also converts for mixed-DPI displays.
+    syncWallpaperBounds(entry, true)
     entry.window.setOpacity(1)
     refreshWallpaperComposition(entry)
     console.log(`[wallpaper:${entry.key}] 贴桌面成功 (${entry.attachHint})`)
