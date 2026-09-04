@@ -1,5 +1,24 @@
 # 灵月桌面 开发日志
 
+## [2026-09-04 21:25] 构建并本机安装 1.1.11 多显示器稳定布局版
+
+**变更摘要**: 将多显示器底层修复升版为 1.1.11，生成 Windows NSIS 更新资产并在本机静默覆盖安装；本次未上传 GitHub Release。
+
+**涉及模块**:
+- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 升级 1.1.11 版本元数据和发布契约。
+- `doc/发布说明/1.1.11.md` / `TempFile/文档资料/project-status.md`: 记录功能、构建哈希、本机安装和双屏验收边界。
+- `dist/`: 生成安装包、blockmap、`latest.yml` 和未打包目录；构建产物不进入 Git。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 62 项测试；`npm.cmd run build:win` 成功。
+- 安装包 369,425,676 bytes，SHA-256 `00A3BC8D7CFF59BCAA69BF980A83474CA305DE54AF9613BE08C492131B1A98DF`。
+- 本机 EXE、`app.asar`、卸载注册表和全部运行进程均为 1.1.11；原壁纸、8 个组件和 2 个全局图标组件保留。
+- 安装态诊断确认主屏 `2560x1440` DIP / `3840x2160` 物理边界经 Raised Desktop 原生方案贴合成功。
+
+**Git Commit**: 本次任务提交 — `chore(release): package LingyueDesk 1.1.11`
+
+---
+
 ## [2026-09-04] 完成多显示器原生坐标、稳定归属与逐屏渲染链路
 
 **变更摘要**: 重新审计从 Electron 显示器枚举、持久化、BrowserWindow、WorkerW 子窗口定位到 Canvas 组件坐标的完整链路，不再用 UI 状态修补原生坐标问题。默认安全落到主显示器，并补齐复制、按屏、延展和组件跨屏持久化。
