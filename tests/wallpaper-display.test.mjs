@@ -14,6 +14,7 @@ import {
 const displays = [
   {
     id: 101,
+    key: 'win32:display1',
     label: '显示器 1',
     name: 'Primary 4K',
     primary: true,
@@ -23,6 +24,7 @@ const displays = [
   },
   {
     id: 202,
+    key: 'win32:display2',
     label: '显示器 2',
     name: 'Secondary FHD',
     primary: false,
@@ -39,7 +41,7 @@ test('duplicate and per-display modes create one native window per monitor', () 
   for (const mode of ['duplicate', 'per-display']) {
     const targets = getWallpaperWindowTargets(mode, displays)
     assert.equal(targets.length, 2)
-    assert.deepEqual(targets.map((target) => target.key), ['display:101', 'display:202'])
+    assert.deepEqual(targets.map((target) => target.key), ['display:win32:display1', 'display:win32:display2'])
     assert.deepEqual(targets.map((target) => target.bounds), displays.map((display) => display.bounds))
   }
 
@@ -48,12 +50,31 @@ test('duplicate and per-display modes create one native window per monitor', () 
   assert.equal(primaryTargets[0].displayId, 101)
 })
 
-test('span is the only mode that creates a virtual-desktop window', () => {
+test('span uses monitor-local windows and crops one virtual composition', () => {
   assert.deepEqual(unionDisplayBounds(displays), { x: -1920, y: 0, width: 4480, height: 1440 })
   const targets = getWallpaperWindowTargets('span', displays)
-  assert.equal(targets.length, 1)
-  assert.equal(targets[0].kind, 'span')
-  assert.deepEqual(targets[0].bounds, { x: -1920, y: 0, width: 4480, height: 1440 })
+  assert.equal(targets.length, 2)
+  assert.deepEqual(targets.map((target) => target.bounds), displays.map((display) => display.bounds))
+
+  const primaryLayout = buildWallpaperLayoutForTarget({
+    mode: 'span',
+    target: targets[0],
+    displays,
+    assignments: {},
+    catalog: [current],
+    current,
+  })
+  const secondaryLayout = buildWallpaperLayoutForTarget({
+    mode: 'span',
+    target: targets[1],
+    displays,
+    assignments: {},
+    catalog: [current],
+    current,
+  })
+  assert.deepEqual(primaryLayout.virtualBounds, { x: -1920, y: 0, width: 4480, height: 1440 })
+  assert.deepEqual(primaryLayout.displays[0].localBounds, { x: -1920, y: 0, width: 4480, height: 1440 })
+  assert.deepEqual(secondaryLayout.displays[0].localBounds, { x: 0, y: -180, width: 4480, height: 1440 })
 })
 
 test('span always covers the virtual desktop regardless of saved wallpaper scaling', () => {
@@ -110,7 +131,7 @@ test('single-monitor targeting preserves other screens and legacy all-targeting 
   })
   assert.equal(secondaryPlan.mode, 'per-display')
   assert.equal(secondaryPlan.currentId, current.id)
-  assert.deepEqual(secondaryPlan.assignments, { 101: current.id, 202: secondary.id })
+  assert.deepEqual(secondaryPlan.assignments, { 'win32:display1': current.id, 'win32:display2': secondary.id })
 
   const allPlan = planWallpaperApplication({
     target: 'all',
@@ -122,7 +143,7 @@ test('single-monitor targeting preserves other screens and legacy all-targeting 
   })
   assert.equal(allPlan.mode, 'per-display')
   assert.equal(allPlan.currentId, secondary.id)
-  assert.deepEqual(allPlan.assignments, { 101: secondary.id, 202: secondary.id })
+  assert.deepEqual(allPlan.assignments, { 'win32:display1': secondary.id, 'win32:display2': secondary.id })
 })
 
 test('applying to the current layout preserves duplicate and span modes', () => {
@@ -142,11 +163,12 @@ test('applying to the current layout preserves duplicate and span modes', () => 
 })
 
 test('main and renderer callers do not bypass the persisted display mode', async () => {
-  const [displayLayoutSource, wallpaperIpcSource, appSource, librarySource] = await Promise.all([
+  const [displayLayoutSource, wallpaperIpcSource, appSource, librarySource, onlineLibrarySource] = await Promise.all([
     readFile(new URL('../src/main/windows/displayLayout.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/main/ipc/wallpaperIpc.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main-ui/App.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main-ui/pages/LibraryPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main-ui/pages/OnlineWallpaperPage.tsx', import.meta.url), 'utf8'),
   ])
 
   assert.match(displayLayoutSource, /normalizeWallpaperDisplayMode\(store\.get\('wallpaperDisplay'\)\?\.mode\)/)
@@ -156,4 +178,28 @@ test('main and renderer callers do not bypass the persisted display mode', async
   assert.match(appSource, /displaySettings\?\.mode === 'per-display'[\s\S]{0,100}\? wallpaperTarget[\s\S]{0,50}: 'current'/)
   assert.match(appSource, /<DisplaySettingsPage \/>/)
   assert.match(librarySource, /activeMode === 'per-display'[\s\S]{0,120}\? activeDisplayId[\s\S]{0,50}: 'current'/)
+  assert.match(onlineLibrarySource, /getDisplayAssignment\(displaySettings\.assignments, targetDisplay\)/)
+  assert.doesNotMatch(onlineLibrarySource, /assignments\[String\(wallpaperTarget\)\]/)
+})
+
+test('native attachment and glass capture keep monitor-local runtime contracts', async () => {
+  const [identitySource, attachSource, wallpaperIpcSource, wallpaperRendererSource, frameStoreSource, glassSource] = await Promise.all([
+    readFile(new URL('../src/main/windows/nativeDisplayIdentity.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main/windows/attachWallpaperNative.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main/ipc/wallpaperIpc.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/wallpaper/Wallpaper.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/canvas/wallpaperFrameStore.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/widgets/FrostedGlassBackground.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(identitySource, /GetMonitorInfoW[\s\S]{0,180}koffi\.inout\(koffi\.pointer\(monitorInfo\)\)/)
+  assert.match(attachSource, /\(style \| WS_CHILD\) & ~WS_POPUP/)
+  assert.match(attachSource, /ScreenToClient\(parent, parentPoint\)/)
+  assert.match(wallpaperIpcSource, /if \(!isWallpaperWebContents\(_e\.sender\.id\)\) return/)
+  assert.match(wallpaperIpcSource, /sendToWallpaperWindows\(IPC\.WALLPAPER_CAPTURE_DEMAND, enabled\)/)
+  assert.match(wallpaperIpcSource, /const payload: WallpaperFramePayload = \{[\s\S]{0,180}displayKey: target\.displayKey/)
+  assert.match(wallpaperRendererSource, /layout\?\.displays\[0\]\?\.localBounds/)
+  assert.match(frameStoreSource, /currentFrames = new Map<string, ProcessedWallpaperFrame>/)
+  assert.match(glassSource, /getWallpaperFrameAt\(widgetX, widgetY\)/)
+  assert.match(glassSource, /selected\.bounds\.x - widgetX/)
 })

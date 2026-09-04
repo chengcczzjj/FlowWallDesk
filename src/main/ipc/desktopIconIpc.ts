@@ -15,6 +15,8 @@ import type {
 } from '@shared/types'
 import { store } from '../store'
 import { getCanvasWindow } from '../windows/canvasWindow'
+import { getDesktopRenderBounds, getDisplayDescriptors, getWallpaperDisplayMode } from '../windows/displayLayout'
+import { materializeWidgetsForCanvas } from '@shared/widget-display-layout'
 import { activateExistingAppWindow, waitForAppWindow } from '../windows/foregroundAppWindow'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
 
@@ -33,7 +35,13 @@ export function isDesktopIconWidgetType(type: string): boolean {
 
 function syncToCanvas(list: WidgetInstance[]): void {
   const win = getCanvasWindow()
-  if (win && !win.isDestroyed()) win.webContents.send(IPC.WIDGET_SYNC, list)
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  win.webContents.send(IPC.WIDGET_SYNC, materializeWidgetsForCanvas(
+    list,
+    getDisplayDescriptors(),
+    getDesktopRenderBounds(),
+    getWallpaperDisplayMode(),
+  ))
 }
 
 function persistWidgets(list: WidgetInstance[]): void {

@@ -18,7 +18,7 @@ interface AppSettings {
 interface WallpaperDisplaySettingsStore {
   /** Determines whether wallpaper windows target one monitor, every monitor, or the virtual desktop. */
   mode: WallpaperDisplayMode
-  /** display id -> wallpaper id; absent entries fall back to wallpaper.current */
+  /** Stable display key -> wallpaper id; absent entries fall back to wallpaper.current. */
   assignments: Record<string, string>
   /** Version of the persisted layout contract. Older releases used incompatible coordinates. */
   schemaVersion?: number
@@ -36,7 +36,7 @@ interface Schema {
   desktopSceneSnapshots?: DesktopSceneSnapshot[]
   /** 主界面窗口最后位置 */
   mainWindowBounds?: { x: number; y: number; width: number; height: number }
-  /** Origin of persisted widget coordinates in virtual desktop DIP space. */
+  /** Legacy Canvas origin retained only while old widget coordinates are migrated. */
   widgetCoordinateOrigin?: { x: number; y: number }
   /** AI 模型配置 */
   modelSettings: ModelSettings
@@ -52,7 +52,7 @@ const defaults: Schema = {
   wallpaper: { volume: 0.5, muted: true },
   // Start conservatively on the primary display. The user can opt into
   // duplicate, per-display, or span layouts after the first frame is stable.
-  wallpaperDisplay: { mode: 'primary', assignments: {}, schemaVersion: 2, userConfigured: false },
+  wallpaperDisplay: { mode: 'primary', assignments: {}, schemaVersion: 3, userConfigured: false },
   widgets: [],
   modelSettings: {
     profiles: [

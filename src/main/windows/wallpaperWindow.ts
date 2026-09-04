@@ -8,6 +8,7 @@ import { attachWindowAsWallpaperNative, setAttachedWallpaperBounds } from './att
 import { secureWindowNavigation } from './navigationSecurity'
 import { getDisplayDescriptors, getWallpaperDisplayMode } from './displayLayout'
 import { getMainWindow } from './mainWindow'
+import { logDisplayDiagnostic } from '../runtime/diagnosticLog'
 
 interface ManagedWallpaperWindow {
   key: string
@@ -17,6 +18,10 @@ interface ManagedWallpaperWindow {
   attachHint: string
   refreshGeneration: number
   refreshTimer: ReturnType<typeof setTimeout> | null
+  attachRetryTimer: ReturnType<typeof setTimeout> | null
+  attachPromise: Promise<boolean> | null
+  attachAttempts: number
+  boundsWarningReported: boolean
 }
 
 const wallpaperWindows = new Map<string, ManagedWallpaperWindow>()
@@ -33,7 +38,7 @@ export function getWallpaperWindows(): BrowserWindow[] {
   return getEntries().map((entry) => entry.window)
 }
 
-/** Primary monitor (or the span window) is the capture source used by legacy callers. */
+/** Primary monitor wallpaper window used by legacy callers. */
 export function getWallpaperWindow(): BrowserWindow | null {
   return getEntries()[0]?.window ?? null
 }
@@ -55,30 +60,31 @@ export function getAttachHint(): string {
   return getEntries().map((entry) => `${entry.key}:${entry.attachHint || 'pending'}`).join(', ')
 }
 
-function getAttachStagingBounds(entry: ManagedWallpaperWindow): Electron.Rectangle {
-  try {
-    const displays = screen.getAllDisplays()
-    const maxRight = Math.max(...displays.map((display) => display.bounds.x + display.bounds.width))
-    const maxBottom = Math.max(...displays.map((display) => display.bounds.y + display.bounds.height))
-    return {
-      x: maxRight + 96,
-      y: maxBottom + 96,
-      width: entry.target.bounds.width,
-      height: entry.target.bounds.height,
-    }
-  } catch {
-    return { x: 32_000, y: 32_000, width: entry.target.bounds.width, height: entry.target.bounds.height }
-  }
-}
-
-function syncWallpaperBounds(entry: ManagedWallpaperWindow, force = false): void {
+function syncWallpaperBounds(entry: ManagedWallpaperWindow, force = false): boolean {
   const win = entry.window
-  if (win.isDestroyed()) return
+  if (win.isDestroyed()) return false
   const bounds = entry.target.bounds
-  if (entry.attached && setAttachedWallpaperBounds(win, bounds)) return
+  if (entry.attached) {
+    const positioned = setAttachedWallpaperBounds(win, bounds, entry.target.nativeBounds)
+    if (!positioned.ok && !entry.boundsWarningReported) {
+      entry.boundsWarningReported = true
+      console.warn(`[wallpaper:${entry.key}] 原生子窗口定位校验失败`, positioned)
+      logDisplayDiagnostic('wallpaper.bounds-verification-failed', {
+        key: entry.key,
+        targetBounds: bounds,
+        nativeBounds: entry.target.nativeBounds,
+        expected: positioned.expected,
+        actual: positioned.actual,
+        attachHint: entry.attachHint,
+      })
+    }
+    if (positioned.ok) entry.boundsWarningReported = false
+    return positioned.ok
+  }
   const current = win.getBounds()
-  if (!force && current.x === bounds.x && current.y === bounds.y && current.width === bounds.width && current.height === bounds.height) return
+  if (!force && current.x === bounds.x && current.y === bounds.y && current.width === bounds.width && current.height === bounds.height) return true
   win.setBounds(bounds, false)
+  return true
 }
 
 function refreshWallpaperComposition(entry: ManagedWallpaperWindow): void {
@@ -145,6 +151,10 @@ function createManagedWallpaperWindow(target: WallpaperWindowTarget): ManagedWal
     attachHint: '',
     refreshGeneration: 0,
     refreshTimer: null,
+    attachRetryTimer: null,
+    attachPromise: null,
+    attachAttempts: 0,
+    boundsWarningReported: false,
   }
   wallpaperWindows.set(target.key, entry)
 
@@ -161,6 +171,7 @@ function createManagedWallpaperWindow(target: WallpaperWindowTarget): ManagedWal
   win.on('closed', () => {
     entry.refreshGeneration += 1
     if (entry.refreshTimer) clearTimeout(entry.refreshTimer)
+    if (entry.attachRetryTimer) clearTimeout(entry.attachRetryTimer)
     if (wallpaperWindows.get(entry.key) === entry) wallpaperWindows.delete(entry.key)
   })
   loadWallpaperRenderer(win)
@@ -168,13 +179,15 @@ function createManagedWallpaperWindow(target: WallpaperWindowTarget): ManagedWal
 }
 
 function detachManagedWallpaperWindow(entry: ManagedWallpaperWindow): void {
-  if (!entry.attached || entry.attachHint !== 'electron-as-wallpaper' || entry.window.isDestroyed()) return
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const eaw = require('electron-as-wallpaper')
-    if (typeof eaw.detach === 'function') eaw.detach(entry.window)
-  } catch (error) {
-    console.warn(`[wallpaper:${entry.key}] detach 失败，将直接销毁窗口：`, error)
+  if (!entry.attached || entry.window.isDestroyed()) return
+  if (entry.attachHint === 'electron-as-wallpaper') {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const eaw = require('electron-as-wallpaper')
+      if (typeof eaw.detach === 'function') eaw.detach(entry.window)
+    } catch (error) {
+      console.warn(`[wallpaper:${entry.key}] detach 失败，将直接销毁窗口：`, error)
+    }
   }
   entry.attached = false
 }
@@ -188,11 +201,31 @@ export function reconcileWallpaperWindows(): BrowserWindow[] {
     mode,
     displays: displays.map((display) => ({
       id: display.id,
+      key: display.key,
       primary: display.primary,
       bounds: display.bounds,
+      nativeBounds: display.nativeBounds,
       scaleFactor: display.scaleFactor,
     })),
     targets: targets.map((target) => ({ key: target.key, kind: target.kind, bounds: target.bounds })),
+  })
+  logDisplayDiagnostic('wallpaper.layout-reconciled', {
+    mode,
+    displays: displays.map((display) => ({
+      id: display.id,
+      key: display.key,
+      deviceName: display.deviceName,
+      primary: display.primary,
+      bounds: display.bounds,
+      nativeBounds: display.nativeBounds,
+      scaleFactor: display.scaleFactor,
+    })),
+    targets: targets.map((target) => ({
+      key: target.key,
+      displayKey: target.displayKey,
+      bounds: target.bounds,
+      nativeBounds: target.nativeBounds,
+    })),
   })
   const wanted = new Set(targets.map((target) => target.key))
 
@@ -201,6 +234,7 @@ export function reconcileWallpaperWindows(): BrowserWindow[] {
     wallpaperWindows.delete(key)
     entry.refreshGeneration += 1
     if (entry.refreshTimer) clearTimeout(entry.refreshTimer)
+    if (entry.attachRetryTimer) clearTimeout(entry.attachRetryTimer)
     detachManagedWallpaperWindow(entry)
     if (!entry.window.isDestroyed()) entry.window.destroy()
   }
@@ -209,6 +243,7 @@ export function reconcileWallpaperWindows(): BrowserWindow[] {
     const existing = wallpaperWindows.get(target.key)
     if (existing && !existing.window.isDestroyed()) {
       existing.target = target
+      existing.boundsWarningReported = false
       syncWallpaperBounds(existing, true)
     } else {
       createManagedWallpaperWindow(target)
@@ -272,6 +307,7 @@ async function tryAttachToDesktop(entry: ManagedWallpaperWindow): Promise<boolea
       window: BrowserWindow,
       options: { transparent: boolean; forwardMouseInput: boolean; forwardKeyboardInput: boolean },
     ) => void
+    detach?: (window: BrowserWindow) => void
     refresh?: () => void
   } | null = null
   try {
@@ -290,8 +326,14 @@ async function tryAttachToDesktop(entry: ManagedWallpaperWindow): Promise<boolea
           forwardKeyboardInput: false,
           forwardMouseInput: false,
         })
-        entry.attachHint = 'electron-as-wallpaper'
-        return true
+        const positioned = setAttachedWallpaperBounds(win, entry.target.bounds, entry.target.nativeBounds)
+        if (positioned.ok) {
+          entry.attachHint = 'electron-as-wallpaper'
+          return true
+        }
+        console.warn(`[wallpaper:${entry.key}] eaw.attach #${index + 1} 未形成有效桌面子窗口`, positioned)
+        try { eaw.detach?.(win) } catch { /* ignore */ }
+        try { eaw.refresh?.() } catch { /* ignore */ }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.warn(`[wallpaper:${entry.key}] eaw.attach #${index + 1} 失败: ${message}`)
@@ -305,34 +347,89 @@ async function tryAttachToDesktop(entry: ManagedWallpaperWindow): Promise<boolea
     const result = await attachWindowAsWallpaperNative(win)
     entry.attachHint = `native:${result.hint}`
     if (result.ok) {
-      return true
+      const positioned = setAttachedWallpaperBounds(win, entry.target.bounds, entry.target.nativeBounds)
+      if (positioned.ok) return true
+      console.warn(`[wallpaper:${entry.key}] native attach #${attempt + 1} 定位校验失败`, positioned)
     }
     console.warn(`[wallpaper:${entry.key}] native attach #${attempt + 1} 失败: ${result.hint}`)
   }
   return false
 }
 
-async function ensureEntryAttached(entry: ManagedWallpaperWindow): Promise<boolean> {
+async function attachEntryOnce(entry: ManagedWallpaperWindow): Promise<boolean> {
   if (entry.attached && !entry.window.isDestroyed()) return true
   if (entry.window.isDestroyed()) return false
-  entry.window.setBounds(getAttachStagingBounds(entry), false)
+  // Keep the hidden window on its target monitor before SetParent so Chromium
+  // initializes with that monitor's DPI. Opacity prevents a top-level flash.
+  entry.window.setBounds(entry.target.bounds, false)
   entry.window.setOpacity(0)
   entry.window.showInactive()
   const ok = await tryAttachToDesktop(entry)
+  if (entry.window.isDestroyed()) return false
   if (ok) {
     entry.attached = true
     // Once parented, bounds must be applied in the host's client coordinate
     // space; the native helper also converts for mixed-DPI displays.
-    syncWallpaperBounds(entry, true)
+    if (!syncWallpaperBounds(entry, true)) {
+      detachManagedWallpaperWindow(entry)
+      entry.window.hide()
+      entry.window.setOpacity(1)
+      return false
+    }
+    entry.attachAttempts = 0
+    if (entry.attachRetryTimer) {
+      clearTimeout(entry.attachRetryTimer)
+      entry.attachRetryTimer = null
+    }
     entry.window.setOpacity(1)
     refreshWallpaperComposition(entry)
     console.log(`[wallpaper:${entry.key}] 贴桌面成功 (${entry.attachHint})`)
+    logDisplayDiagnostic('wallpaper.attached', {
+      key: entry.key,
+      displayKey: entry.target.displayKey,
+      attachHint: entry.attachHint,
+      bounds: entry.target.bounds,
+      nativeBounds: entry.target.nativeBounds,
+    })
   } else {
     entry.window.hide()
     entry.window.setOpacity(1)
     console.warn(`[wallpaper:${entry.key}] 贴桌面失败 (${entry.attachHint})`)
+    logDisplayDiagnostic('wallpaper.attach-failed', {
+      key: entry.key,
+      displayKey: entry.target.displayKey,
+      attachHint: entry.attachHint,
+      bounds: entry.target.bounds,
+      nativeBounds: entry.target.nativeBounds,
+    })
   }
   return ok
+}
+
+function scheduleAttachRetry(entry: ManagedWallpaperWindow): void {
+  if (entry.window.isDestroyed() || entry.attached || entry.attachRetryTimer) return
+  entry.attachAttempts += 1
+  const delay = Math.min(15_000, 1_000 * 2 ** Math.min(entry.attachAttempts - 1, 4))
+  entry.attachRetryTimer = setTimeout(() => {
+    entry.attachRetryTimer = null
+    void ensureEntryAttached(entry)
+  }, delay)
+  console.warn(`[wallpaper:${entry.key}] 将在 ${delay}ms 后重试桌面贴合`)
+}
+
+async function ensureEntryAttached(entry: ManagedWallpaperWindow): Promise<boolean> {
+  if (entry.attached && !entry.window.isDestroyed()) return true
+  if (entry.window.isDestroyed()) return false
+  if (entry.attachPromise) return entry.attachPromise
+  const promise = attachEntryOnce(entry)
+  entry.attachPromise = promise
+  try {
+    const ok = await promise
+    if (!ok) scheduleAttachRetry(entry)
+    return ok
+  } finally {
+    if (entry.attachPromise === promise) entry.attachPromise = null
+  }
 }
 
 /** Attach one renderer after media readiness, or all windows for compatibility callers. */
@@ -350,7 +447,16 @@ export async function ensureWallpaperAttached(webContentsId?: number): Promise<b
 export function refreshWallpaperAttach(): void {
   const entries = getEntries()
   if (entries.length === 0) return
-  for (const entry of entries) syncWallpaperBounds(entry, true)
+  for (const entry of entries) {
+    if (!entry.attached || syncWallpaperBounds(entry, true)) continue
+    logDisplayDiagnostic('wallpaper.desktop-parent-lost', {
+      key: entry.key,
+      displayKey: entry.target.displayKey,
+      attachHint: entry.attachHint,
+    })
+    detachManagedWallpaperWindow(entry)
+    void ensureEntryAttached(entry)
+  }
   if (!entries.some((entry) => entry.attached)) return
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -361,7 +467,11 @@ export function refreshWallpaperAttach(): void {
   }
   for (const entry of entries) {
     if (!entry.attached) continue
-    syncWallpaperBounds(entry, true)
+    if (!syncWallpaperBounds(entry, true)) {
+      detachManagedWallpaperWindow(entry)
+      void ensureEntryAttached(entry)
+      continue
+    }
     refreshWallpaperComposition(entry)
   }
 }

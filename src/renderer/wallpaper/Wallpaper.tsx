@@ -30,37 +30,50 @@ function drawWallpaperFrame(
   source: CanvasImageSource,
   width: number,
   height: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  surfaceBounds: { x: number; y: number; width: number; height: number },
   objectFit: React.CSSProperties['objectFit'],
   transform: string
 ): void {
   const sourceSize = getSourceSize(source)
-  let drawWidth = width
-  let drawHeight = height
+  const outputScaleX = width / Math.max(1, viewportWidth)
+  const outputScaleY = height / Math.max(1, viewportHeight)
+  const surfaceX = surfaceBounds.x * outputScaleX
+  const surfaceY = surfaceBounds.y * outputScaleY
+  const surfaceWidth = surfaceBounds.width * outputScaleX
+  const surfaceHeight = surfaceBounds.height * outputScaleY
+  let drawWidth = surfaceWidth
+  let drawHeight = surfaceHeight
   let drawX = 0
   let drawY = 0
 
   if (objectFit === 'cover' || objectFit === 'contain' || objectFit === 'scale-down') {
     const scale = objectFit === 'cover'
-      ? Math.max(width / sourceSize.width, height / sourceSize.height)
-      : Math.min(width / sourceSize.width, height / sourceSize.height)
+      ? Math.max(surfaceWidth / sourceSize.width, surfaceHeight / sourceSize.height)
+      : Math.min(surfaceWidth / sourceSize.width, surfaceHeight / sourceSize.height)
     drawWidth = sourceSize.width * scale
     drawHeight = sourceSize.height * scale
-    drawX = (width - drawWidth) / 2
-    drawY = (height - drawHeight) / 2
+    drawX = (surfaceWidth - drawWidth) / 2
+    drawY = (surfaceHeight - drawHeight) / 2
   } else if (objectFit === 'none') {
-    drawWidth = sourceSize.width
-    drawHeight = sourceSize.height
-    drawX = (width - drawWidth) / 2
-    drawY = (height - drawHeight) / 2
+    drawWidth = sourceSize.width * outputScaleX
+    drawHeight = sourceSize.height * outputScaleY
+    drawX = (surfaceWidth - drawWidth) / 2
+    drawY = (surfaceHeight - drawHeight) / 2
   }
 
   ctx.clearRect(0, 0, width, height)
   ctx.save()
+  ctx.translate(surfaceX, surfaceY)
+  ctx.beginPath()
+  ctx.rect(0, 0, surfaceWidth, surfaceHeight)
+  ctx.clip()
   if (transform === 'scaleX(-1)') {
-    ctx.translate(width, 0)
+    ctx.translate(surfaceWidth, 0)
     ctx.scale(-1, 1)
   } else if (transform === 'scaleY(-1)') {
-    ctx.translate(0, height)
+    ctx.translate(0, surfaceHeight)
     ctx.scale(1, -1)
   }
   ctx.drawImage(source, drawX, drawY, drawWidth, drawHeight)
@@ -204,7 +217,27 @@ export function Wallpaper() {
     }
     if (!source) return
     try {
-      drawWallpaperFrame(ctx, source, c.width, c.height, objectFit, transform)
+      const viewportWidth = Math.max(1, window.innerWidth)
+      const viewportHeight = Math.max(1, window.innerHeight)
+      const expectedHeight = Math.max(1, Math.round(c.width * viewportHeight / viewportWidth))
+      if (c.height !== expectedHeight) c.height = expectedHeight
+      const surfaceBounds = layout?.displays[0]?.localBounds ?? {
+        x: 0,
+        y: 0,
+        width: viewportWidth,
+        height: viewportHeight,
+      }
+      drawWallpaperFrame(
+        ctx,
+        source,
+        c.width,
+        c.height,
+        viewportWidth,
+        viewportHeight,
+        surfaceBounds,
+        objectFit,
+        transform,
+      )
       const data = c.toDataURL('image/jpeg', 0.62)
       captureErrorKeyRef.current = null
       window.wallpaperBridge?.sendFrame?.(data)
@@ -215,7 +248,7 @@ export function Wallpaper() {
         console.warn('[wallpaper] renderer frame capture failed; main fallback will take over:', error)
       }
     }
-  }, [activeItem?.id, objectFit, transform])
+  }, [activeItem?.id, layout, objectFit, transform])
 
   // 根据壁纸类型启动/停止抽帧
   const startCapture = useCallback(() => {
@@ -413,26 +446,26 @@ export function Wallpaper() {
 
   const surfaces = layout?.displays?.length
     ? layout.displays
-    : [{ displayId: -1, bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item: activeItem }]
+    : [{ displayId: -1, displayKey: 'fallback', bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item: activeItem }]
 
   const renderSurface = (surface: (typeof surfaces)[number], index: number) => {
     const surfaceItem = surface.item ?? activeItem
     const surfaceSrc = toAssetUrl(surfaceItem.source) ?? ''
     const surfaceMediaStyle = { ...mediaStyle, display: 'block' as const }
     if (surfaceItem.type === 'video') {
-      return <video key={`${surface.displayId}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
+      return <video key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
     }
     if (surfaceItem.type === 'image') {
-      return <img key={`${surface.displayId}:${surfaceItem.source}`} ref={index === 0 ? imgRef : undefined} crossOrigin="anonymous" src={surfaceSrc} onLoad={() => { if (index === 0) { markMediaReady(); captureFrame() } }} onError={() => { if (index === 0) { setErr(`image 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} alt="" />
+      return <img key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? imgRef : undefined} crossOrigin="anonymous" src={surfaceSrc} onLoad={() => { if (index === 0) { markMediaReady(); captureFrame() } }} onError={() => { if (index === 0) { setErr(`image 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} alt="" />
     }
     if (surfaceItem.type === 'web') {
-      return <iframe key={`${surface.displayId}:${surfaceItem.source}`} src={surfaceSrc} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
+      return <iframe key={`${surface.displayKey}:${surfaceItem.source}`} src={surfaceSrc} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
     }
     return null
   }
 
   return <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'transparent' }}>
-    {surfaces.map((surface, index) => <div key={`${surface.displayId}:${surface.localBounds.x}:${surface.localBounds.y}`} style={{ position: 'absolute', left: surface.localBounds.x, top: surface.localBounds.y, width: surface.localBounds.width, height: surface.localBounds.height, overflow: 'hidden' }}>{renderSurface(surface, index)}</div>)}
+    {surfaces.map((surface, index) => <div key={`${surface.displayKey}:${surface.localBounds.x}:${surface.localBounds.y}`} style={{ position: 'absolute', left: surface.localBounds.x, top: surface.localBounds.y, width: surface.localBounds.width, height: surface.localBounds.height, overflow: 'hidden' }}>{renderSurface(surface, index)}</div>)}
     {errorOverlay}
   </div>
 }

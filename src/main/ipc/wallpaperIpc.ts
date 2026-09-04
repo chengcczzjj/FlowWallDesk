@@ -9,17 +9,18 @@ import type {
   WallpaperDisplayLayout,
   WallpaperDisplayMode,
   WallpaperDisplaySettings,
+  WallpaperFramePayload,
   WallpaperItem,
   WallpaperSettings,
 } from '@shared/types'
 import {
   buildWallpaperLayoutForTarget,
+  getDisplayStorageKey,
   normalizeWallpaperDisplayMode,
   planWallpaperApplication,
 } from '@shared/wallpaper-display-layout'
 import { store } from '../store'
 import {
-  getWallpaperWindow,
   getWallpaperWindows,
   getWallpaperWindowTarget,
   isWallpaperAttached,
@@ -29,7 +30,6 @@ import {
 } from '../windows/wallpaperWindow'
 import { refreshCanvasBounds, refreshCanvasZOrder, getCanvasWindow, isDesktopOccluded } from '../windows/canvasWindow'
 import {
-  getDesktopRenderBounds,
   getDisplayDescriptors,
   WALLPAPER_DISPLAY_SCHEMA_VERSION,
 } from '../windows/displayLayout'
@@ -407,40 +407,57 @@ async function listAllWallpapers(): Promise<WallpaperItem[]> {
 // video/image 类型由壁纸渲染进程 canvas 抽帧，通过 IPC 中转
 // web 类型与渲染端断帧场景由主进程 capturePage 兜底
 let captureTimer: ReturnType<typeof setInterval> | null = null
-let captureInFlight = false
+const captureInFlight = new Set<string>()
 let wallpaperFrameDemanded = false
-let lastRendererFrameAt = 0
-let rendererFrameSeen = false
-let fallbackCaptureActive = false
+const lastRendererFrameAt = new Map<string, number>()
+const rendererFrameSeen = new Set<string>()
+const fallbackCaptureActive = new Set<string>()
 const RENDERER_FRAME_STALE_MS = 1_250
 
 async function captureWallpaperFrameFallback(): Promise<void> {
-  if (captureInFlight || !wallpaperFrameDemanded || isDesktopOccluded()) return
-  const wallpaperType = store.get('wallpaper').current?.type
-  if (wallpaperType !== 'web' && Date.now() - lastRendererFrameAt < RENDERER_FRAME_STALE_MS) return
-  if (!fallbackCaptureActive) {
-    fallbackCaptureActive = true
-    console.warn(`[wallpaper] renderer frames stale; using main capture fallback (${wallpaperType ?? 'unknown'})`)
-  }
-  const wp = getWallpaperWindow()
+  if (!wallpaperFrameDemanded || isDesktopOccluded()) return
   const canvas = getCanvasWindow()
-  if (
-    !wp || wp.isDestroyed() || wp.webContents.isDestroyed() ||
-    !canvas || canvas.isDestroyed() || canvas.webContents.isDestroyed()
-  ) return
-  captureInFlight = true
-  try {
-    const img = await wp.webContents.capturePage()
-    const width = 768
-    const bounds = getDesktopRenderBounds()
-    const height = Math.max(1, Math.round(width * bounds.height / Math.max(1, bounds.width)))
-    const resized = img.resize({ width, height, quality: 'good' })
-    const b64 = resized.toJPEG(48).toString('base64')
-    safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, `data:image/jpeg;base64,${b64}`)
-  } catch {
-    // capturePage can fail while a window or frame is being replaced.
-  } finally {
-    captureInFlight = false
+  if (!canvas || canvas.isDestroyed() || canvas.webContents.isDestroyed()) return
+
+  for (const wp of getWallpaperWindows()) {
+    if (wp.isDestroyed() || wp.webContents.isDestroyed()) continue
+    const target = getWallpaperWindowTarget(wp.webContents.id)
+    if (!target?.displayKey || captureInFlight.has(target.displayKey)) continue
+    if (Date.now() - (lastRendererFrameAt.get(target.displayKey) ?? 0) < RENDERER_FRAME_STALE_MS) continue
+    if (!fallbackCaptureActive.has(target.displayKey)) {
+      fallbackCaptureActive.add(target.displayKey)
+      console.warn(`[wallpaper:${target.displayKey}] renderer frames stale; using main capture fallback`)
+    }
+
+    captureInFlight.add(target.displayKey)
+    try {
+      const img = await wp.webContents.capturePage()
+      const width = 768
+      const height = Math.max(1, Math.round(width * target.bounds.height / Math.max(1, target.bounds.width)))
+      const resized = img.resize({ width, height, quality: 'good' })
+      const data = `data:image/jpeg;base64,${resized.toJPEG(48).toString('base64')}`
+      const payload: WallpaperFramePayload = {
+        displayKey: target.displayKey,
+        bounds: { ...target.bounds },
+        data,
+      }
+      safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, payload)
+    } catch {
+      // capturePage can fail while a window or frame is being replaced.
+    } finally {
+      captureInFlight.delete(target.displayKey)
+    }
+  }
+}
+
+function resetWallpaperFrameWatchdog(): void {
+  const now = Date.now()
+  lastRendererFrameAt.clear()
+  rendererFrameSeen.clear()
+  fallbackCaptureActive.clear()
+  for (const win of getWallpaperWindows()) {
+    const target = getWallpaperWindowTarget(win.webContents.id)
+    if (target?.displayKey) lastRendererFrameAt.set(target.displayKey, now)
   }
 }
 
@@ -495,11 +512,14 @@ export function registerWallpaperIpc(): void {
     const display = getDisplayDescriptors().find((item) => item.id === displayId)
     if (!display) throw new Error('显示器不存在')
     const assignments = { ...(store.get('wallpaperDisplay')?.assignments ?? {}) }
-    if (wallpaperId === null || wallpaperId === '') delete assignments[String(displayId)]
+    const displayKey = getDisplayStorageKey(display)
+    delete assignments[String(displayId)]
+    delete assignments[`electron:${displayId}`]
+    if (wallpaperId === null || wallpaperId === '') delete assignments[displayKey]
     else {
       const selected = (await listAllWallpapers()).find((item) => item.id === wallpaperId)
       if (!selected) throw new Error('壁纸不存在')
-      assignments[String(displayId)] = wallpaperId
+      assignments[displayKey] = wallpaperId
       if (display.primary) {
         const state = store.get('wallpaper')
         store.set('wallpaper', { ...state, current: selected })
@@ -524,32 +544,37 @@ export function registerWallpaperIpc(): void {
   // 壁纸抽帧中转：壁纸窗口 → 画布窗口（用于组件毛玻璃效果）
   // video/image 类型由渲染端抽帧发送，主进程只做中转
   ipcMain.on(IPC.WALLPAPER_FRAME, (_e, data: string) => {
-    if (_e.sender.id !== getWallpaperWindow()?.webContents.id) return
+    if (!isWallpaperWebContents(_e.sender.id)) return
     if (typeof data !== 'string' || data.length > 5 * 1024 * 1024 || !data.startsWith('data:image/jpeg;base64,')) return
     if (!wallpaperFrameDemanded || isDesktopOccluded()) return
-    lastRendererFrameAt = Date.now()
-    if (!rendererFrameSeen) {
-      rendererFrameSeen = true
-      console.log('[wallpaper] renderer frame stream active')
+    const target = getWallpaperWindowTarget(_e.sender.id)
+    if (!target?.displayKey) return
+    lastRendererFrameAt.set(target.displayKey, Date.now())
+    if (!rendererFrameSeen.has(target.displayKey)) {
+      rendererFrameSeen.add(target.displayKey)
+      console.log(`[wallpaper:${target.displayKey}] renderer frame stream active`)
     }
-    if (fallbackCaptureActive) {
-      fallbackCaptureActive = false
-      console.log('[wallpaper] renderer frame stream recovered; fallback idle')
+    if (fallbackCaptureActive.delete(target.displayKey)) {
+      console.log(`[wallpaper:${target.displayKey}] renderer frame stream recovered; fallback idle`)
     }
     const canvas = getCanvasWindow()
-    safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, data)
+    const payload: WallpaperFramePayload = {
+      displayKey: target.displayKey,
+      bounds: { ...target.bounds },
+      data,
+    }
+    safeSendToWindow(canvas, IPC.WALLPAPER_FRAME, payload)
   })
 
   ipcMain.on(IPC.WALLPAPER_CAPTURE_DEMAND, (event, enabled: boolean) => {
     if (event.sender.id !== getCanvasWindow()?.webContents.id || typeof enabled !== 'boolean') return
     wallpaperFrameDemanded = enabled
-    safeSendToWindow(getWallpaperWindow(), IPC.WALLPAPER_CAPTURE_DEMAND, enabled)
+    sendToWallpaperWindows(IPC.WALLPAPER_CAPTURE_DEMAND, enabled)
     if (!enabled) {
       stopMainCapture()
-      rendererFrameSeen = false
-      fallbackCaptureActive = false
+      resetWallpaperFrameWatchdog()
     } else {
-      lastRendererFrameAt = Date.now()
+      resetWallpaperFrameWatchdog()
       startMainCapture()
     }
   })
@@ -565,9 +590,9 @@ export function registerWallpaperIpc(): void {
     if (payload?.source && payload.source !== expected.source) return
     const senderWindow = getWallpaperWindows().find((win) => win.webContents.id === _e.sender.id)
     if (!senderWindow) return
-    if (_e.sender.id === getWallpaperWindow()?.webContents.id) {
-      safeSendToWindow(senderWindow, IPC.WALLPAPER_CAPTURE_DEMAND, wallpaperFrameDemanded)
-    }
+    safeSendToWindow(senderWindow, IPC.WALLPAPER_CAPTURE_DEMAND, wallpaperFrameDemanded)
+    const target = getWallpaperWindowTarget(_e.sender.id)
+    if (target?.displayKey) lastRendererFrameAt.set(target.displayKey, Date.now())
     // READY may arrive after the edge-triggered occlusion event, so always resync it.
     safeSendToWindow(senderWindow, IPC.WALLPAPER_PAUSE_CAPTURE, isDesktopOccluded())
     if (wallpaperFrameDemanded) startMainCapture()
@@ -619,9 +644,7 @@ export function registerWallpaperIpc(): void {
     refreshCanvasZOrder()
 
     // 主进程定时器同时负责 web 抽帧与 video/image 断帧看门狗。
-    lastRendererFrameAt = Date.now()
-    rendererFrameSeen = false
-    fallbackCaptureActive = false
+    resetWallpaperFrameWatchdog()
     if (wallpaperFrameDemanded) startMainCapture()
 
     if (state.current?.id !== nextCurrent.id) await loadWidgetsForWallpaper(nextCurrent.id)
@@ -919,7 +942,7 @@ export async function restoreWallpaper(): Promise<void> {
     if (win.isDestroyed() || win.webContents.isDestroyed()) return
     console.log(`[wallpaper] restore 布局到 renderer ${win.webContents.id}:`, state.current?.name)
     void broadcastWallpaperDisplayLayout()
-    lastRendererFrameAt = Date.now()
+    resetWallpaperFrameWatchdog()
     if (wallpaperFrameDemanded) startMainCapture()
   }
   for (const win of windows) {

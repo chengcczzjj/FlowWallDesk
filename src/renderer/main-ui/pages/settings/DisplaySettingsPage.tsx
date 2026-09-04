@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Monitor, RefreshCw, Tv2 } from 'lucide-react'
 import type { WallpaperDisplayMode, WallpaperDisplaySettings, WallpaperItem } from '@shared/types'
+import { getDisplayAssignment } from '@shared/wallpaper-display-layout'
 import './settings.css'
 
 const MODES: Array<{ value: WallpaperDisplayMode; title: string; description: string }> = [
@@ -144,7 +145,7 @@ export function DisplaySettingsPage() {
         <div className="settings-group__header">已连接显示器</div>
         <div className="settings-display-list">
           {(settings?.displays ?? []).map((display) => {
-            const assignment = settings?.assignments[String(display.id)] ?? ''
+            const assignment = settings ? getDisplayAssignment(settings.assignments, display) ?? '' : ''
             return <div className={`settings-display-card${selectedDisplayId === display.id ? ' selected' : ''}`} key={display.id} onClick={() => setSelectedDisplayId(display.id)}>
               <div className="settings-display-card__icon"><Monitor size={18} /></div>
               <div className="settings-display-card__body">

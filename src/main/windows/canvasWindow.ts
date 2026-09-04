@@ -16,7 +16,8 @@ import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared
 import { secureWindowNavigation } from './navigationSecurity'
 import { store } from '../store'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
-import { getDesktopRenderBounds } from './displayLayout'
+import { getDesktopRenderBounds, getDisplayDescriptors, getWallpaperDisplayMode } from './displayLayout'
+import { materializeWidgetsForCanvas } from '@shared/widget-display-layout'
 
 
 let koffi: any
@@ -365,7 +366,12 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
 function refreshCanvasCursorHitTest(): void {
   const displayBounds = getDesktopRenderBounds()
   const cursor = screen.getCursorScreenPoint()
-  const widgets = store.get('widgets')
+  const widgets = materializeWidgetsForCanvas(
+    store.get('widgets'),
+    getDisplayDescriptors(),
+    displayBounds,
+    getWallpaperDisplayMode(),
+  )
   const widget = findInteractiveWidgetAtPoint(cursor, displayBounds, widgets)
   // Sample the native surface for every widget, not only Dock.  A fullscreen
   // transition can leave Chromium's renderer hover state looking healthy

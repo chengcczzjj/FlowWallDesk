@@ -14,6 +14,7 @@ import type {
   DesktopIconLaunchResult,
   CanvasOcclusionState,
   NativeDockClickEvent,
+  WallpaperFramePayload,
 } from '@shared/types'
 
 const api = {
@@ -96,8 +97,8 @@ const api = {
   openRecycleBin: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_RECYCLE_BIN),
   showDesktop: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_SHOW_DESKTOP),
   /** 监听壁纸抽帧（用于毛玻璃效果） */
-  onFrame: (cb: (data: string) => void): (() => void) => {
-    const handler = (_: unknown, data: string) => cb(data)
+  onFrame: (cb: (frame: WallpaperFramePayload) => void): (() => void) => {
+    const handler = (_: unknown, frame: WallpaperFramePayload) => cb(frame)
     ipcRenderer.on(IPC.WALLPAPER_FRAME, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_FRAME, handler)
   },

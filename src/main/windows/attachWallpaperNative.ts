@@ -33,6 +33,7 @@ interface User32 {
   SendMessageA: (hwnd: number, msg: number, wp: number, lp: number) => number
   SetParent: (child: number, parent: number) => number
   GetParent: (child: number) => number
+  ScreenToClient: (hwnd: number, point: { x: number; y: number }) => number
   GetWindowRect: (hwnd: number, rect: { left: number; top: number; right: number; bottom: number }) => number
   EnumWindows: (cb: unknown, lparam: number) => number
   GetClassNameA: (hwnd: number, buf: Uint8Array, max: number) => number
@@ -66,7 +67,8 @@ function loadUser32(): User32 | null {
   if (!koffi) return null
   try {
     const lib = koffi.load('user32.dll')
-    const RECT = koffi.struct('WallpaperRect', { left: 'long', top: 'long', right: 'long', bottom: 'long' })
+    const POINT = koffi.struct('WallpaperPoint', { x: 'long', y: 'long' })
+    const RECT = koffi.struct('WallpaperBoundsRect', { left: 'long', top: 'long', right: 'long', bottom: 'long' })
     user32 = {
       FindWindowExA: lib.func('__stdcall', 'FindWindowExA', 'intptr', [
         'intptr',
@@ -82,6 +84,7 @@ function loadUser32(): User32 | null {
       ]),
       SetParent: lib.func('__stdcall', 'SetParent', 'intptr', ['intptr', 'intptr']),
       GetParent: lib.func('__stdcall', 'GetParent', 'intptr', ['intptr']),
+      ScreenToClient: lib.func('__stdcall', 'ScreenToClient', 'int', ['intptr', koffi.inout(koffi.pointer(POINT))]),
       GetWindowRect: lib.func('__stdcall', 'GetWindowRect', 'int', ['intptr', koffi.out(koffi.pointer(RECT))]),
       EnumWindows: lib.func('__stdcall', 'EnumWindows', 'int', ['void*', 'intptr']),
       GetClassNameA: lib.func('__stdcall', 'GetClassNameA', 'int', ['intptr', 'void*', 'int']),
@@ -147,34 +150,53 @@ const SWP_CHILD_NOACTIVATE = 0x0010
 export function setAttachedWallpaperBounds(
   win: BrowserWindow,
   bounds: { x: number; y: number; width: number; height: number },
-): boolean {
+  nativeBounds?: { x: number; y: number; width: number; height: number },
+): { ok: boolean; expected?: { x: number; y: number; width: number; height: number }; actual?: { x: number; y: number; width: number; height: number } } {
   const u = loadUser32()
-  if (!u) return false
+  if (!u) return { ok: false }
   try {
     const hwnd = hwndFromBuffer(win.getNativeWindowHandle())
     const parent = Number(u.GetParent(hwnd))
-    if (!hwnd || !parent) return false
-    const parentRect = { left: 0, top: 0, right: 0, bottom: 0 }
-    if (!u.GetWindowRect(parent, parentRect)) return false
-    // Electron owns the DIP -> physical pixel conversion for the display the
-    // BrowserWindow currently occupies (including per-monitor scaling).
-    const screenRect = screen.dipToScreenRect(win, {
+    if (!hwnd || !parent) return { ok: false }
+    // electron-as-wallpaper calls SetParent only. Win32 explicitly does not
+    // update WS_POPUP/WS_CHILD for callers, so normalize the style before using
+    // parent-client coordinates.
+    addChildStyle(u, hwnd)
+    const screenRect = nativeBounds ?? screen.dipToScreenRect(null, {
       x: bounds.x,
       y: bounds.y,
       width: bounds.width,
       height: bounds.height,
     })
-    return Boolean(u.SetWindowPos(
+    const parentPoint = { x: screenRect.x, y: screenRect.y }
+    if (!u.ScreenToClient(parent, parentPoint)) return { ok: false, expected: screenRect }
+    const positioned = Boolean(u.SetWindowPos(
       hwnd,
       0,
-      screenRect.x - parentRect.left,
-      screenRect.y - parentRect.top,
+      parentPoint.x,
+      parentPoint.y,
       screenRect.width,
       screenRect.height,
       SWP_CHILD_NOZORDER | SWP_CHILD_NOACTIVATE,
     ))
+    const rawActual = { left: 0, top: 0, right: 0, bottom: 0 }
+    const actual = u.GetWindowRect(hwnd, rawActual)
+      ? {
+          x: rawActual.left,
+          y: rawActual.top,
+          width: rawActual.right - rawActual.left,
+          height: rawActual.bottom - rawActual.top,
+        }
+      : undefined
+    const matches = actual && (
+      Math.abs(actual.x - screenRect.x) <= 2 &&
+      Math.abs(actual.y - screenRect.y) <= 2 &&
+      Math.abs(actual.width - screenRect.width) <= 2 &&
+      Math.abs(actual.height - screenRect.height) <= 2
+    )
+    return { ok: positioned && Boolean(matches), expected: screenRect, actual }
   } catch {
-    return false
+    return { ok: false }
   }
 }
 
@@ -254,6 +276,7 @@ export function isNativeAttachAvailable(): boolean {
 const GWL_STYLE = -16
 const GWL_EXSTYLE = -20
 const WS_CHILD = 0x40000000
+const WS_POPUP = 0x80000000
 const WS_EX_LAYERED = 0x00080000
 const WS_EX_NOREDIRECTIONBITMAP = 0x00200000
 const LWA_ALPHA = 0x02
@@ -272,7 +295,11 @@ function isRaisedDesktop(u: User32, progman: number): boolean {
 /** 给窗口添加 WS_CHILD 样式 */
 function addChildStyle(u: User32, hwnd: number): void {
   const style = u.GetWindowLongPtrA(hwnd, GWL_STYLE)
-  u.SetWindowLongPtrA(hwnd, GWL_STYLE, style | WS_CHILD)
+  // SetParent does not change WS_CHILD/WS_POPUP. Keeping the top-level popup
+  // style makes SetWindowPos interpret secondary-monitor coordinates wrongly.
+  u.SetWindowLongPtrA(hwnd, GWL_STYLE, (style | WS_CHILD) & ~WS_POPUP)
+  // Flush cached non-client style data without moving or activating the window.
+  u.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
 }
 
 /** 给窗口添加 WS_EX_LAYERED 并设置 alpha=255（完全不透明） */
@@ -384,6 +411,7 @@ export async function attachWindowAsWallpaperNative(
     if (result.progmanInnerWorker)
       candidates.push({ hwnd: result.progmanInnerWorker, tag: 'progman-inner' })
 
+    addChildStyle(u, hwnd)
     for (const c of candidates) {
       kernel32?.SetLastError(0)
       const prev = u.SetParent(hwnd, c.hwnd)

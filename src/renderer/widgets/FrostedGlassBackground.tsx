@@ -2,7 +2,7 @@ import { useContext, useLayoutEffect, useRef } from 'react'
 import { WidgetPosCtx } from '../canvas/contexts'
 import {
   BASE_WALLPAPER_FRAME_BLUR_PX,
-  getWallpaperFrame,
+  getWallpaperFrameAt,
   subscribeWallpaperFrame,
 } from '../canvas/wallpaperFrameStore'
 
@@ -24,26 +24,41 @@ export function FrostedGlassBackground({
   const frameImageRef = useRef<HTMLImageElement>(null)
   const appliedFrameRef = useRef<string | null>(null)
   const pos = useContext(WidgetPosCtx)
-  const screenX = window.screenX || 0
-  const screenY = window.screenY || 0
-  const frameWidth = window.innerWidth || window.screen.width
-  const frameHeight = window.innerHeight || window.screen.height
   const extraBlurPx = Math.sqrt(Math.max(0, blurPx ** 2 - BASE_WALLPAPER_FRAME_BLUR_PX ** 2))
+  const positionRef = useRef(pos)
+  positionRef.current = pos
+
+  const applyLatestFrameRef = useRef<() => void>(() => undefined)
+  applyLatestFrameRef.current = () => {
+    const image = frameImageRef.current
+    if (!image) return
+    const currentPos = positionRef.current
+    const widgetX = window.screenX + currentPos.x
+    const widgetY = window.screenY + currentPos.y
+    const selected = getWallpaperFrameAt(widgetX, widgetY)
+    const frame = selected?.data ?? null
+    if (selected) {
+      image.style.left = `${selected.bounds.x - widgetX}px`
+      image.style.top = `${selected.bounds.y - widgetY}px`
+      image.style.width = `${selected.bounds.width}px`
+      image.style.height = `${selected.bounds.height}px`
+    }
+    if (frame === appliedFrameRef.current) return
+    appliedFrameRef.current = frame
+    if (frame) image.src = frame
+    else image.removeAttribute('src')
+  }
 
   useLayoutEffect(() => {
-    const applyLatestFrame = () => {
-      const image = frameImageRef.current
-      if (!image) return
-      const frame = getWallpaperFrame()
-      if (frame === appliedFrameRef.current) return
-      appliedFrameRef.current = frame
-      if (frame) image.src = frame
-      else image.removeAttribute('src')
-    }
+    const applyLatestFrame = () => applyLatestFrameRef.current()
 
     applyLatestFrame()
     return subscribeWallpaperFrame(applyLatestFrame)
   }, [])
+
+  useLayoutEffect(() => {
+    applyLatestFrameRef.current()
+  }, [pos.x, pos.y])
 
   return (
     <div
@@ -60,10 +75,10 @@ export function FrostedGlassBackground({
         ref={frameImageRef}
         style={{
           position: 'absolute',
-          left: -(screenX + pos.x),
-          top: -(screenY + pos.y),
-          width: frameWidth,
-          height: frameHeight,
+          left: -(window.screenX + pos.x),
+          top: -(window.screenY + pos.y),
+          width: window.innerWidth || window.screen.width,
+          height: window.innerHeight || window.screen.height,
           maxWidth: 'none',
           maxHeight: 'none',
           filter: `blur(${extraBlurPx}px) saturate(1.08)`,

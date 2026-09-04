@@ -1,10 +1,10 @@
-import { app, ipcMain, Menu, screen } from 'electron'
+import { app, ipcMain, Menu } from 'electron'
 import { randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
 import { dirname, join } from 'path'
 import { IPC } from '@shared/ipc-channels'
 import { z } from 'zod'
-import type { DesktopIconItem, WidgetInstance } from '@shared/types'
+import type { DesktopIconItem, DisplayBounds, DisplayDescriptor, WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan } from '@shared/desktop-scene-layout'
 import { findSmartWidgetPlacement } from '@shared/widget-placement'
 import { migrateTodoWidgetInstance } from '@shared/todo'
@@ -38,8 +38,20 @@ import {
 import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIconIpc'
 import { assertTrustedIpcSender } from './ipcSecurity'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
-import { getDesktopRenderBounds, getDesktopRenderWorkArea } from '../windows/displayLayout'
+import {
+  getDesktopRenderBounds,
+  getDisplayDescriptors,
+  getWallpaperDisplayMode,
+} from '../windows/displayLayout'
 import { normalizeWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
+import {
+  WIDGET_DISPLAY_COORDINATE_SPACE,
+  getDisplayCanvasBounds,
+  materializeWidgetsForCanvas,
+  migrateLegacyWidgetToDisplay,
+  persistWidgetFromCanvas,
+  resolveWidgetDisplay,
+} from '@shared/widget-display-layout'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
@@ -92,6 +104,7 @@ const widgetInstanceSchema = z.object({
   config: widgetConfigSchema.optional(),
   stackOrder: z.number().finite().optional(),
   displayId: z.number().int().optional(),
+  displayKey: z.string().min(1).max(160).optional(),
 })
 
 function parseWidgetList(value: unknown): WidgetInstance[] {
@@ -111,7 +124,7 @@ function withDefaultWidgetConfig(widget: WidgetInstance): WidgetInstance {
   const positionInvalid = typeof widget.x !== 'number' || !Number.isFinite(widget.x) || typeof widget.y !== 'number' || !Number.isFinite(widget.y)
   const width = widthInvalid ? DOCK_DEFAULT_WIDTH : widget.width
   const height = heightInvalid ? DOCK_DEFAULT_HEIGHT : widget.height
-  const fallbackPlacement = widthInvalid || heightInvalid || positionInvalid ? getDockPlacement(width, height) : null
+  const fallbackPlacement = widthInvalid || heightInvalid || positionInvalid ? getDockPlacement(width, height, widget) : null
   return {
     ...widget,
     x: fallbackPlacement?.x ?? widget.x,
@@ -202,13 +215,23 @@ function mergeWidgetUpdate(currentWidget: WidgetInstance, incomingWidget: Widget
   }
 }
 
-async function readWidgetConfigFile(configPath: string): Promise<WidgetInstance[]> {
-  const txt = await fs.readFile(configPath, 'utf-8')
-  const data = JSON.parse(txt) as { widgets?: unknown }
-  return parseWidgetList(data.widgets)
+interface LoadedWidgetConfig {
+  widgets: WidgetInstance[]
+  coordinateSpace?: string
+  builtinDefault: boolean
 }
 
-async function tryReadWidgetConfigFile(configPath: string): Promise<WidgetInstance[] | null> {
+async function readWidgetConfigFile(configPath: string, builtinDefault = false): Promise<LoadedWidgetConfig> {
+  const txt = await fs.readFile(configPath, 'utf-8')
+  const data = JSON.parse(txt) as { widgets?: unknown; coordinateSpace?: unknown }
+  return {
+    widgets: parseWidgetList(data.widgets),
+    coordinateSpace: typeof data.coordinateSpace === 'string' ? data.coordinateSpace : undefined,
+    builtinDefault,
+  }
+}
+
+async function tryReadWidgetConfigFile(configPath: string): Promise<LoadedWidgetConfig | null> {
   try {
     return await readWidgetConfigFile(configPath)
   } catch {
@@ -226,16 +249,19 @@ function getWallpaperDefaultWidgetConfigPath(wallpaperId: string): string {
   return join(getWallpaperRoot(), wallpaperId, 'widget-config.json')
 }
 
-async function readWallpaperWidgetConfig(wallpaperId: string): Promise<WidgetInstance[]> {
+async function readWallpaperWidgetConfig(wallpaperId: string): Promise<LoadedWidgetConfig> {
   const override = await tryReadWidgetConfigFile(getWallpaperWidgetOverridePath(wallpaperId))
   if (override) return override
-  return readWidgetConfigFile(getWallpaperDefaultWidgetConfigPath(wallpaperId))
+  return readWidgetConfigFile(getWallpaperDefaultWidgetConfigPath(wallpaperId), true)
 }
 
 async function writeWallpaperWidgetOverride(wallpaperId: string, widgets: WidgetInstance[]): Promise<void> {
   const configPath = getWallpaperWidgetOverridePath(wallpaperId)
   await fs.mkdir(dirname(configPath), { recursive: true })
-  await fs.writeFile(configPath, JSON.stringify({ widgets }, null, 2), 'utf-8')
+  await fs.writeFile(configPath, JSON.stringify({
+    coordinateSpace: WIDGET_DISPLAY_COORDINATE_SPACE,
+    widgets,
+  }, null, 2), 'utf-8')
 }
 
 function resolveGlobalIconWidgets(wallpaperWidgets: WidgetInstance[]): WidgetInstance[] {
@@ -249,55 +275,101 @@ function resolveGlobalIconWidgets(wallpaperWidgets: WidgetInstance[]): WidgetIns
 }
 
 export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<WidgetInstance[]> {
-  let wallpaperWidgets: WidgetInstance[] = []
+  let wallpaperConfig: LoadedWidgetConfig = { widgets: [], builtinDefault: true }
   if (wallpaperId) {
     try {
-      wallpaperWidgets = await readWallpaperWidgetConfig(wallpaperId)
+      wallpaperConfig = await readWallpaperWidgetConfig(wallpaperId)
     } catch {
-      wallpaperWidgets = []
+      wallpaperConfig = { widgets: [], builtinDefault: true }
     }
   }
 
-  const merged = withDefaultWidgetConfigs([...getWallpaperScopedWidgets(wallpaperWidgets), ...resolveGlobalIconWidgets(wallpaperWidgets)])
+  const displays = getDisplayDescriptors()
+  const primary = displays.find((display) => display.primary) ?? displays[0]
+  const legacyOrigin = store.get('widgetCoordinateOrigin') ?? primary?.bounds ?? { x: 0, y: 0 }
+  const wallpaperWidgets = wallpaperConfig.widgets.map((widget) => migrateLegacyWidgetToDisplay(
+    widget,
+    legacyOrigin,
+    displays,
+    wallpaperConfig.builtinDefault || wallpaperConfig.coordinateSpace === WIDGET_DISPLAY_COORDINATE_SPACE,
+  ))
+  const globalWidgets = resolveGlobalIconWidgets(wallpaperConfig.widgets).map((widget) => migrateLegacyWidgetToDisplay(
+    widget,
+    legacyOrigin,
+    displays,
+  ))
+  const merged = withDefaultWidgetConfigs([...getWallpaperScopedWidgets(wallpaperWidgets), ...globalWidgets])
   persistWidgets(merged)
+  const render = getDesktopRenderBounds()
+  store.set('widgetCoordinateOrigin', { x: render.x, y: render.y })
   syncToCanvas()
   return merged
 }
 
-/** Keep persisted widget positions stable when the virtual desktop origin changes. */
+/** Migrate legacy canvas coordinates once; display-local positions need no mode translation. */
 export function ensureWidgetCoordinateOrigin(): void {
   const current = getDesktopRenderBounds()
-  const previous = store.get('widgetCoordinateOrigin') ?? screen.getPrimaryDisplay().bounds
-  const dx = previous.x - current.x
-  const dy = previous.y - current.y
-  if (dx !== 0 || dy !== 0) {
-    const widgets = store.get('widgets').map((widget) => ({ ...widget, x: widget.x + dx, y: widget.y + dy }))
-    persistWidgets(widgets)
-  }
+  const displays = getDisplayDescriptors()
+  const primary = displays.find((display) => display.primary) ?? displays[0]
+  const previous = store.get('widgetCoordinateOrigin') ?? primary?.bounds ?? { x: 0, y: 0 }
+  const widgets = store.get('widgets').map((widget) => migrateLegacyWidgetToDisplay(widget, previous, displays))
+  persistWidgets(widgets)
   store.set('widgetCoordinateOrigin', { x: current.x, y: current.y })
+  syncToCanvas()
 }
 
 /** 根据 workArea 和已有组件，自动计算不重叠的放置位置 */
+function getPrimaryDisplay(): DisplayDescriptor | undefined {
+  const displays = getDisplayDescriptors()
+  return displays.find((display) => display.primary) ?? displays[0]
+}
+
+function bindWidgetToPrimary(widget: WidgetInstance): WidgetInstance {
+  const primary = getPrimaryDisplay()
+  if (!primary) return widget
+  return {
+    ...widget,
+    displayId: primary.id,
+    displayKey: primary.key,
+  }
+}
+
+function getDisplayLocalWorkArea(display: DisplayDescriptor): DisplayBounds {
+  return {
+    x: display.workArea.x - display.bounds.x,
+    y: display.workArea.y - display.bounds.y,
+    width: display.workArea.width,
+    height: display.workArea.height,
+  }
+}
+
+function getWidgetsForDisplay(existing: WidgetInstance[], display: DisplayDescriptor): WidgetInstance[] {
+  return existing.filter((widget) => (
+    widget.displayKey === display.key ||
+    (!widget.displayKey && widget.displayId === display.id) ||
+    (!widget.displayKey && widget.displayId === undefined && display.primary)
+  ))
+}
+
 function findPlacement(
   w: number,
   h: number,
   existing: WidgetInstance[]
 ): { x: number; y: number } {
-  const workArea = getDesktopRenderWorkArea()
-  return findSmartWidgetPlacement(w, h, existing, {
-    x: workArea.x,
-    y: workArea.y,
-    width: workArea.width,
-    height: workArea.height,
-  }, {
+  const primary = getPrimaryDisplay()
+  if (!primary) return { x: EDGE_PADDING, y: EDGE_PADDING }
+  return findSmartWidgetPlacement(w, h, getWidgetsForDisplay(existing, primary), getDisplayLocalWorkArea(primary), {
     gap: GRID_GAP,
     edgePadding: EDGE_PADDING,
     grid: GRID_GAP,
   })
 }
 
-function getDockPlacement(width: number, height: number): { x: number; y: number } {
-  const area = getDesktopRenderBounds()
+function getDockPlacement(width: number, height: number, widget?: WidgetInstance): { x: number; y: number } {
+  const displays = getDisplayDescriptors()
+  const display = widget ? resolveWidgetDisplay(widget, displays) : undefined
+  const target = display ?? displays.find((candidate) => candidate.primary) ?? displays[0]
+  const area = target?.bounds ?? { x: 0, y: 0, width: 1, height: 1 }
   const maxX = area.width - EDGE_PADDING - width
   const maxY = area.height - BOTTOM_EDGE_PADDING - height
   return {
@@ -306,23 +378,30 @@ function getDockPlacement(width: number, height: number): { x: number; y: number
   }
 }
 
-function clampStickyNotePosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
-  const area = getDesktopRenderBounds()
+function clampStickyNotePosition(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  area: DisplayBounds = getPrimaryDisplay()?.bounds ?? { x: 0, y: 0, width: 1, height: 1 },
+): { x: number; y: number } {
   return {
-    x: Math.round(Math.max(-width + STICKY_NOTE_GRAB_EDGE, Math.min(x, area.width - STICKY_NOTE_GRAB_EDGE))),
-    y: Math.round(Math.max(-height + STICKY_NOTE_GRAB_EDGE, Math.min(y, area.height - STICKY_NOTE_GRAB_EDGE))),
+    x: Math.round(Math.max(area.x - width + STICKY_NOTE_GRAB_EDGE, Math.min(x, area.x + area.width - STICKY_NOTE_GRAB_EDGE))),
+    y: Math.round(Math.max(area.y - height + STICKY_NOTE_GRAB_EDGE, Math.min(y, area.y + area.height - STICKY_NOTE_GRAB_EDGE))),
   }
 }
 
 /** 新便利贴有意错落叠放，避免把“可重叠”又退化成普通组件自动排版。 */
 function findStickyNotePlacement(width: number, height: number, existing: WidgetInstance[]): { x: number; y: number } {
-  const area = getDesktopRenderWorkArea()
-  const count = existing.filter((widget) => widget.type === 'todo-board' && widget.enabled).length
+  const primary = getPrimaryDisplay()
+  if (!primary) return { x: EDGE_PADDING, y: EDGE_PADDING }
+  const area = getDisplayLocalWorkArea(primary)
+  const count = getWidgetsForDisplay(existing, primary).filter((widget) => widget.type === 'todo-board' && widget.enabled).length
   const column = count % 6
   const row = Math.floor(count / 6) % 3
   const x = Math.round(area.x + area.width * 0.66 - width / 2 + column * 28 - row * 36)
   const y = Math.round(area.y + Math.min(150, area.height * 0.17) + column * 22 + row * 34)
-  return clampStickyNotePosition(x, y, width, height)
+  return clampStickyNotePosition(x, y, width, height, { x: 0, y: 0, width: primary.bounds.width, height: primary.bounds.height })
 }
 
 /** 将坐标对齐到网格 */
@@ -344,19 +423,18 @@ function resolvePosition(
   w: number,
   h: number,
   allWidgets: WidgetInstance[],
-  snapPosition = true
+  snapPosition = true,
+  area: DisplayBounds = { x: 0, y: 0, width: getDesktopRenderBounds().width, height: getDesktopRenderBounds().height },
 ): { x: number; y: number } {
-  const area = getDesktopRenderBounds()
-
   // 1. 网格吸附
   let sx = snapPosition ? Math.round(x / GRID_GAP) * GRID_GAP : x
   let sy = snapPosition ? Math.round(y / GRID_GAP) * GRID_GAP : y
 
   // 2. 屏幕边界约束
-  const minX = EDGE_PADDING
-  const minY = EDGE_PADDING
-  const maxX = area.width - EDGE_PADDING - w
-  const maxY = area.height - BOTTOM_EDGE_PADDING - h
+  const minX = area.x + EDGE_PADDING
+  const minY = area.y + EDGE_PADDING
+  const maxX = area.x + area.width - EDGE_PADDING - w
+  const maxY = area.y + area.height - BOTTOM_EDGE_PADDING - h
   sx = Math.max(minX, Math.min(sx, Math.max(minX, maxX)))
   sy = Math.max(minY, Math.min(sy, Math.max(minY, maxY)))
 
@@ -393,7 +471,47 @@ function resolvePosition(
 function syncToCanvas(): void {
   const list = store.get('widgets')
   const win = getCanvasWindow()
-  if (win) win.webContents.send(IPC.WIDGET_SYNC, list)
+  if (!win || win.webContents.isDestroyed()) return
+  const displays = getDisplayDescriptors()
+  const render = getDesktopRenderBounds()
+  const materialized = materializeWidgetsForCanvas(list, displays, render, getWallpaperDisplayMode())
+  win.webContents.send(IPC.WIDGET_SYNC, materialized)
+}
+
+function getMaterializedWidgets(widgets: readonly WidgetInstance[]): WidgetInstance[] {
+  const displays = getDisplayDescriptors()
+  return materializeWidgetsForCanvas(
+    widgets,
+    displays,
+    getDesktopRenderBounds(),
+    getWallpaperDisplayMode(),
+  )
+}
+
+function normalizeCanvasWidgetUpdate(incoming: WidgetInstance, stored: WidgetInstance[]): WidgetInstance {
+  const displays = getDisplayDescriptors()
+  const render = getDesktopRenderBounds()
+  const mode = getWallpaperDisplayMode()
+  const preliminary = persistWidgetFromCanvas(incoming, displays, render, mode)
+  const targetDisplay = resolveWidgetDisplay(preliminary, displays)
+    ?? displays.find((display) => display.primary)
+    ?? displays[0]
+  if (!targetDisplay) return incoming
+  const displayArea = getDisplayCanvasBounds(targetDisplay, render)
+  const canvasWidgets = materializeWidgetsForCanvas(stored, displays, render, mode)
+  const resolved = isFreeformStickyNote(incoming.type)
+    ? clampStickyNotePosition(incoming.x, incoming.y, incoming.width, incoming.height, displayArea)
+    : resolvePosition(
+        incoming.id,
+        incoming.x,
+        incoming.y,
+        incoming.width,
+        incoming.height,
+        canvasWidgets,
+        !canAddMultipleWidgetType(incoming.type),
+        displayArea,
+      )
+  return persistWidgetFromCanvas({ ...incoming, ...resolved }, displays, render, mode)
 }
 
 export function showDesktopScenePreviewForTool(plan: DesktopSceneLayoutPlan): void {
@@ -458,7 +576,7 @@ function applyLayoutPatch(widget: WidgetInstance, layout: LayoutPatch): WidgetIn
 
 function createWidgetFromScenePatch(patch: Extract<WidgetPatch, { op: 'create' }>): WidgetInstance {
   const size = DEFAULT_WIDGET_SIZE_BY_TYPE[patch.type]
-  return withDefaultWidgetConfig({
+  return bindWidgetToPrimary(withDefaultWidgetConfig({
     id: `${patch.type}-${Date.now()}-${randomUUID().slice(0, 8)}`,
     type: patch.type,
     x: typeof patch.layout.x === 'number' ? patch.layout.x : 0,
@@ -467,7 +585,7 @@ function createWidgetFromScenePatch(patch: Extract<WidgetPatch, { op: 'create' }
     height: typeof patch.layout.height === 'number' ? patch.layout.height : size.height,
     enabled: true,
     config: patch.config ?? {},
-  })
+  }))
 }
 
 function summarizeScenePatch(patch: WidgetPatch): string {
@@ -669,7 +787,7 @@ export function registerWidgetIpc(): void {
     assertTrustedIpcSender(event, ['main', 'canvas'])
     const list = withDefaultWidgetConfigs(parseWidgetList(store.get('widgets')))
     persistWidgets(list)
-    return list
+    return event.sender.id === getCanvasWindow()?.webContents.id ? getMaterializedWidgets(list) : list
   })
 
   ipcMain.handle(IPC.WIDGET_ADD, (_e, w: WidgetInstance) => {
@@ -683,7 +801,7 @@ export function registerWidgetIpc(): void {
     if (!canAddMultipleWidgetType(w.type) && list.some((existing) => existing.type === w.type)) {
       return list
     }
-    const widget = withDefaultWidgetConfig(w)
+    const widget = bindWidgetToPrimary(withDefaultWidgetConfig(w))
     const placement = widget.type === 'desktop-icons-dock'
       ? getDockPlacement(widget.width, widget.height)
       : isFreeformStickyNote(widget.type)
@@ -696,7 +814,7 @@ export function registerWidgetIpc(): void {
     syncToCanvas()
     autoSaveToWallpaper()
     if (!isCanvasEditMode()) setCanvasMousePassthrough(true)
-    return list
+    return _e.sender.id === getCanvasWindow()?.webContents.id ? getMaterializedWidgets(list) : list
   })
 
   ipcMain.handle(IPC.WIDGET_REMOVE, async (_e, id: string) => {
@@ -710,11 +828,11 @@ export function registerWidgetIpc(): void {
     assertTrustedIpcSender(_e, ['main', 'canvas'])
     w = widgetInstanceSchema.parse(w)
     const list = store.get('widgets')
-    const resolved = isFreeformStickyNote(w.type)
-      ? clampStickyNotePosition(w.x, w.y, w.width, w.height)
-      : resolvePosition(w.id, w.x, w.y, w.width, w.height, list, !canAddMultipleWidgetType(w.type))
-    w.x = resolved.x
-    w.y = resolved.y
+    if (_e.sender.id === getCanvasWindow()?.webContents.id) {
+      w = normalizeCanvasWidgetUpdate(w, list)
+    } else if (!w.displayKey) {
+      w = bindWidgetToPrimary(w)
+    }
     const updated = isFreeformStickyNote(w.type)
       ? [...list.filter((item) => item.id !== w.id), mergeWidgetUpdate(list.find((item) => item.id === w.id) ?? w, w)]
       : list.map((it) => (it.id === w.id ? mergeWidgetUpdate(it, w) : it))
@@ -874,7 +992,7 @@ export function addWidgetForTool(widget: WidgetInstance): { ok: boolean; added: 
     return { ok: true, added: false, widget: existing, list, reason: 'already-exists' }
   }
 
-  const normalized = withDefaultWidgetConfig(widget)
+  const normalized = bindWidgetToPrimary(withDefaultWidgetConfig(widget))
   const placement = normalized.type === 'desktop-icons-dock'
     ? getDockPlacement(normalized.width, normalized.height)
     : isFreeformStickyNote(normalized.type)
@@ -972,10 +1090,6 @@ export async function restoreWidgets(): Promise<void> {
   if (changed) {
     persistWidgets(widgets)
     autoSaveToWallpaper()
-    // 通知画布更新
-    const canvas = getCanvasWindow()
-    if (canvas && !canvas.isDestroyed()) {
-      canvas.webContents.send(IPC.WIDGET_SYNC, widgets)
-    }
+    syncToCanvas()
   }
 }

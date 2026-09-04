@@ -6,6 +6,7 @@ import type {
   WallpaperItem,
 } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
+import { getDisplayAssignment } from '@shared/wallpaper-display-layout'
 import { WallpaperSidebar } from '../components/WallpaperSidebar'
 import { ImageOff, Monitor, Plus } from 'lucide-react'
 import type { InitialFile } from '../components/AddWallpaperDialog'
@@ -66,8 +67,9 @@ export function LibraryPage({
         if (nextDisplaySettings.mode === 'per-display' && displayId !== undefined && displayId !== wallpaperTarget) {
           onDisplaySelect?.(displayId)
         }
-        const effectiveId = nextDisplaySettings.mode === 'per-display' && displayId !== undefined
-          ? nextDisplaySettings.assignments[String(displayId)] ?? current?.current?.id
+        const selectedDisplay = nextDisplaySettings.displays.find((display) => display.id === displayId)
+        const effectiveId = nextDisplaySettings.mode === 'per-display' && selectedDisplay
+          ? getDisplayAssignment(nextDisplaySettings.assignments, selectedDisplay) ?? current?.current?.id
           : current?.current?.id
         if (effectiveId) {
           setAppliedId(effectiveId)
@@ -122,8 +124,9 @@ export function LibraryPage({
       setLoadedDisplaySettings(nextSettings)
       onDisplaySettingsChange?.(nextSettings)
       const current = await window.lingyue.wallpaper.getCurrent()
-      const effectiveId = mode === 'per-display' && activeDisplayId !== undefined
-        ? nextSettings.assignments[String(activeDisplayId)] ?? current?.current?.id
+      const selectedDisplay = nextSettings.displays.find((display) => display.id === activeDisplayId)
+      const effectiveId = mode === 'per-display' && selectedDisplay
+        ? getDisplayAssignment(nextSettings.assignments, selectedDisplay) ?? current?.current?.id
         : current?.current?.id
       setAppliedId(effectiveId)
       if (effectiveId) setSelectedId(effectiveId)

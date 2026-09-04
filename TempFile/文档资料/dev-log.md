@@ -1,5 +1,30 @@
 # 灵月桌面 开发日志
 
+## [2026-09-04] 完成多显示器原生坐标、稳定归属与逐屏渲染链路
+
+**变更摘要**: 重新审计从 Electron 显示器枚举、持久化、BrowserWindow、WorkerW 子窗口定位到 Canvas 组件坐标的完整链路，不再用 UI 状态修补原生坐标问题。默认安全落到主显示器，并补齐复制、按屏、延展和组件跨屏持久化。
+
+**涉及模块**:
+- `src/main/windows/nativeDisplayIdentity.ts` / `src/main/windows/displayLayout.ts` / `src/main/windows/attachWallpaperNative.ts`: 用 Win32 设备名和物理矩形匹配 Electron 显示器；修复 `GetMonitorInfoW.cbSize` 被 Koffi 纯输出参数清零的问题；`SetParent` 后显式切换 `WS_CHILD`、移除 `WS_POPUP`，经 `ScreenToClient` 定位并用 `GetWindowRect` 校验。
+- `src/main/windows/wallpaperWindow.ts` / `src/shared/wallpaper-display-layout.ts` / `src/main/ipc/wallpaperIpc.ts`: 所有模式均使用显示器本地窗口；延展改为同一虚拟构图的逐屏负偏移裁切；贴合失败自动退避重试，壁纸分配迁移到稳定显示器键。
+- `src/shared/widget-display-layout.ts` / `src/main/ipc/widgetIpc.ts` / `src/main/windows/canvasWindow.ts` / `src/main/ipc/desktopIconIpc.ts`: 组件改为稳定显示器键 + 屏幕本地坐标持久化，单 Canvas 只在同步和拖拽边界做双向映射，旧虚拟桌面坐标按覆盖面积一次性迁移。
+- `src/renderer/canvas/wallpaperFrameStore.ts` / `src/renderer/widgets/FrostedGlassBackground.tsx` / `src/renderer/wallpaper/Wallpaper.tsx`: 毛玻璃帧改为逐屏传输和选择，renderer 与主进程 fallback 都保留显示器边界，延展抽帧使用真实本地裁切区域。
+- `src/main/runtime/diagnosticLog.ts` / `doc/双显示器支持方案.md`: 增加 `%APPDATA%\lingyue-desk\logs\display-diagnostics.jsonl`，记录拓扑、逻辑/物理边界、贴合结果和失败重试，并同步真实架构及验收边界。
+
+**遇到的问题**:
+- 旧实现把“模式能保存、窗口数会变化”当成多屏完成，但 `electron-as-wallpaper` 只执行 `SetParent`，没有负责每块屏幕的坐标；父子窗口坐标、DIP/物理像素和负坐标仍混用，因此 UI 改多少轮都不能消除半张壁纸跨屏。
+- 初版稳定键代码虽然存在，`GetMonitorInfoW` 却声明成 Koffi `out` 参数，调用前必需的 `cbSize` 被清零，真实 Windows 调用始终失败并静默退回 Electron id；改为 `inout` 后已直接读到 `\\.\DISPLAY1` 和 `2560x1440` 物理边界。
+- 旧组件一直保存联合 Canvas 坐标，切换主屏/联合画布必然改变原点；现永久保存显示器本地坐标，只有跨屏拖拽才改变显示器归属。
+
+**验证结果**:
+- `npm.cmd test` 通过全部 62 项测试；`npm.cmd run build:check` 成功。
+- 使用 Node + Koffi 直接调用 Win32 枚举，确认本机 `GetMonitorInfoW` 返回稳定设备名、主屏标志及物理矩形。
+- 当前开发机只有一台 `2560x1440` 显示器，不能把自动测试冒充公司混合 DPI 双屏验收；后续实机异常可直接依据 `display-diagnostics.jsonl` 中的 expected/actual 边界定位。
+
+**Git Commit**: 本次任务提交 — `fix(display): complete stable multi-monitor layout`
+
+---
+
 ## [2026-08-30 21:23] 发布 1.1.10 多显示器壁纸布局恢复版
 
 **变更摘要**: 将多显示器模式链路修复升版为 1.1.10，生成自动更新资产、完成本机覆盖安装并发布 GitHub Release。

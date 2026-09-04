@@ -2,6 +2,7 @@ import { screen } from 'electron'
 import type { DisplayBounds, DisplayDescriptor, WallpaperDisplayMode } from '@shared/types'
 import { normalizeWallpaperDisplayMode, unionDisplayBounds } from '@shared/wallpaper-display-layout'
 import { store } from '../store'
+import { getNativeDisplayIdentities } from './nativeDisplayIdentity'
 
 /**
  * The first multi-display implementation persisted coordinates in a different
@@ -9,28 +10,29 @@ import { store } from '../store'
  * display.  The user can still opt into any other layout from Display Settings;
  * explicit choices are marked as configured and survive future restarts.
  */
-export const WALLPAPER_DISPLAY_SCHEMA_VERSION = 2
+export const WALLPAPER_DISPLAY_SCHEMA_VERSION = 3
 
 export function normalizePersistedWallpaperDisplay(): void {
   const persisted = store.get('wallpaperDisplay')
   if (persisted?.schemaVersion === WALLPAPER_DISPLAY_SCHEMA_VERSION) return
 
+  const displays = getDisplayDescriptors()
+  const assignments: Record<string, string> = {}
+  for (const [key, wallpaperId] of Object.entries(persisted?.assignments ?? {})) {
+    const electronKey = /^electron:(-?\d+)$/.exec(key)
+    const legacyId = electronKey ? Number(electronKey[1]) : Number(key)
+    const display = Number.isInteger(legacyId)
+      ? displays.find((candidate) => candidate.id === legacyId)
+      : displays.find((candidate) => candidate.key.toLowerCase() === key.toLowerCase())
+    if (display) assignments[display.key] = wallpaperId
+    else if (key.toLowerCase().startsWith('win32:')) assignments[key.toLowerCase()] = wallpaperId
+  }
   store.set('wallpaperDisplay', {
     mode: 'primary',
-    assignments: {},
+    assignments,
     schemaVersion: WALLPAPER_DISPLAY_SCHEMA_VERSION,
     userConfigured: false,
   })
-  try {
-    const primary = screen.getPrimaryDisplay().bounds
-    // The migration intentionally treats existing widget positions as
-    // primary-local. Do not apply a stale virtual-desktop origin delta during
-    // the same startup, otherwise every component moves by the old secondary
-    // monitor offset before the user gets a chance to inspect the safe layout.
-    store.set('widgetCoordinateOrigin', { x: primary.x, y: primary.y })
-  } catch {
-    // screen can briefly be unavailable during an Explorer restart.
-  }
   console.warn('[display] 已将旧版显示器布局安全恢复为主显示器模式')
 }
 
@@ -38,21 +40,56 @@ function rectFromElectron(rect: Electron.Rectangle): DisplayBounds {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
 }
 
+function overlapArea(left: DisplayBounds, right: DisplayBounds): number {
+  const width = Math.max(0, Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x))
+  const height = Math.max(0, Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y))
+  return width * height
+}
+
 /** Stable display metadata used by settings and by the virtual desktop windows. */
 export function getDisplayDescriptors(): DisplayDescriptor[] {
   try {
     const primaryId = screen.getPrimaryDisplay().id
+    const nativeDisplays = getNativeDisplayIdentities()
+    const unmatchedNativeDisplays = [...nativeDisplays]
     return screen.getAllDisplays()
       .sort((a, b) => (a.id === primaryId ? -1 : b.id === primaryId ? 1 : a.bounds.x - b.bounds.x))
-      .map((display, index) => ({
-        id: display.id,
-        label: `显示器 ${index + 1}`,
-        name: display.label?.trim() || undefined,
-        primary: display.id === primaryId,
-        bounds: rectFromElectron(display.bounds),
-        workArea: rectFromElectron(display.workArea),
-        scaleFactor: display.scaleFactor,
-      }))
+      .map((display, index) => {
+        const bounds = rectFromElectron(display.bounds)
+        let nativeBounds: DisplayBounds
+        try {
+          nativeBounds = rectFromElectron(screen.dipToScreenRect(null, display.bounds))
+        } catch {
+          nativeBounds = {
+            x: Math.round(bounds.x * display.scaleFactor),
+            y: Math.round(bounds.y * display.scaleFactor),
+            width: Math.round(bounds.width * display.scaleFactor),
+            height: Math.round(bounds.height * display.scaleFactor),
+          }
+        }
+        const native = unmatchedNativeDisplays
+          .map((candidate, candidateIndex) => ({
+            candidate,
+            candidateIndex,
+            score: overlapArea(nativeBounds, candidate.bounds),
+          }))
+          .sort((left, right) => right.score - left.score)[0]
+        const matchedNative = native?.score > 0 ? native.candidate : undefined
+        if (matchedNative && native) unmatchedNativeDisplays.splice(native.candidateIndex, 1)
+        const deviceName = matchedNative?.deviceName || undefined
+        return {
+          id: display.id,
+          key: deviceName ? `win32:${deviceName.toLowerCase()}` : `electron:${display.id}`,
+          label: `显示器 ${index + 1}`,
+          name: display.label?.trim() || undefined,
+          deviceName,
+          primary: display.id === primaryId,
+          bounds,
+          nativeBounds: matchedNative?.bounds ?? nativeBounds,
+          workArea: rectFromElectron(display.workArea),
+          scaleFactor: display.scaleFactor,
+        }
+      })
   } catch {
     // The screen module can briefly be unavailable during startup or display
     // topology changes. Callers can safely render an empty selector meanwhile.

@@ -11,8 +11,10 @@ export interface WallpaperWindowTarget {
   key: string
   kind: 'display' | 'span'
   displayId?: number
+  displayKey?: string
   primary: boolean
   bounds: DisplayBounds
+  nativeBounds?: DisplayBounds
 }
 
 export type WallpaperObjectFit = 'cover' | 'contain' | 'none' | 'fill' | 'scale-down'
@@ -21,6 +23,19 @@ export function normalizeWallpaperDisplayMode(mode: unknown): WallpaperDisplayMo
   return mode === 'duplicate' || mode === 'per-display' || mode === 'span' || mode === 'primary'
     ? mode
     : 'primary'
+}
+
+export function getDisplayStorageKey(display: Pick<DisplayDescriptor, 'id' | 'key'>): string {
+  return display.key || `electron:${display.id}`
+}
+
+export function getDisplayAssignment(
+  assignments: Readonly<Record<string, string>>,
+  display: Pick<DisplayDescriptor, 'id' | 'key'>,
+): string | undefined {
+  return assignments[getDisplayStorageKey(display)]
+    ?? assignments[`electron:${display.id}`]
+    ?? assignments[String(display.id)]
 }
 
 /** Span always fills the virtual desktop; saved per-wallpaper scaling applies to other modes. */
@@ -58,16 +73,16 @@ export function planWallpaperApplication(params: {
     // Legacy callers may still pass "all".  Treat it as assigning the same
     // wallpaper to every monitor instead of switching to a separate layout
     // mode that is no longer exposed by the UI.
-    for (const display of displays) assignments[String(display.id)] = itemId
+    for (const display of displays) assignments[getDisplayStorageKey(display)] = itemId
     return { mode: 'per-display', assignments, currentId: itemId }
   }
   if (typeof target === 'number') {
     const selectedDisplay = displays.find((display) => display.id === target)
     if (!selectedDisplay) throw new Error('display-not-found')
     if (params.currentId && params.mode !== 'per-display') {
-      for (const display of displays) assignments[String(display.id)] = params.currentId
+      for (const display of displays) assignments[getDisplayStorageKey(display)] = params.currentId
     }
-    assignments[String(target)] = itemId
+    assignments[getDisplayStorageKey(selectedDisplay)] = itemId
     return {
       mode: 'per-display',
       assignments,
@@ -76,8 +91,8 @@ export function planWallpaperApplication(params: {
   }
 
   if (params.mode === 'per-display') {
-    const primaryId = displays.find((display) => display.primary)?.id
-    if (primaryId !== undefined) assignments[String(primaryId)] = itemId
+    const primary = displays.find((display) => display.primary)
+    if (primary) assignments[getDisplayStorageKey(primary)] = itemId
   }
   // Applying to the current layout must not silently discard duplicate/span.
   // Only an explicit monitor target changes the layout to per-display.
@@ -93,24 +108,22 @@ export function unionDisplayBounds(displays: readonly DisplayDescriptor[]): Disp
   return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
 }
 
-/** Non-span modes use one native window per monitor so mixed DPI never distorts monitor boundaries. */
+/** Every mode uses monitor-local native windows; span is cropped from one virtual composition. */
 export function getWallpaperWindowTargets(
   mode: WallpaperDisplayMode,
   displays: readonly DisplayDescriptor[],
 ): WallpaperWindowTarget[] {
   if (displays.length === 0) return []
-  if (mode === 'span') {
-    return [{ key: 'span', kind: 'span', primary: true, bounds: unionDisplayBounds(displays) }]
-  }
-
   const primary = displays.find((display) => display.primary) ?? displays[0]
   const visible = mode === 'primary' ? [primary] : displays
   return visible.map((display) => ({
-    key: `display:${display.id}`,
+    key: `display:${getDisplayStorageKey(display)}`,
     kind: 'display',
     displayId: display.id,
+    displayKey: getDisplayStorageKey(display),
     primary: display.primary,
     bounds: { ...display.bounds },
+    nativeBounds: display.nativeBounds ? { ...display.nativeBounds } : undefined,
   }))
 }
 
@@ -129,6 +142,7 @@ export function buildWallpaperLayoutForTarget(params: {
       virtualBounds: { ...target.bounds },
       displays: [{
         displayId: -1,
+        displayKey: 'span',
         bounds: { ...target.bounds },
         localBounds: { x: 0, y: 0, width: target.bounds.width, height: target.bounds.height },
         item: current,
@@ -136,18 +150,29 @@ export function buildWallpaperLayoutForTarget(params: {
     }
   }
 
-  const display = displays.find((candidate) => candidate.id === target.displayId)
+  const display = displays.find((candidate) => (
+    candidate.key === target.displayKey || candidate.id === target.displayId
+  ))
   const bounds = display?.bounds ?? target.bounds
   const byId = new Map(catalog.map((item) => [item.id, item]))
-  const assignedId = target.displayId === undefined ? undefined : assignments[String(target.displayId)]
+  const assignedId = display ? getDisplayAssignment(assignments, display) : undefined
   const item = mode === 'per-display' && assignedId ? (byId.get(assignedId) ?? current) : current
+  const virtualBounds = mode === 'span' ? unionDisplayBounds(displays) : bounds
   return {
     mode,
-    virtualBounds: { ...bounds },
+    virtualBounds: { ...virtualBounds },
     displays: [{
       displayId: target.displayId ?? -1,
+      displayKey: target.displayKey ?? `electron:${target.displayId ?? -1}`,
       bounds: { ...bounds },
-      localBounds: { x: 0, y: 0, width: bounds.width, height: bounds.height },
+      localBounds: mode === 'span'
+        ? {
+            x: virtualBounds.x - bounds.x,
+            y: virtualBounds.y - bounds.y,
+            width: virtualBounds.width,
+            height: virtualBounds.height,
+          }
+        : { x: 0, y: 0, width: bounds.width, height: bounds.height },
       item,
     }],
   }
