@@ -5,6 +5,24 @@
 
 历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
 
+## [2026-09-05 22:25] 记录提交与打包的远端交付约定
+
+**变更摘要**: 根据用户明确约定统一“提交/打包”的交付范围，避免本机完成却让其他电脑无法取得版本；本次为未来规则维护，不补发旧安装包。
+
+**涉及模块**:
+- AGENTS.md / dev-progress：替代旧的单独推送/发布确认规则，保留本次仅本地限制、分支边界和无关工作保护；增加完整更新资产与远端验证流程。
+- dev-lessons.md / project-status.md：记录跨电脑更新缺失的原因及约定入口，不把规则修改写成已发布事实。
+- tests/agent-docs.test.mjs：新增交付约定、显式限制与旧冲突文案回归检查；一条较早事件原文移入 2026-08 归档，主页保留 12 条。
+
+**验证结果**:
+- npm.cmd test：类型、只读 lint 和全部 105 项测试通过；归档前后旧条目标题与正文逐项一致。
+- 未改业务源码或用户数据，未重打包、安装、推送或发布；1.1.12 远端更新资产仍待实际发布。
+
+**经验关联**: L11 验证与交付分层。
+**提交意图**: docs(agent): remember commit and package delivery expectations
+
+---
+
 ## [2026-09-05 15:31] 精简显示设置并重新打包更新本机 1.1.12
 
 **变更摘要**: 将本轮安全稳定修复升版为 1.1.12；根据安装后反馈删除三行横幅、统一菜单样式，重新打包并覆盖本机；不扩展远端发布。
@@ -215,22 +233,5 @@
 **Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.7`
 **Git Tag**: `v1.1.7`（已推送）
 **GitHub Release**: `https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.7`（安装包、blockmap、`latest.yml` 大小与 SHA-256 均已校验）
-
----
-
-## [2026-08-29 12:58] 修复开机长时间锁屏后便利贴输入失效
-
-**变更摘要**: 根据本机安装态日志定位 Canvas 在开机后长时间停留锁屏界面时丢失 `pointerdown` 的根因，改为桌面返回后无损重建输入窗口，并增加真实点击丢失后的自动恢复。
-
-**涉及模块**:
-- `src/main/windows/canvasWindow.ts`: 识别启动期长时间遮挡并重建 Canvas；监测原生按下与 renderer 回执，丢失时自动重建输入窗口并记录诊断事件。
-- `src/shared/canvas-hit-test.ts`: 仅在原生命中仍落到桌面 Shell 时执行 z-order 重组合，移除便利贴边缘的扩大误命中区域。
-- `tests/shared-contracts.test.mjs` / `tests/release-contracts.test.mjs`: 覆盖启动锁屏重建、桌面表面修复边界和输入恢复契约。
-
-**遇到的问题**:
-- 本机实际安装仍为 1.1.5；开机后锁屏约 26 分钟的会话中记录到 289 次原生鼠标变化和 24 次 `pointerup`，但 `pointerdown` 为 0，证明故障不在便利贴业务逻辑，而是透明 Canvas 在锁屏遮挡期间初始化后输入表面失效 → 长遮挡返回直接重建 BrowserWindow，并以真实按键回执提供运行时兜底。
-- 原自愈会在 `WindowFromPoint` 已命中 Canvas、鼠标仅位于便利贴 2px 或 Dock 28px 扩大边缘时反复执行 always-on-top 重组合 → 只允许桌面 Shell 原生命中触发重组合，避免全屏透明窗口无效抬升造成卡顿。
-
-**Git Commit**: 已提交 — `fix(canvas): rebuild stale input surface after startup lock`
 
 ---

@@ -141,3 +141,22 @@ test('reusable lessons have unique stable identifiers', async () => {
   assert.ok(ids.length > 0)
   assert.equal(new Set(ids).size, ids.length)
 })
+
+test('delivery requests include remote handoff while explicit local limits still win', async () => {
+  const rules = await readFile(join(root, 'AGENTS.md'), 'utf8')
+  const progress = await readFile(join(root, '.github/skills/dev-progress/SKILL.md'), 'utf8')
+  assert.match(rules, /用户要求“提交”[^\n]*commit \+ git push/)
+  assert.match(rules, /用户要求“打包”[^\n]*GitHub Release[^\n]*完整更新资产发布/)
+  assert.match(rules, /“仅本地”“不要推送”“不要发布”“不要提交”[^\n]*优先/)
+  assert.match(rules, /要求记住以后的规则[^\n]*不立即触发/)
+  assert.match(rules, /不能擅自合并到 main、force push/)
+  assert.match(rules, /\.blockmap[^\n]*latest\.yml/)
+  assert.match(rules, /已发布同一版本不得静默覆盖/)
+  assert.match(progress, /git ls-remote/)
+  assert.match(progress, /更新源能发现它/)
+  for (const text of [rules, progress]) {
+    assert.doesNotMatch(text, /git push[^\n]*必须由用户明确要求或单独确认/)
+    assert.doesNotMatch(text, /不包含 push \/ 上传 \/ 发布/)
+    assert.doesNotMatch(text, /不隐含 push 或发布授权/)
+  }
+})
