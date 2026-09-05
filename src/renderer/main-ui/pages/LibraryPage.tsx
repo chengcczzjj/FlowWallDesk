@@ -1,27 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   WallpaperApplyTarget,
-  WallpaperDisplayMode,
   WallpaperDisplaySettings,
   WallpaperItem,
 } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
 import { getDisplayAssignment } from '@shared/wallpaper-display-layout'
 import { WallpaperSidebar } from '../components/WallpaperSidebar'
-import { ImageOff, Monitor, Plus } from 'lucide-react'
+import { ImageOff, Plus } from 'lucide-react'
 import type { InitialFile } from '../components/AddWallpaperDialog'
 
 const TYPE_LABEL: Record<WallpaperItem['type'], string> = {
   video: '视频',
   image: '图片',
   web: '网页',
-}
-
-const DISPLAY_MODE_COPY: Record<WallpaperDisplayMode, { label: string; description: string }> = {
-  primary: { label: '仅主显示器', description: '壁纸只铺满 Windows 主显示器。' },
-  duplicate: { label: '复制到每台显示器', description: '同一张壁纸会在每台显示器上独立铺满。' },
-  'per-display': { label: '每台显示器单独设置', description: '当前选择只会替换指定显示器的壁纸。' },
-  span: { label: '跨屏延展', description: '一张壁纸会铺满整个 Windows 虚拟桌面。' },
 }
 
 export function LibraryPage({
@@ -91,9 +83,7 @@ export function LibraryPage({
   const activeDisplayId = typeof wallpaperTarget === 'number' && activeSettings?.displays.some((display) => display.id === wallpaperTarget)
     ? wallpaperTarget
     : activeSettings?.displays.find((display) => display.primary)?.id ?? activeSettings?.displays[0]?.id
-  const activeDisplay = activeSettings?.displays.find((display) => display.id === activeDisplayId)
   const activeMode = activeSettings?.mode ?? 'primary'
-  const activeModeCopy = DISPLAY_MODE_COPY[activeMode]
 
   const filtered = useMemo(() => {
     if (!search.trim()) return list
@@ -118,23 +108,6 @@ export function LibraryPage({
       onDisplaySettingsChange?.(nextSettings)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '应用壁纸失败')
-    }
-  }
-
-  const updateDisplayMode = async (mode: WallpaperDisplayMode) => {
-    try {
-      const nextSettings = await window.lingyue.wallpaper.setDisplayMode(mode)
-      setLoadedDisplaySettings(nextSettings)
-      onDisplaySettingsChange?.(nextSettings)
-      const current = await window.lingyue.wallpaper.getCurrent()
-      const selectedDisplay = nextSettings.displays.find((display) => display.id === activeDisplayId)
-      const effectiveId = mode === 'per-display' && selectedDisplay
-        ? getDisplayAssignment(nextSettings.assignments, selectedDisplay) ?? current?.current?.id
-        : current?.current?.id
-      setAppliedId(effectiveId)
-      if (effectiveId) setSelectedId(effectiveId)
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : '显示器布局应用失败')
     }
   }
 
@@ -204,49 +177,6 @@ export function LibraryPage({
       </div>
 
       <div className="library-content" style={{ marginRight: selected ? 320 : 0 }}>
-        <div className="library-toolbar">
-          <div className="library-toolbar__copy">
-            <span className="library-toolbar__eyebrow">WALLPAPER DISPLAY</span>
-            <strong>{activeMode === 'per-display' && activeDisplay
-              ? `${activeModeCopy.label} · ${activeDisplay.label}${activeDisplay.primary ? ' · 主屏' : ''}`
-              : activeModeCopy.label}</strong>
-            <small>{activeMode === 'per-display' && !activeDisplay ? '正在读取 Windows 显示器…' : activeModeCopy.description}</small>
-          </div>
-          <div className="library-display-controls">
-            <label className="library-display-select">
-              <Monitor size={15} />
-              <span className="sr-only">选择显示器布局</span>
-              <select
-                value={activeMode}
-                onChange={(event) => void updateDisplayMode(event.target.value as WallpaperDisplayMode)}
-                aria-label="选择显示器布局"
-              >
-                {Object.entries(DISPLAY_MODE_COPY).map(([mode, copy]) => (
-                  <option key={mode} value={mode}>{copy.label}</option>
-                ))}
-              </select>
-            </label>
-            {activeMode === 'per-display' && (
-              <label className="library-display-select">
-                <Monitor size={15} />
-                <span className="sr-only">选择壁纸显示器</span>
-                <select
-                  value={activeDisplayId ?? ''}
-                  onChange={(event) => onDisplaySelect?.(Number(event.target.value))}
-                  disabled={!activeSettings?.displays.length}
-                  aria-label="选择壁纸显示器"
-                >
-                  {!activeSettings?.displays.length && <option value="">读取中…</option>}
-                  {(activeSettings?.displays ?? []).map((display) => (
-                    <option key={display.id} value={display.id}>
-                      {display.label}{display.primary ? ' · 主屏' : ''} · {display.bounds.width} × {display.bounds.height}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
-        </div>
         {loading ? (
           <div className="empty-page">加载中…</div>
         ) : filtered.length === 0 ? (

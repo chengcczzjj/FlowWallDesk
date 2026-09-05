@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { WallpaperApplyTarget, WallpaperDisplaySettings } from '@shared/types'
 import { LibraryPage } from './pages/LibraryPage'
+import { WallpaperDisplayControls } from './components/WallpaperDisplayControls'
 import { OnlineWallpaperPage } from './pages/OnlineWallpaperPage'
 import { EmptyPage } from './pages/EmptyPage'
 import { WidgetsPage } from './pages/WidgetsPage'
@@ -190,8 +191,7 @@ export function App() {
     })
   }, [])
 
-  // Monitor selection is rendered by the wallpaper page.  Keep the selected
-  // display in App so it survives switching between local and online tabs.
+  // Keep display selection in the shared toolbar across local and online tabs.
   useEffect(() => {
     let alive = true
     const sync = async () => {
@@ -318,6 +318,14 @@ export function App() {
             </div>
             {activity === 'library' && (
               <div className="nav-footer">
+                {(subPage === 'library' || subPage === 'store') && (
+                  <WallpaperDisplayControls
+                    settings={displaySettings}
+                    target={wallpaperTarget}
+                    onTargetChange={setWallpaperTarget}
+                    onSettingsChange={setDisplaySettings}
+                  />
+                )}
                 <button className="nav-btn" title="添加壁纸" onClick={() => openAddDialog()}>
                   <Plus size={16} />
                 </button>

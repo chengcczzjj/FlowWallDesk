@@ -543,89 +543,126 @@ textarea,
   transition: margin-right 0.4s cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
-/* Monitor choice belongs to the wallpaper library, next to the collection it
-   controls.  Keeping this bar inside the scrolling column prevents the detail
-   sidebar from covering the selector or its status copy. */
-.library-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 160;
+/* The picker uses Chromium's top layer, so the sidebar cannot cover it. */
+.wallpaper-display-controls {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 72px;
-  padding: 13px 18px;
-  border-bottom: 1px solid rgba(70, 97, 88, .12);
-  background: rgba(247, 250, 249, .86);
-  backdrop-filter: blur(18px) saturate(125%);
-  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  gap: 6px;
+  margin-right: 6px;
 }
-.library-toolbar__copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.library-toolbar__eyebrow {
-  color: #7b9087;
-  font-size: 9px;
-  font-weight: 780;
-  letter-spacing: .14em;
-}
-.library-toolbar__copy strong {
-  overflow: hidden;
-  color: #304c42;
-  font-size: 14px;
-  font-weight: 760;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.library-toolbar__copy small {
-  overflow: hidden;
-  color: #82918b;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.library-display-select {
-  flex: 0 0 auto;
+.wallpaper-display-control {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-width: 190px;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid rgba(68, 118, 103, .2);
-  border-radius: 10px;
-  color: #4f7566;
-  background: rgba(255, 255, 255, .72);
-  box-shadow: 0 5px 14px rgba(34, 52, 47, .06);
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: transparent;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
-.library-display-controls {
-  flex: 0 1 auto;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+.wallpaper-display-control:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+  border-color: var(--border-control);
 }
-.library-display-controls .library-display-select {
-  min-width: 168px;
+.wallpaper-display-control:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
 }
-.library-display-select select {
-  min-width: 0;
-  flex: 1;
+.wallpaper-display-picker,
+.wallpaper-display-picker::picker(select) {
+  appearance: base-select;
+}
+.wallpaper-display-picker {
+  min-width: 100px;
+  padding: 0;
+  gap: 10px;
   border: 0;
   outline: 0;
-  color: #365c4f;
+  color: inherit;
   background: transparent;
-  font-size: 11px;
-  font-weight: 700;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}
+.wallpaper-display-picker--target {
+  min-width: 76px;
+}
+.wallpaper-display-picker:disabled {
+  opacity: .5;
+}
+.wallpaper-display-picker::picker-icon {
+  color: var(--text-secondary);
+  font-size: 10px;
+  transition: rotate var(--transition-fast);
+}
+.wallpaper-display-picker:open::picker-icon {
+  rotate: 180deg;
+}
+.wallpaper-display-picker::picker(select) {
+  min-width: 180px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(320px, calc(100vh - 120px));
+  margin: 8px 0 0;
+  padding: 5px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(24px);
+  box-shadow: var(--shadow-flyout);
+  font-family: var(--font-family);
+  font-size: var(--font-size-caption);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.wallpaper-display-picker option {
+  min-height: 34px;
+  padding: 8px 12px;
+  gap: 10px;
+  border-radius: var(--radius-md);
+  font-weight: 400;
   cursor: pointer !important;
 }
-.library-display-select:focus-within {
-  border-color: rgba(68, 118, 103, .44);
-  box-shadow: 0 0 0 3px rgba(100, 162, 137, .14);
+.wallpaper-display-picker option:checked {
+  color: var(--accent);
+  background: var(--accent-bg);
+  font-weight: 600;
+}
+.wallpaper-display-picker option:hover,
+.wallpaper-display-picker option:focus-visible {
+  color: var(--accent);
+  background: var(--accent-light);
+  outline: none;
+}
+.wallpaper-display-picker option::checkmark {
+  color: var(--accent);
+}
+.wallpaper-display-error {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--bg-solid);
+  box-shadow: var(--shadow-flyout);
+  font-size: var(--font-size-caption);
+}
+.wallpaper-display-error button {
+  flex-shrink: 0;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
 }
 .sr-only {
   position: absolute;
@@ -3132,24 +3169,6 @@ textarea,
     border-left: 0;
     border-top: 1px solid var(--pet-line);
     overflow: visible;
-  }
-}
-
-@media (max-width: 760px) {
-  .library-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .library-display-select {
-    width: 100%;
-  }
-
-  .library-display-controls {
-    width: 100%;
-    align-items: stretch;
-    flex-direction: column;
   }
 }
 
