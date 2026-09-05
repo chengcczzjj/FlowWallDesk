@@ -14,6 +14,8 @@ import type {
   WidgetInstance,
 } from '@shared/types'
 import { store } from '../store'
+import { persistWidgets } from '../services/widget-persistence'
+import { withDesktopIconOperation } from '../services/desktop-icon-operations'
 import { getCanvasWindow } from '../windows/canvasWindow'
 import { getDesktopRenderBounds, getDisplayDescriptors, getWallpaperDisplayMode } from '../windows/displayLayout'
 import { materializeWidgetsForCanvas } from '@shared/widget-display-layout'
@@ -42,11 +44,6 @@ function syncToCanvas(list: WidgetInstance[]): void {
     getDesktopRenderBounds(),
     getWallpaperDisplayMode(),
   ))
-}
-
-function persistWidgets(list: WidgetInstance[]): void {
-  store.set('widgets', list)
-  store.set('globalIconWidgets', list.filter((widget) => isDesktopIconWidgetType(widget.type)))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -192,8 +189,13 @@ function readImageFileIcon(filePath: string): string | undefined {
 
 function imageToDataUrl(image: Electron.NativeImage): string | undefined {
   if (image.isEmpty()) return undefined
+  const size = image.getSize()
+  if (size.width > 96 || size.height > 96) {
+    const scale = 96 / Math.max(size.width, size.height)
+    image = image.resize({ width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) })
+  }
   try {
-    const dataUrl = image.toDataURL({ scaleFactor: 2 })
+    const dataUrl = image.toDataURL()
     if (dataUrl) return dataUrl
   } catch {
     /* fall back to the default representation */
@@ -393,15 +395,9 @@ async function importOneDesktopIcon(widgetId: string, sourcePath: string): Promi
     const originalName = parse(sourcePath).base
     const targetName = `${id}-${safeSegment(originalName) || `icon${extname(sourcePath)}`}`
     managedPath = await nextAvailablePath(managedDir, targetName)
-    try {
-      await movePath(sourcePath, managedPath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`移动到托管目录失败，原文件已保留：${message}`)
-    }
   }
 
-  return {
+  const item: DesktopIconItem = {
     id,
     name: getDisplayName(sourcePath),
     originalPath: sourcePath,
@@ -418,6 +414,19 @@ async function importOneDesktopIcon(widgetId: string, sourcePath: string): Promi
     removedFromDesktop: removeOriginal,
     addedAt: Date.now(),
   }
+  // Persist recovery metadata (and check size limits) before moving a desktop file.
+  // If the process exits mid-move, the record still points at both locations.
+  if (removeOriginal) {
+    if (!appendItemsToWidget(widgetId, [item])) throw new Error('目标组件不存在')
+    try {
+      await movePath(sourcePath, managedPath)
+    } catch (error) {
+      updateDesktopIconItems(widgetId, (items) => items.filter((candidate) => candidate.id !== id))
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`移动到托管目录失败，原文件已保留：${message}`)
+    }
+  }
+  return item
 }
 
 function findReusableDesktopIconItem(widgetId: string, sourcePath: string): DesktopIconItem | undefined {
@@ -531,7 +540,8 @@ function appendItemsToWidget(widgetId: string, items: DesktopIconItem[]): boolea
 
   const config = isRecord(target.config) ? target.config : {}
   const existing = Array.isArray(config.items) ? config.items.filter(isDesktopIconItem) : []
-  const nextItems = [...existing, ...items].map((item, index) => ({ ...item, order: index }))
+  const existingIds = new Set(existing.map((item) => item.id))
+  const nextItems = [...existing, ...items.filter((item) => !existingIds.has(item.id))].map((item, index) => ({ ...item, order: index }))
   const updated = widgets.map((widget) =>
     widget.id === widgetId ? { ...widget, config: { ...config, items: nextItems } } : widget
   )
@@ -549,6 +559,7 @@ async function rollbackImportedDesktopIcon(item: DesktopIconItem): Promise<void>
 }
 
 async function appendImportedItemToWidget(widgetId: string, item: DesktopIconItem): Promise<void> {
+  if (item.removedFromDesktop && findStoredDesktopIcon(item.id, widgetId)) return
   try {
     if (!appendItemsToWidget(widgetId, [item])) throw new Error('目标组件不存在')
   } catch (error) {
@@ -807,7 +818,7 @@ export async function launchDesktopIcon(
 }
 
 export function registerDesktopIconIpc(): void {
-  ipcMain.handle(IPC.DESKTOP_ICON_IMPORT, async (_event, widgetId: string, filePaths: string[]) => {
+  ipcMain.handle(IPC.DESKTOP_ICON_IMPORT, async (_event, widgetId: string, filePaths: string[]) => withDesktopIconOperation(widgetId, async () => {
     assertTrustedIpcSender(_event, ['canvas'])
     const result: DesktopIconImportResult = { ok: false, items: [], skipped: [] }
     if (!widgetId || !Array.isArray(filePaths) || filePaths.length === 0) {
@@ -832,7 +843,7 @@ export function registerDesktopIconIpc(): void {
     })
 
     return { ...result, ok: result.items.length > 0 }
-  })
+  }))
 
   ipcMain.handle(IPC.DESKTOP_ICON_LAUNCH, async (_event, widgetId: string, item: DesktopIconItem, suppliedRequestId?: string) => {
     assertTrustedIpcSender(_event, ['canvas'])

@@ -8,6 +8,8 @@ export interface WallpaperItem {
   source: string
   /** 类型：video / image / web */
   type: 'video' | 'image' | 'web'
+  /** Runtime-only isolated URL for a web wallpaper package. */
+  webUrl?: string
   /** 预览图（可选）*/
   preview?: string
   /** 原始 FlowWallDeskInfo.json 的额外字段 */
@@ -70,6 +72,7 @@ export interface WallpaperDisplayLayout {
   mode: WallpaperDisplayMode
   virtualBounds: DisplayBounds
   displays: WallpaperDisplaySegment[]
+  playback?: { epochMs: number; audioEnabled: boolean }
 }
 
 /** One monitor-local wallpaper snapshot used by transparent glass widgets. */

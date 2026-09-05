@@ -168,7 +168,7 @@ export function DisplaySettingsPage() {
         <div className="settings-card__icon"><Tv2 size={17} /></div>
         <div className="settings-card__body">
           <div className="settings-card__title">实现方式</div>
-          <div className="settings-card__desc">复制和单独设置模式会为每台显示器创建独立的桌面壁纸窗口，避免不同缩放比例导致跨屏拉伸；只有“跨屏延展”会使用覆盖整个虚拟桌面的单一窗口。显示器拔插、分辨率和缩放变化会自动重建布局。</div>
+          <div className="settings-card__desc">四种模式均使用显示器本地壁纸窗口；跨屏延展将同一虚拟画面逐屏裁切，避免单个大窗口跨越不同缩放比例。复制和延展视频共享播放基准，仅主屏输出声音。显示器拔插、分辨率和缩放变化会重新协调布局与组件归属。</div>
         </div>
       </div>
     </div>

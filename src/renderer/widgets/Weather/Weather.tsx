@@ -1,5 +1,6 @@
 import { Cloud, CloudLightning, CloudRain, CloudSnow, Sun } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
+import { useWeather } from '../shared/useWeather'
 
 const WeatherIcon = ({
   style,
@@ -118,42 +119,24 @@ export function WeatherWidget({ config }: WeatherWidgetProps) {
   const style = (config?.style as string) || 'minimal'
   const darkMode = (config?.darkMode as boolean) ?? false
 
-  const [weatherData, setWeatherData] = useState({ temp: 22, condition: 'Sunny', city: 'Beijing' })
   const configuredCity = typeof config?.city === 'string' ? config.city.trim() : undefined
-
-  useEffect(() => {
-    const fetchWeather = async () => {
-      try {
-        const snapshot = await window.canvasBridge?.fetchWeather({ city: configuredCity, days: 1 })
-        if (!snapshot?.ok || !snapshot.current) return
-        const condition = snapshot.current.condition === 'sunny'
-          ? 'Sunny'
-          : snapshot.current.condition === 'rainy'
-            ? 'Rainy'
-            : snapshot.current.condition === 'snowy'
-              ? 'Snowy'
-              : snapshot.current.condition === 'stormy'
-                ? 'Stormy'
-                : 'Cloudy'
-        setWeatherData({
-          temp: Math.round(snapshot.current.temperature),
-          condition,
-          city: snapshot.city || snapshot.location,
-        })
-      } catch (error) {
-        console.log('Weather API failed, using default', error)
-      }
-    }
-    void fetchWeather()
-  }, [configuredCity])
-
-  const { temp, condition, city } = weatherData
+  const weather = useWeather(configuredCity)
+  const current = weather.snapshot?.current
+  const temp = current ? Math.round(current.temperature) : '--'
+  const city = weather.snapshot?.city || weather.snapshot?.location || configuredCity || '--'
+  const condition = current ? current.condition[0].toUpperCase() + current.condition.slice(1) : 'Unknown'
+  const withStatus = (content: ReactNode) => (
+    <div className="relative w-full h-full" title={weather.label}>
+      {content}
+      {weather.status !== 'ready' && <div role="status" className="absolute bottom-0 left-0 w-full text-center text-[10px] opacity-80">{weather.label}</div>}
+    </div>
+  )
   const textColor = darkMode ? 'text-slate-900' : 'text-white'
 
   const getStyle = (extra = {}) => ({ ...extra })
 
   if (style === 'glass') {
-    return (
+    return withStatus(
       <div className="flex items-center gap-2 select-none w-full h-full justify-center" style={getStyle()}>
         <WeatherIcon style={style} condition={condition} size={56} />
         <span className={`text-xl font-bold opacity-90 ${textColor} drop-shadow-md`}>{temp}°</span>
@@ -162,7 +145,7 @@ export function WeatherWidget({ config }: WeatherWidgetProps) {
   }
 
   if (style === 'realism') {
-    return (
+    return withStatus(
       <div className="flex items-center gap-3 select-none w-full h-full justify-center" style={getStyle()}>
         <WeatherIcon style={style} condition={condition} size={64} />
         <div className="flex flex-col -space-y-0.5">
@@ -174,7 +157,7 @@ export function WeatherWidget({ config }: WeatherWidgetProps) {
   }
 
   if (style === 'neon') {
-    return (
+    return withStatus(
       <div className="flex items-center gap-3 select-none w-full h-full justify-center" style={getStyle()}>
         <WeatherIcon style={style} condition={condition} size={48} />
         <span className={`text-xl font-bold ${textColor}`} style={{ textShadow: darkMode ? 'none' : '0 0 10px rgba(255,255,255,0.8)' }}>{temp}°</span>
@@ -183,7 +166,7 @@ export function WeatherWidget({ config }: WeatherWidgetProps) {
   }
 
   // minimal (default)
-  return (
+  return withStatus(
     <div className="flex items-center gap-2 select-none w-full h-full justify-center" style={getStyle()}>
       <WeatherIcon style={style} condition={condition} size={48} className={darkMode ? 'text-slate-800' : 'text-white'} />
       <div className="flex flex-col -space-y-0.5">

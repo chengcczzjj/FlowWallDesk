@@ -7,10 +7,10 @@
 
 - 适用：壁纸导入、配置保存、AI 组件调整、打包后自修复。
 - 根因：安装目录/asar 不应写入；直接改内置默认值会受权限、更新覆盖影响。切换壁纸时旧防抖保存还可能写错命名空间。
-- 当前约束：路径经 userData helper 生成，先读用户覆盖再读默认；切壁纸前取消待保存任务，加载失败也应清空旧组件，不能留下前一壁纸状态。
+- 当前约束：路径经 userData helper 生成；待写快照绑定产生时的命名空间，防抖仅合并不丢弃。切换和正常退出前排空写入；新覆盖文件先读/校验，只有 ENOENT 回退默认，损坏/权限失败保留当前状态并拒绝切换。覆盖文件使用同目录临时文件加 rename，无壁纸使用独立命名空间。
 - 代码：[userDataPaths.ts](../../src/main/runtime/userDataPaths.ts)、[widgetIpc.ts](../../src/main/ipc/widgetIpc.ts)、[wallpaperIpc.ts](../../src/main/ipc/wallpaperIpc.ts)。
-- 验证：至少检查切换壁纸、覆盖缺失/损坏、重启后的状态；开发态可写目录不代替安装态验证。
-- 来源：2026-05-26 运行时可变层；早期切壁纸自动保存问题。
+- 验证：[desktop-ipc-regressions.test.mjs](../../tests/desktop-ipc-regressions.test.mjs) 覆盖快速 A-B-A、同命名空间重载、损坏/写失败、无壁纸重启、退出 flush；开发态可写目录不代替安装态/断电验证。
+- 替代关系：2026-09-05 修复替代早期“切换前取消保存、加载失败清空”的做法；保留 2026-05-26 默认资源与运行时可变层分离的原则。
 
 ## L02 sandbox preload：单入口不是可随意拆分的打包细节
 
@@ -26,10 +26,11 @@
 - 适用：壁纸跨屏错位、组件切模式跳动、混合 DPI、负坐标和热插拔。
 - 根因：`SetParent` 不负责显示器位置；DIP/物理像素/父窗口坐标混用会产生半屏错位。`GetMonitorInfoW` 的 `cbSize` 若被纯 `out` 参数清零，稳定键查询会静默失效。
 - 当前约束：保持持久化的四种显示模式；每个目标屏幕建本地壁纸窗口，延展只共享虚拟构图并逐屏裁切。原生参数使用 `inout` 保留输入，调整 `WS_CHILD/WS_POPUP`、`ScreenToClient` 后以 `GetWindowRect` 校验实际边界。
-- 组件保存设备键与显示器本地坐标，旧虚拟 Canvas 坐标只做一次迁移。Win32 设备键并非任意硬件变化下的永久硬件身份；匹配失败/降级必须结合诊断确认。
+- 组件保存设备键与显示器本地坐标，旧虚拟 Canvas 坐标只做一次迁移；工作区缩小时只钳制渲染投影，不覆盖保存坐标。Win32 设备键并非任意硬件变化下的永久身份，匹配失败/降级必须结合诊断确认。
+- 模式、分配、应用与热插拔统一协调实际主屏壁纸及组件命名空间。壁纸设置按 ID 合并后同步当前快照/布局，未开始的滑条保存按 ID 合并，避免磁盘较慢时无界排队。renderer 只使用自己显示器的有效设置；延迟初始请求不得覆盖更新推送，旧主屏快照不得重置已加载图片/网页的可见状态。复制/延展视频共用时钟并只有一个音频所有者；通用 Web 动画没有因此获得同步。
 - 代码：[nativeDisplayIdentity.ts](../../src/main/windows/nativeDisplayIdentity.ts)、[attachWallpaperNative.ts](../../src/main/windows/attachWallpaperNative.ts)、[widget-display-layout.ts](../../src/shared/widget-display-layout.ts)。测试：[wallpaper-display.test.mjs](../../tests/wallpaper-display.test.mjs)、[widget-display-layout.test.mjs](../../tests/widget-display-layout.test.mjs)。
 - 验证：检查 `display-diagnostics.jsonl` 的拓扑、expected/actual 边界、归属与重试；单屏/纯函数测试不证明混合 DPI 双屏通过。
-- 替代关系：2026-08-27 固定按屏模式被 08-30 恢复四模式替代；08-24 的单跨屏延展窗口被 09-04 逐屏裁切替代。
+- 替代关系：2026-08-27 固定按屏模式被 08-30 恢复四模式替代；08-24 的单跨屏延展窗口被 09-04 逐屏裁切替代。09-05 补齐状态一致性与视频纠偏；[wallpaper-renderer.cjs](../../tests/electron/wallpaper-renderer.cjs) 验证生产渲染器，不代表硬件帧精确同步。
 
 ## L04 原生点击补偿：先确认前台归属，不只看坐标
 
@@ -72,7 +73,7 @@
 
 - 适用：导入/恢复快捷方式、单实例应用唤醒、Dock 点击反馈。
 - 根因：Shell 虚拟项没有真实路径；copy/delete 兜底可能丢源文件。直接启动快捷方式 target 不等于双击原快捷方式；启动器或 1px 内部窗不等于应用主窗口。
-- 当前约束：跳过无路径虚拟项，导入用安全 rename，记录失败尝试回滚；优先 Windows Shell 打开原快捷方式。窗口唤醒验证可见性、尺寸和应用家族，不仅匹配进程名。
+- 当前约束：跳过无路径虚拟项，导入用安全 rename；2026-09-05 改为移动前先校验并持久化恢复记录（见 L13），避免先移动后发现写入超限。优先 Windows Shell 打开原快捷方式。窗口唤醒验证可见性、尺寸和应用家族，不仅匹配进程名。
 - 动画层分离但悬停缩放保持连续，扩散副本从点击瞬间的实际尺寸开始；“回到桌面”不播放启动动画。
 - 代码：[desktopIconIpc.ts](../../src/main/ipc/desktopIconIpc.ts)、[foregroundAppWindow.ts](../../src/main/windows/foregroundAppWindow.ts)、[DesktopIcons.tsx](../../src/renderer/widgets/DesktopIcons/DesktopIcons.tsx)。测试：[shared-contracts.test.mjs](../../tests/shared-contracts.test.mjs)、[release-contracts.test.mjs](../../tests/release-contracts.test.mjs)。
 - 验证：同名目标冲突、导入失败回滚、Shell 虚拟项、已运行应用唤醒；文件操作还需真实环境验证。
@@ -92,7 +93,7 @@
 
 - 适用：在线壁纸、解压、所有者发布、更新错误展示。
 - 根因：远程 ZIP 可能损坏、越界或被替换；隐藏发布按钮不能限制后端写权限；原始更新错误可能包含响应头/Cookie。
-- 当前约束：检查 HTTPS、声明大小、SHA-256、路径及符号链接；临时 staging 校验后原子替换，失败回滚旧版本。所有者入口同时校验身份与仓库写权限，凭据不传渲染层。
+- 当前约束：检查 HTTPS、声明大小、SHA-256、路径及符号链接；临时 staging 校验后原子替换，失败回滚旧版本。更新/删除检查全部保存的显示器分配（含断开屏幕）及进行中的应用，并与应用互斥；不能只查 current。所有者入口同时校验身份与仓库写权限，凭据不传渲染层。
 - 代码：[wallpaper-resource-service.ts](../../src/main/services/wallpaper-resource-service.ts)、[safe-zip.ts](../../src/main/services/safe-zip.ts)、[wallpaper-owner-service.ts](../../src/main/services/wallpaper-owner-service.ts)、[update-service.ts](../../src/main/services/update-service.ts)。测试：[wallpaper-resource.test.mjs](../../tests/wallpaper-resource.test.mjs)、[release-contracts.test.mjs](../../tests/release-contracts.test.mjs)。
 - 验证：损坏包、路径越界、符号链接、旧版本保留与脱敏错误；工程记录只留脱敏结论，不粘贴凭据/原始网络响应。
 - 来源：2026-08-01 更新错误、08-18 独立资源库安全安装与所有者发布。
@@ -103,6 +104,7 @@
 - 根因：源码契约能通过但原生 ABI 调用失败；代码版本不等于实际运行版本，本机包不等于 GitHub Release，单屏不等于多屏验收。
 - 当前约束：分别记录测试、构建、安装/进程版本、远端资产验证；缺哪个就明确写未做。先读已脱敏的持久日志缩小问题，不把“UI 能保存设置”当完整链路证据。
 - 代码：[diagnosticLog.ts](../../src/main/runtime/diagnosticLog.ts)、[electron-builder.yml](../../electron-builder.yml)。测试：[release-contracts.test.mjs](../../tests/release-contracts.test.mjs)；它只约束配置和源码，不能证明安装/发布成功。
+- 隔离 Electron 测试显式控制退出：清理窗口时不能由自动退出掩盖断言失败，启动器必须同时检查退出码和成功标记。09-05 的静态壁纸回归已验证“先失败、修复后通过”。
 - 验证：运行时主要诊断文件为 `dock-diagnostics.jsonl`、`display-diagnostics.jsonl`、`update-diagnostics.jsonl`（userData/logs）；核对 pid、时间、版本及真实场景。网络/设备无法验证时不推测通过。
 - 来源：2026-08-29 安装版不一致、09-04 Koffi 原生实测与 1.1.11 仅本地安装。旧记录中的发布操作不构成新任务发布授权。
 
@@ -113,3 +115,21 @@
 - 当前做法：根规则单点维护、适配仅引用；状态/事件/经验分层，旧方案在知识索引标有效性。日志先写“提交意图”再一起提交，实际提交哈希在最终回复只读核验。
 - 检查：[agent-docs.test.mjs](../../tests/agent-docs.test.mjs) 检查导航链接、已声明脚本和事件重复等机械约束；提交权限、历史方案有效性仍需语义复核。
 - 来源：2026-09-05 工程知识审计；后续修改规则按同一入口同步，避免再次分叉。
+
+## L13 组件和托管文件：读取不修复，限制增长不丢历史
+
+- 适用：组件数量/配置限额、旧版大记录、损坏存储、Dock 导入与删除。
+- 根因：用新增输入限额校验已有数据，再把失败转为 [] 回写，会清空组件和文件恢复线索；先移动文件再保存记录会在超限/异常时产生孤儿文件。
+- 当前做法：读取只校验结构且不回写，损坏明确报错；新增/增长执行数量与配置字节限制，已有大记录可读和缩减。运行时组件和全局图标通过一次 store 写入同步，加载完整校验前不做半次全局迁移。
+- 文件移动前先保存 originalPath/managedPath，导入/删除按组件串行；恢复部分失败仅移除成功项，保留当前组件的新修改及未恢复记录。迟到更新不能重新创建已删除组件。
+- 代码：[widget-data.ts](../../src/shared/widget-data.ts)、[widget-persistence.ts](../../src/main/services/widget-persistence.ts)、[desktop-icon-operations.ts](../../src/main/services/desktop-icon-operations.ts)。测试：[desktop-ipc-regressions.test.mjs](../../tests/desktop-ipc-regressions.test.mjs) 使用独立临时目录与生产 IPC，未操作真实桌面。
+- 来源：2026-09-05 壁纸/组件/显示器高优先级修复；不宣称跨多个文件或异常断电的完整事务保证。
+
+## L14 网页壁纸：选文件不等于授权父目录
+
+- 适用：本地 HTML/ZIP 导入、自定义协议、网页 iframe 与本地资源访问。
+- 根因：选择一个 HTML 却授权/复制整个父目录会带入无关私人文件；所有网页共享来源会扩大跨包读取与执行能力。
+- 当前做法：单 HTML 仅复制/授权选中文件，完整相对依赖必须显式选择 ZIP；每个包使用独立随机来源，以 realpath 限定包根目录，拒绝穿越/junction。共享 lyasset local 来源只提供被授权的被动媒体，不提供 HTML/脚本/配置。
+- CSP 与 iframe 沙箱保留包内脚本/样式/fetch，隔离父页面和 bridge，禁止子框架/对象/表单及顶层逃逸；网络 HTTPS 能力仍允许，不应把网页内容当可信应用代码。
+- 代码：[protocols.ts](../../src/main/protocols.ts)。测试：[wallpaper-security.test.mjs](../../tests/wallpaper-security.test.mjs)、[wallpaper-sandbox.cjs](../../tests/electron/wallpaper-sandbox.cjs)；后者在实际 Electron/Chromium 中验证隔离，不仅匹配 CSP 字符串。
+- 来源：2026-09-05 网页壁纸安全修复；第三方壁纸若依赖被禁能力应报告兼容性问题，不回退整目录授权或关闭沙箱。

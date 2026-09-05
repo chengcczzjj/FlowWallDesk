@@ -9,12 +9,6 @@ const api = {
     ipcRenderer.on(IPC.WALLPAPER_LOAD, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_LOAD, handler)
   },
-  /** 监听实时设置更新（音量、速度、缩放等） */
-  onSettingUpdate: (cb: (key: string, value: unknown) => void): (() => void) => {
-    const handler = (_: unknown, key: string, value: unknown) => cb(key, value)
-    ipcRenderer.on(IPC.WALLPAPER_UPDATE_SETTING, handler)
-    return () => ipcRenderer.off(IPC.WALLPAPER_UPDATE_SETTING, handler)
-  },
   /** 渲染端主动拉取当前壁纸（避免错过 onLoad 事件） */
   getCurrent: (): Promise<{ current?: WallpaperItem } | undefined> =>
     ipcRenderer.invoke(IPC.WALLPAPER_GET_CURRENT),

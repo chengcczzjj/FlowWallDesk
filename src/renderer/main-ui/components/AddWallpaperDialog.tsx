@@ -95,7 +95,7 @@ export function AddWallpaperDialog(props: {
 
     // 设置预览 URL（图片和视频都使用 lyasset:// 协议）
     if (type === 'image' || type === 'video') {
-      const granted = await window.lingyue.wallpaper.grantPreview(path)
+      const granted = await window.lingyue.wallpaper.grantPreview(path).catch(() => false)
       setPreviewUrl(granted ? (toAssetUrl(path) ?? undefined) : undefined)
     } else {
       setPreviewUrl(undefined)
@@ -111,9 +111,11 @@ export function AddWallpaperDialog(props: {
 
   // 浏览文件
   const handleBrowse = async () => {
-    const item = await window.lingyue.wallpaper.pickFile()
-    if (item) {
-      handleFileSelected(item.source, item.name)
+    try {
+      const item = await window.lingyue.wallpaper.pickFile()
+      if (item) await handleFileSelected(item.source, item.name)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '文件选择失败，请重试。')
     }
   }
 
@@ -135,10 +137,11 @@ export function AddWallpaperDialog(props: {
     const files = e.dataTransfer.files
     if (files.length > 0) {
       const f = files[0]
-      // Electron drag & drop 提供 path 属性
-      const path = (f as File & { path?: string }).path
+      const path = window.lingyue.utils.getFilePath(f)
       if (path) {
-        handleFileSelected(path, f.name)
+        void handleFileSelected(path, f.name)
+      } else {
+        setError('无法读取拖入的文件路径，请使用浏览文件。')
       }
     }
   }
@@ -155,21 +158,19 @@ export function AddWallpaperDialog(props: {
       setProgress('正在导入…')
     }
 
-    const result = await window.lingyue.wallpaper.import(filePath, {
-      name: name || stripExt(fileName),
-      desc,
-      author,
-      contact,
-    })
-
-    setImporting(false)
-    setProgress('')
-
-    if (result.ok && result.item) {
-      onImported(result.item)
-      onClose()
-    } else {
-      setError(result.error ?? '导入失败')
+    try {
+      const result = await window.lingyue.wallpaper.import(filePath, { name: name || stripExt(fileName), desc, author, contact })
+      if (result.ok && result.item) {
+        onImported(result.item)
+        onClose()
+      } else {
+        setError(result.error ?? '导入失败')
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '导入失败，请重试。')
+    } finally {
+      setImporting(false)
+      setProgress('')
     }
   }
 
@@ -212,7 +213,7 @@ export function AddWallpaperDialog(props: {
               <Upload size={32} style={{ color: 'var(--text-tertiary)' }} />
               <span className="drop-zone__text">拖放壁纸文件到此处</span>
               <span className="drop-zone__hint">
-                支持 mp4, webm, jpg, png, gif, webp, html, zip
+                支持 mp4, webm, jpg, png, gif, webp, html, zip。HTML 仅导入单文件；如需图片、脚本等相对资源，请将完整壁纸目录打包为 ZIP。
               </span>
             </div>
           ) : (

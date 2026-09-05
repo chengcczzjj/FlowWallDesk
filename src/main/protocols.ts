@@ -1,6 +1,7 @@
 import { protocol, net } from 'electron'
 import { promises as fs } from 'fs'
 import { extname, dirname, isAbsolute, relative, resolve } from 'path'
+import { randomUUID } from 'crypto'
 import { pathToFileURL } from 'url'
 import { isTrustedRendererAssetOrigin } from '@shared/asset-url'
 
@@ -58,6 +59,48 @@ const MIME: Record<string, string> = {
 
 const allowedRoots = new Set<string>()
 const allowedFiles = new Set<string>()
+const webPackages = new Map<string, { root: string; entry?: string }>()
+const webPackageHosts = new Map<string, string>()
+const WEB_CSP = "default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; sandbox allow-scripts allow-same-origin"
+
+/** Each imported package has a distinct origin, with no absolute-path access. */
+export async function createWallpaperWebUrl(filePath: string): Promise<string> {
+  const entry = await fs.realpath(filePath)
+  if (!['.html', '.htm'].includes(extname(entry).toLowerCase())) throw new Error('无效的网页壁纸入口')
+  let root = dirname(entry)
+  let singleFile = true
+  for (const ownedRoot of allowedRoots) {
+    if (!isInside(ownedRoot, entry)) continue
+    const segments = relative(ownedRoot, entry).split(/[\\/]/)
+    if (segments.length > 1) {
+      root = await fs.realpath(resolve(ownedRoot, segments[0]))
+      if (!isInside(ownedRoot, root)) throw new Error('壁纸资源目录越界')
+      singleFile = false
+      break
+    }
+  }
+  if (singleFile && !allowedFiles.has(entry)) throw new Error('未授权的网页壁纸')
+  const key = singleFile ? entry : root
+  let host = webPackageHosts.get(key)
+  if (!host) {
+    host = 'wp-' + randomUUID()
+    webPackageHosts.set(key, host)
+    webPackages.set(host, { root, entry: singleFile ? entry : undefined })
+  }
+  return 'lyasset://' + host + '/' + relative(root, entry).replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')
+}
+
+async function resolveWebPackagePath(host: string, pathname: string): Promise<string | null> {
+  const pkg = webPackages.get(host)
+  if (!pkg) return null
+  try {
+    const candidate = await fs.realpath(resolve(pkg.root, decodeURIComponent(pathname.slice(1))))
+    if (!isInside(pkg.root, candidate) || (pkg.entry && candidate !== pkg.entry)) return null
+    return candidate
+  } catch {
+    return null
+  }
+}
 
 function addAssetCorsHeaders(request: Request, headers: Headers): void {
   const origin = request.headers.get('Origin')
@@ -85,14 +128,13 @@ export async function allowAssetRoot(rootPath: string): Promise<void> {
 }
 
 /**
- * 临时授权用户明确选择的单个媒体文件；HTML 会授权其所在目录以加载相对资源。
- * 目录授权仍会经过 realpath 边界检查，不能通过 ../ 或 junction 跳出。
+ * 只授权用户明确选择的文件；HTML 的相对资源必须通过显式导入的 ZIP 包提供。
  */
 export async function allowUserSelectedAsset(filePath: string): Promise<void> {
   const realPath = await fs.realpath(filePath)
   const extension = extname(realPath).toLowerCase()
   if (extension === '.html' || extension === '.htm') {
-    allowedRoots.add(await fs.realpath(dirname(realPath)))
+    allowedFiles.add(realPath)
     return
   }
   const mime = MIME[extension]
@@ -134,11 +176,15 @@ function parseAbsPath(rawUrl: string): string | null {
 
 export function registerAssetProtocol(): void {
   protocol.handle('lyasset', async (request) => {
-    const requestedPath = parseAbsPath(request.url)
+    const url = new URL(request.url)
+    const isWebPackage = webPackages.has(url.hostname)
+    const requestedPath = isWebPackage ? url.pathname : parseAbsPath(request.url)
     if (!requestedPath) {
       return new Response('Bad Request', { status: 400, headers: { 'Cache-Control': 'no-store' } })
     }
-    const absPath = await resolveAllowedAssetPath(requestedPath)
+    const absPath = isWebPackage
+      ? await resolveWebPackagePath(url.hostname, url.pathname)
+      : url.hostname === 'local' ? await resolveAllowedAssetPath(requestedPath) : null
     if (!absPath) {
       console.warn('[lyasset] 拒绝越界资源请求', requestedPath)
       return new Response('Forbidden', { status: 403, headers: { 'Cache-Control': 'no-store' } })
@@ -150,12 +196,16 @@ export function registerAssetProtocol(): void {
       }
       const ext = extname(absPath).toLowerCase()
       const mime = MIME[ext] ?? 'application/octet-stream'
+      // The shared origin is passive media only; scripts/configs/HTML stay package-scoped.
+      if (!isWebPackage && !/^(image|video|audio)\//.test(mime)) return new Response('Forbidden', { status: 403 })
       // 视频/音频/HTML 走 net.fetch，支持 Range & 流式
       if (mime.startsWith('video/') || mime.startsWith('audio/') || mime === 'text/html; charset=utf-8') {
         const fileUrl = pathToFileURL(absPath).toString()
         const resp = await net.fetch(fileUrl)
         const headers = new Headers(resp.headers)
         headers.set('Content-Type', mime)
+        headers.set('Content-Security-Policy', isWebPackage ? WEB_CSP : "default-src 'none'; sandbox")
+        headers.set('X-Content-Type-Options', 'nosniff')
         addAssetCorsHeaders(request, headers)
         return new Response(resp.body, { status: resp.status, headers })
       }
@@ -165,6 +215,8 @@ export function registerAssetProtocol(): void {
         'Content-Length': String(buf.byteLength),
         'Cache-Control': 'no-cache',
       })
+      headers.set('Content-Security-Policy', isWebPackage ? WEB_CSP : "default-src 'none'; sandbox")
+      headers.set('X-Content-Type-Options', 'nosniff')
       addAssetCorsHeaders(request, headers)
       return new Response(buf, {
         status: 200,

@@ -57,8 +57,8 @@ const api = {
     attachStatus: (): Promise<boolean> => ipcRenderer.invoke(IPC.WALLPAPER_ATTACH_STATUS),
     saveSettings: (wallpaperId: string, settings: WallpaperSettings): Promise<boolean> =>
       ipcRenderer.invoke(IPC.WALLPAPER_SAVE_SETTINGS, wallpaperId, settings),
-    updateSetting: (key: string, value: unknown): Promise<boolean> =>
-      ipcRenderer.invoke(IPC.WALLPAPER_UPDATE_SETTING, key, value),
+    updateSetting: (wallpaperId: string, key: keyof WallpaperSettings, value: unknown): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.WALLPAPER_UPDATE_SETTING, wallpaperId, key, value),
     getDisplaySettings: (): Promise<WallpaperDisplaySettings> =>
       ipcRenderer.invoke(IPC.WALLPAPER_DISPLAY_GET_SETTINGS),
     setDisplayMode: (mode: WallpaperDisplayMode): Promise<WallpaperDisplaySettings> =>

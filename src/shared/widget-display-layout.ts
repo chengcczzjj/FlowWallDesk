@@ -93,11 +93,18 @@ export function materializeWidgetForCanvas(
   const primary = displays.find((display) => display.primary) ?? displays[0]
   const display = resolveWidgetDisplay(widget, displays) ?? (!widget.displayKey ? primary : undefined)
   if (!display || (mode === 'primary' && display.id !== primary?.id)) return null
+  const area = display.workArea
+  const left = area.x - display.bounds.x
+  const top = area.y - display.bounds.y
+  // Project into the current work area without rewriting saved coordinates;
+  // reconnecting a larger display restores the original placement.
+  const x = Math.max(left, Math.min(widget.x, left + Math.max(0, area.width - widget.width)))
+  const y = Math.max(top, Math.min(widget.y, top + Math.max(0, area.height - widget.height)))
   return bindWidgetToDisplay(
     widget,
     display,
-    widget.x + display.bounds.x - renderBounds.x,
-    widget.y + display.bounds.y - renderBounds.y,
+    x + display.bounds.x - renderBounds.x,
+    y + display.bounds.y - renderBounds.y,
   )
 }
 

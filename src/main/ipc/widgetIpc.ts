@@ -1,16 +1,20 @@
-import { app, ipcMain, Menu } from 'electron'
+import { app, dialog, ipcMain, Menu } from 'electron'
 import { randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
-import { dirname, join } from 'path'
+import { join } from 'path'
 import { IPC } from '@shared/ipc-channels'
 import { z } from 'zod'
+import { parseStoredWidgets, storedWidgetSchema, widgetConfigSchema, widgetInstanceSchema } from '@shared/widget-data'
+import { createDebouncedWriter } from '@shared/debounced-writer'
+import { persistWidgets } from '../services/widget-persistence'
+import { withDesktopIconOperation } from '../services/desktop-icon-operations'
+import { writeJsonAtomic } from '../runtime/atomicJson'
 import type { DesktopIconItem, DisplayBounds, DisplayDescriptor, WidgetInstance } from '@shared/types'
 import type { DesktopSceneLayoutPlan } from '@shared/desktop-scene-layout'
 import { findSmartWidgetPlacement } from '@shared/widget-placement'
 import { migrateTodoWidgetInstance } from '@shared/todo'
 import {
   DEFAULT_WIDGET_SIZE_BY_TYPE,
-  WIDGET_TYPES,
   getWidgetCapability,
   type DesktopSceneSnapshot,
   type LayoutPatch,
@@ -84,34 +88,6 @@ function isFreeformStickyNote(type: string): boolean {
   return type === 'todo-board'
 }
 
-const widgetConfigSchema = z.record(z.string().max(120), z.unknown()).superRefine((value, context) => {
-  try {
-    if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 512 * 1024) {
-      context.addIssue({ code: 'custom', message: '组件配置不能超过 512KB。' })
-    }
-  } catch {
-    context.addIssue({ code: 'custom', message: '组件配置必须可以序列化。' })
-  }
-})
-const widgetInstanceSchema = z.object({
-  id: z.string().min(1).max(160).regex(/^[\w.-]+$/),
-  type: z.enum(WIDGET_TYPES),
-  x: z.number().finite().min(-32_768).max(32_768),
-  y: z.number().finite().min(-32_768).max(32_768),
-  width: z.number().finite().min(0).max(4096),
-  height: z.number().finite().min(0).max(4096),
-  enabled: z.boolean(),
-  config: widgetConfigSchema.optional(),
-  stackOrder: z.number().finite().optional(),
-  displayId: z.number().int().optional(),
-  displayKey: z.string().min(1).max(160).optional(),
-})
-
-function parseWidgetList(value: unknown): WidgetInstance[] {
-  const parsed = z.array(widgetInstanceSchema).max(200).safeParse(value)
-  return parsed.success ? parsed.data : []
-}
-
 function isGlobalIconWidgetType(type: string): boolean {
   return GLOBAL_ICON_WIDGET_TYPES.includes(type)
 }
@@ -153,13 +129,7 @@ function getIconWidgets(widgets: WidgetInstance[]): WidgetInstance[] {
 
 function readStoredGlobalIconWidgets(): WidgetInstance[] | undefined {
   const stored = store.get('globalIconWidgets')
-  return Array.isArray(stored) ? stored : undefined
-}
-
-function persistWidgets(widgets: WidgetInstance[]): void {
-  const normalized = normalizeWidgetStackOrder(widgets)
-  store.set('widgets', normalized)
-  store.set('globalIconWidgets', getIconWidgets(normalized))
+  return stored === undefined ? undefined : parseStoredWidgets(stored)
 }
 
 function hasConfigKey(config: Record<string, unknown>, key: string): boolean {
@@ -225,17 +195,18 @@ async function readWidgetConfigFile(configPath: string, builtinDefault = false):
   const txt = await fs.readFile(configPath, 'utf-8')
   const data = JSON.parse(txt) as { widgets?: unknown; coordinateSpace?: unknown }
   return {
-    widgets: parseWidgetList(data.widgets),
+    widgets: parseStoredWidgets(data.widgets),
     coordinateSpace: typeof data.coordinateSpace === 'string' ? data.coordinateSpace : undefined,
     builtinDefault,
   }
 }
 
-async function tryReadWidgetConfigFile(configPath: string): Promise<LoadedWidgetConfig | null> {
+async function tryReadWidgetConfigFile(configPath: string, builtinDefault = false): Promise<LoadedWidgetConfig | null> {
   try {
-    return await readWidgetConfigFile(configPath)
-  } catch {
-    return null
+    return await readWidgetConfigFile(configPath, builtinDefault)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
   }
 }
 
@@ -252,37 +223,50 @@ function getWallpaperDefaultWidgetConfigPath(wallpaperId: string): string {
 async function readWallpaperWidgetConfig(wallpaperId: string): Promise<LoadedWidgetConfig> {
   const override = await tryReadWidgetConfigFile(getWallpaperWidgetOverridePath(wallpaperId))
   if (override) return override
-  return readWidgetConfigFile(getWallpaperDefaultWidgetConfigPath(wallpaperId), true)
+  return await tryReadWidgetConfigFile(getWallpaperDefaultWidgetConfigPath(wallpaperId), true)
+    ?? { widgets: [], builtinDefault: true }
 }
 
 async function writeWallpaperWidgetOverride(wallpaperId: string, widgets: WidgetInstance[]): Promise<void> {
   const configPath = getWallpaperWidgetOverridePath(wallpaperId)
-  await fs.mkdir(dirname(configPath), { recursive: true })
-  await fs.writeFile(configPath, JSON.stringify({
+  await writeJsonAtomic(configPath, {
     coordinateSpace: WIDGET_DISPLAY_COORDINATE_SPACE,
     widgets,
-  }, null, 2), 'utf-8')
+  })
 }
 
 function resolveGlobalIconWidgets(wallpaperWidgets: WidgetInstance[]): WidgetInstance[] {
   const storedGlobal = readStoredGlobalIconWidgets()
   if (storedGlobal) return storedGlobal
 
-  const legacyRuntimeIcons = getIconWidgets(store.get('widgets'))
-  const migrated = legacyRuntimeIcons.length > 0 ? legacyRuntimeIcons : getIconWidgets(wallpaperWidgets)
-  store.set('globalIconWidgets', migrated)
-  return migrated
+  const legacyRuntimeIcons = getIconWidgets(parseStoredWidgets(store.get('widgets')))
+  return legacyRuntimeIcons.length > 0 ? legacyRuntimeIcons : getIconWidgets(wallpaperWidgets)
 }
 
-export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<WidgetInstance[]> {
-  let wallpaperConfig: LoadedWidgetConfig = { widgets: [], builtinDefault: true }
-  if (wallpaperId) {
-    try {
-      wallpaperConfig = await readWallpaperWidgetConfig(wallpaperId)
-    } catch {
-      wallpaperConfig = { widgets: [], builtinDefault: true }
-    }
+let namespaceLoad: Promise<unknown> = Promise.resolve()
+
+export function loadWidgetsForWallpaper(wallpaperId?: string): Promise<WidgetInstance[]> {
+  const result = namespaceLoad.catch(() => undefined).then(() => loadWidgetNamespace(wallpaperId))
+  namespaceLoad = result
+  return result
+}
+
+async function loadWidgetNamespace(wallpaperId?: string): Promise<WidgetInstance[]> {
+  parseStoredWidgets(store.get('widgets'))
+  // The active namespace is already authoritative. Do not reread an older disk
+  // snapshot while new edits may be arriving (including a repeated startup restore).
+  if (widgetNamespaceInitialized && wallpaperId === widgetWallpaperId) {
+    await flushPendingWidgetSave()
+    syncToCanvas()
+    return parseStoredWidgets(store.get('widgets'))
   }
+  const wallpaperConfig: LoadedWidgetConfig = wallpaperId
+    ? await readWallpaperWidgetConfig(wallpaperId)
+    : await tryReadWidgetConfigFile(getWallpaperWidgetOverridePath(UNASSIGNED_WIDGET_NAMESPACE))
+      ?? { widgets: widgetNamespaceInitialized ? [] : parseStoredWidgets(store.get('widgets')), builtinDefault: false, coordinateSpace: WIDGET_DISPLAY_COORDINATE_SPACE }
+  // Resolve the next configuration first. A corrupt file must not discard the
+  // current desktop. Drain edits made while the next file was being read.
+  if (widgetNamespaceInitialized) await flushPendingWidgetSave()
 
   const displays = getDisplayDescriptors()
   const primary = displays.find((display) => display.primary) ?? displays[0]
@@ -299,7 +283,9 @@ export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<Wid
     displays,
   ))
   const merged = withDefaultWidgetConfigs([...getWallpaperScopedWidgets(wallpaperWidgets), ...globalWidgets])
-  persistWidgets(merged)
+  persistWidgets(merged, true)
+  widgetWallpaperId = wallpaperId
+  widgetNamespaceInitialized = true
   const render = getDesktopRenderBounds()
   store.set('widgetCoordinateOrigin', { x: render.x, y: render.y })
   syncToCanvas()
@@ -734,59 +720,70 @@ function getWallpaperRoot(): string {
   return join(__dirname, '../../assets/wallpaper')
 }
 
-/** 自动保存组件配置到用户数据覆盖层 */
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-
-/** 取消尚未完成的防抖写入（切壁纸前调用，避免旧组件写到新壁纸覆盖层） */
-export function cancelPendingAutoSave(): void {
-  if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null }
-}
+const UNASSIGNED_WIDGET_NAMESPACE = 'workspace:unassigned'
+let widgetWallpaperId: string | undefined
+let widgetNamespaceInitialized = false
+const widgetWriter = createDebouncedWriter(
+  (entry: { wallpaperId: string; widgets: WidgetInstance[] }) => writeWallpaperWidgetOverride(entry.wallpaperId, entry.widgets),
+  (error) => console.error('[widget] autosave failed; pending data retained:', error),
+)
 
 function autoSaveToWallpaper(): void {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  autoSaveTimer = setTimeout(async () => {
-    try {
-      const current = store.get('wallpaper')?.current
-      if (!current) return
-      const widgets = getWallpaperScopedWidgets(store.get('widgets'))
-      await writeWallpaperWidgetOverride(current.id, widgets)
-    } catch { /* 写入失败静默忽略 */ }
-  }, 500)
+  const wallpaperId = (widgetNamespaceInitialized ? widgetWallpaperId : store.get('wallpaper')?.current?.id)
+    ?? UNASSIGNED_WIDGET_NAMESPACE
+  widgetWriter.schedule({ wallpaperId, widgets: structuredClone(getWallpaperScopedWidgets(parseStoredWidgets(store.get('widgets')))) })
+}
+
+export async function flushPendingWidgetSave(): Promise<void> {
+  autoSaveToWallpaper()
+  await widgetWriter.flush()
 }
 
 async function removeWidgetWithRestore(id: string): Promise<{ list: WidgetInstance[]; deleted: boolean }> {
-  const widgets = store.get('widgets')
-  const target = widgets.find((w) => w.id === id)
-  if (!target) return { list: widgets, deleted: false }
+  return withDesktopIconOperation(id, async () => {
+    const target = store.get('widgets').find((widget) => widget.id === id)
+    if (!target) return { list: store.get('widgets'), deleted: false }
 
-  const restoreResult = await restoreDesktopIconsForWidget(target)
-  if (!restoreResult.ok) {
+    const restoreResult = await restoreDesktopIconsForWidget(target)
+    const current = store.get('widgets').find((widget) => widget.id === id)
     const restoredIds = new Set(restoreResult.restoredItemIds ?? [])
-    const remainingItems = getDesktopIconItems(target).filter((item) => item.removedFromDesktop && !restoredIds.has(item.id))
-    if (target.type !== 'desktop-icons-dock' && remainingItems.length > 0) {
-      const retained = { ...target, config: { ...(target.config ?? {}), items: remainingItems } }
-      const updated = widgets.map((widget) => (widget.id === id ? retained : widget))
+    const remainingItems = current ? getDesktopIconItems(current).filter((item) => !restoredIds.has(item.id)) : []
+    const hasManagedItems = remainingItems.some((item) => item.removedFromDesktop)
+    if (current && (!restoreResult.ok || hasManagedItems)) {
+      const retained = { ...current, config: { ...(current.config ?? {}), items: remainingItems } }
+      const updated = store.get('widgets').map((widget) => widget.id === id ? retained : widget)
       persistWidgets(updated)
       syncToCanvas()
       autoSaveToWallpaper()
-      console.warn('[widget] desktop icon restore incomplete, keeping widget:', restoreResult.skipped)
+      await dialog.showMessageBox({ type: 'warning', message: '部分桌面文件未能恢复，已保留组件及文件记录。', detail: restoreResult.skipped.join('\n'), buttons: ['保留并稍后重试'] })
       return { list: updated, deleted: false }
     }
-    console.warn('[widget] desktop icon restore incomplete, removing widget:', restoreResult.skipped)
-  }
 
-  const list = widgets.filter((w) => w.id !== id)
-  persistWidgets(list)
-  syncToCanvas()
-  autoSaveToWallpaper()
-  return { list, deleted: true }
+    const list = store.get('widgets').filter((widget) => widget.id !== id)
+    persistWidgets(list)
+    syncToCanvas()
+    autoSaveToWallpaper()
+    return { list, deleted: true }
+  })
 }
 
 export function registerWidgetIpc(): void {
+  let quitAfterFlush = false
+  let quitFlushInProgress = false
+  app.on('before-quit', (event) => {
+    if (quitAfterFlush || !widgetNamespaceInitialized) return
+    event.preventDefault()
+    if (quitFlushInProgress) return
+    quitFlushInProgress = true
+    void flushPendingWidgetSave().then(() => { quitAfterFlush = true; app.quit() }).catch((error) => {
+      quitFlushInProgress = false
+      console.error('[widget] quit save failed:', error)
+      dialog.showErrorBox('组件配置保存失败', '原数据和待保存修改已保留，请检查磁盘空间或权限后重试退出。')
+    })
+  })
   ipcMain.handle(IPC.WIDGET_LIST, (event) => {
     assertTrustedIpcSender(event, ['main', 'canvas'])
-    const list = withDefaultWidgetConfigs(parseWidgetList(store.get('widgets')))
-    persistWidgets(list)
+    const list = withDefaultWidgetConfigs(parseStoredWidgets(store.get('widgets')))
     return event.sender.id === getCanvasWindow()?.webContents.id ? getMaterializedWidgets(list) : list
   })
 
@@ -826,13 +823,15 @@ export function registerWidgetIpc(): void {
 
   ipcMain.handle(IPC.WIDGET_UPDATE, (_e, w: WidgetInstance) => {
     assertTrustedIpcSender(_e, ['main', 'canvas'])
-    w = widgetInstanceSchema.parse(w)
+    w = storedWidgetSchema.parse(w)
     const list = store.get('widgets')
     if (_e.sender.id === getCanvasWindow()?.webContents.id) {
       w = normalizeCanvasWidgetUpdate(w, list)
     } else if (!w.displayKey) {
       w = bindWidgetToPrimary(w)
     }
+    // Late renderer updates after removal/switching must not recreate a widget.
+    if (!list.some((widget) => widget.id === w.id)) return list
     const updated = isFreeformStickyNote(w.type)
       ? [...list.filter((item) => item.id !== w.id), mergeWidgetUpdate(list.find((item) => item.id === w.id) ?? w, w)]
       : list.map((it) => (it.id === w.id ? mergeWidgetUpdate(it, w) : it))
@@ -949,10 +948,7 @@ export function registerWidgetIpc(): void {
   ipcMain.handle(IPC.WIDGET_CONFIG_SAVE, async (event) => {
     assertTrustedIpcSender(event, ['main', 'canvas'])
     try {
-      const current = store.get('wallpaper')?.current
-      if (!current) return false
-      const widgets = getWallpaperScopedWidgets(store.get('widgets'))
-      await writeWallpaperWidgetOverride(current.id, widgets)
+      await flushPendingWidgetSave()
       return true
     } catch (e) {
       console.error('[widget] config save failed:', e)
@@ -978,9 +974,7 @@ export function registerWidgetIpc(): void {
  * 基础单元 160px，间距 16px
  */
 export function listWidgetsForTool(): WidgetInstance[] {
-  const list = withDefaultWidgetConfigs(store.get('widgets'))
-  persistWidgets(list)
-  return list
+  return withDefaultWidgetConfigs(parseStoredWidgets(store.get('widgets')))
 }
 
 export function addWidgetForTool(widget: WidgetInstance): { ok: boolean; added: boolean; widget: WidgetInstance; list: WidgetInstance[]; reason?: string } {
@@ -992,7 +986,7 @@ export function addWidgetForTool(widget: WidgetInstance): { ok: boolean; added: 
     return { ok: true, added: false, widget: existing, list, reason: 'already-exists' }
   }
 
-  const normalized = bindWidgetToPrimary(withDefaultWidgetConfig(widget))
+  const normalized = bindWidgetToPrimary(withDefaultWidgetConfig(widgetInstanceSchema.parse(widget)))
   const placement = normalized.type === 'desktop-icons-dock'
     ? getDockPlacement(normalized.width, normalized.height)
     : isFreeformStickyNote(normalized.type)

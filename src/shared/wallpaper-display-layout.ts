@@ -99,6 +99,28 @@ export function planWallpaperApplication(params: {
   return { mode: params.mode, assignments, currentId: itemId }
 }
 
+/** The primary visible wallpaper owns the widget namespace in every mode. */
+export function resolveEffectiveWallpaper(params: {
+  mode: WallpaperDisplayMode
+  displays: readonly DisplayDescriptor[]
+  assignments: Readonly<Record<string, string>>
+  catalog: readonly WallpaperItem[]
+  current?: WallpaperItem
+}): WallpaperItem | undefined {
+  const byId = new Map(params.catalog.map((item) => [item.id, item]))
+  const current = params.current ? byId.get(params.current.id) ?? params.current : undefined
+  if (params.mode !== 'per-display') return current
+  const primary = params.displays.find((display) => display.primary) ?? params.displays[0]
+  const primaryId = primary && getDisplayAssignment(params.assignments, primary)
+  if (primaryId && byId.has(primaryId)) return byId.get(primaryId)
+  if (current) return current
+  for (const display of params.displays) {
+    const assignedId = getDisplayAssignment(params.assignments, display)
+    if (assignedId && byId.has(assignedId)) return byId.get(assignedId)
+  }
+  return undefined
+}
+
 export function unionDisplayBounds(displays: readonly DisplayDescriptor[]): DisplayBounds {
   if (displays.length === 0) return { x: 0, y: 0, width: 1, height: 1 }
   const left = Math.min(...displays.map((display) => display.bounds.x))
@@ -156,7 +178,8 @@ export function buildWallpaperLayoutForTarget(params: {
   const bounds = display?.bounds ?? target.bounds
   const byId = new Map(catalog.map((item) => [item.id, item]))
   const assignedId = display ? getDisplayAssignment(assignments, display) : undefined
-  const item = mode === 'per-display' && assignedId ? (byId.get(assignedId) ?? current) : current
+  const freshCurrent = byId.get(current.id) ?? current
+  const item = mode === 'per-display' && assignedId ? (byId.get(assignedId) ?? freshCurrent) : freshCurrent
   const virtualBounds = mode === 'span' ? unionDisplayBounds(displays) : bounds
   return {
     mode,

@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useState } from 'react'
+import { useWeather } from '../shared/useWeather'
 import { COLOR_THEMES } from '../shared/constants'
 
 interface GraphicDateTimeProps {
@@ -57,7 +58,6 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
   const theme =
     COLOR_THEMES.find((t) => t.id === themeId) || COLOR_THEMES.find((t) => t.id === 'yellow') || COLOR_THEMES[0]
   const [now, setNow] = useState(new Date())
-  const [weatherSummary, setWeatherSummary] = useState<WeatherSummary>(DEFAULT_WEATHER)
   const configuredCity = typeof config?.city === 'string' ? config.city.trim() : undefined
 
   useEffect(() => {
@@ -65,40 +65,16 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
     return () => clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-
-    const fetchWeather = async () => {
-      try {
-        const snapshot = await window.canvasBridge?.fetchWeather({ city: configuredCity, days: 1 })
-        const current = snapshot?.current
-        if (!snapshot?.ok || !current) throw new Error(snapshot?.error || 'weather fetch failed')
-
-        if (!cancelled) {
-          setWeatherSummary({
-            city: snapshot.city || snapshot.location || DEFAULT_WEATHER.city,
-            condition: current.condition === 'sunny' ? 'clear' : current.condition,
-            temp: Number.isFinite(current.temperature)
-              ? String(Math.round(current.temperature))
-              : '--',
-            humidity: Number.isFinite(current.humidity)
-              ? String(Math.round(current.humidity))
-              : '--',
-            windSpeed: Number.isFinite(current.windSpeed)
-              ? String(Math.round(current.windSpeed))
-              : '--',
-          })
-        }
-      } catch {
-        if (!cancelled) setWeatherSummary(DEFAULT_WEATHER)
-      }
-    }
-
-    void fetchWeather()
-    return () => {
-      cancelled = true
-    }
-  }, [configuredCity])
+  const weather = useWeather(configuredCity)
+  const snapshot = weather.snapshot
+  const current = snapshot?.current
+  const weatherSummary: WeatherSummary = current ? {
+    city: snapshot?.city || snapshot?.location || DEFAULT_WEATHER.city,
+    condition: current.condition === 'sunny' ? 'clear' : current.condition,
+    temp: String(Math.round(current.temperature)),
+    humidity: Number.isFinite(current.humidity) ? String(Math.round(current.humidity)) : '--',
+    windSpeed: Number.isFinite(current.windSpeed) ? String(Math.round(current.windSpeed)) : '--',
+  } : { ...DEFAULT_WEATHER, city: configuredCity || '--' }
 
   const day = now.toLocaleDateString('en-US', { day: '2-digit' })
   const month = now.toLocaleDateString('en-US', { month: 'long' }).toUpperCase()
@@ -121,6 +97,7 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
   return (
     <div
       className="select-none"
+      title={weather.label}
       style={{
         position: 'relative',
         width: 420,
@@ -249,6 +226,7 @@ export function GraphicDateTime({ config }: GraphicDateTimeProps) {
           {weatherSummary.condition}, {weatherSummary.temp}° · Humidity {weatherSummary.humidity}%
           <br />
           Wind {weatherSummary.windSpeed} km/h
+          {weather.status !== 'ready' && <div role="status">{weather.label}</div>}
         </div>
       </div>
     </div>

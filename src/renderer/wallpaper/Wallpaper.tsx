@@ -1,3 +1,4 @@
+import { getSynchronizedVideoTime, needsVideoTimeCorrection } from '@shared/wallpaper-playback'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WallpaperItem, WallpaperDisplayLayout } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
@@ -99,11 +100,12 @@ export function Wallpaper() {
   const [capturePaused, setCapturePaused] = useState(false)
   const activeItem = layout?.displays[0]?.item ?? item
 
-  // 实时设置状态
-  const [volume, setVolume] = useState(50)
-  const [speed, setSpeed] = useState(1.0)
-  const [scaling, setScaling] = useState('覆盖')
-  const [flip, setFlip] = useState('无')
+  // Settings belong to this surface, never the primary window's legacy snapshot.
+  const audioEnabled = layout?.playback?.audioEnabled !== false
+  const volume = activeItem?.settings?.volume ?? 50
+  const speed = activeItem?.settings?.speed ?? 1
+  const scaling = activeItem?.settings?.scaling ?? '覆盖'
+  const flip = activeItem?.settings?.flip ?? '无'
   const objectFit = resolveWallpaperObjectFit(layout?.mode, scaling)
   const transform = flipToTransform(flip)
 
@@ -130,7 +132,7 @@ export function Wallpaper() {
       if (!v || activeItem?.type !== 'video') return
       clearPlayRetry()
       v.volume = Math.max(0, Math.min(1, volume / 100))
-      v.muted = volume === 0 || !videoStarted || attempt > 0
+      v.muted = !audioEnabled || volume === 0 || !videoStarted || attempt > 0
       v.playbackRate = speed
       v.play()
         .then(() => {
@@ -140,7 +142,7 @@ export function Wallpaper() {
           }
           if (generation !== playRequestGenerationRef.current) return
           setVideoStarted(true)
-          if (volume > 0) v.muted = false
+          if (audioEnabled && volume > 0) v.muted = false
         })
         .catch((e: DOMException) => {
           if (generation !== playRequestGenerationRef.current || pausedRef.current) return
@@ -153,7 +155,7 @@ export function Wallpaper() {
           )
         })
     },
-    [activeItem?.type, clearPlayRetry, speed, videoStarted, volume]
+    [activeItem?.type, audioEnabled, clearPlayRetry, speed, videoStarted, volume]
   )
 
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
@@ -174,6 +176,7 @@ export function Wallpaper() {
   }, [clearPlayRetry])
 
   useEffect(() => {
+    setErr(null)
     setMediaReady(false)
     setVideoStarted(false)
     readyReportedRef.current = null
@@ -318,98 +321,72 @@ export function Wallpaper() {
   }, [activeItem, captureDemanded, captureFrame, capturePaused, startCapture, stopCapture])
 
   useEffect(() => {
+    let alive = true
+    let itemRevision = 0
     const off = window.wallpaperBridge?.onLoad((it) => {
       console.log('[wallpaper] onLoad', it)
-      setErr(null)
-      setMediaReady(false)
-      setVideoStarted(false)
+      itemRevision += 1
       setItem(it)
-      // 加载壁纸自带的设置
-      if (it.settings) {
-        if (it.settings.volume !== undefined) setVolume(it.settings.volume)
-        if (it.settings.speed !== undefined) setSpeed(it.settings.speed)
-        if (it.settings.scaling !== undefined) setScaling(it.settings.scaling)
-        if (it.settings.flip !== undefined) setFlip(it.settings.flip)
-      }
     })
-    const offLayout = window.wallpaperBridge?.onDisplayLayout?.(setLayout)
-    const offLayoutChanged = window.wallpaperBridge?.onDisplayLayoutChanged?.(() => {
-      window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
-        if (next) setLayout(next)
-      })
+    let layoutRevision = 0
+    const pullLayout = (): void => {
+      const revision = ++layoutRevision
+      void window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
+        if (alive && revision === layoutRevision) setLayout(next)
+      }).catch((error) => { if (alive) console.warn('[wallpaper] layout request failed:', error) })
+    }
+    const offLayout = window.wallpaperBridge?.onDisplayLayout?.((next) => {
+      layoutRevision += 1
+      setLayout(next)
     })
-    // 主动拉取当前壁纸（防止启动时错过 LOAD 事件）
-    window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
-      if (next) setLayout(next)
-    })
+    const offLayoutChanged = window.wallpaperBridge?.onDisplayLayoutChanged?.(pullLayout)
+    // A delayed initial pull must not overwrite a newer pushed layout.
+    pullLayout()
+    const currentRevision = itemRevision
     window.wallpaperBridge?.getCurrent?.().then((state) => {
-      if (state?.current) {
-        console.log('[wallpaper] initial pull', state.current)
-        setErr(null)
-        setMediaReady(false)
-        setVideoStarted(false)
+      if (alive && currentRevision === itemRevision && state?.current) {
+        // Readiness resets only when the effective surface changes, not when a
+        // legacy primary snapshot arrives after an image or iframe has loaded.
         setItem(state.current)
-        const s = state.current.settings
-        if (s) {
-          if (s.volume !== undefined) setVolume(s.volume)
-          if (s.speed !== undefined) setSpeed(s.speed)
-          if (s.scaling !== undefined) setScaling(s.scaling)
-          if (s.flip !== undefined) setFlip(s.flip)
-        }
       }
-    })
+    }).catch((error) => { if (alive) console.warn('[wallpaper] current request failed:', error) })
     return () => {
+      alive = false
       off?.()
       offLayout?.()
       offLayoutChanged?.()
     }
   }, [])
 
-  // Per-monitor assignments can have their own media settings and may change
-  // without changing wallpaper.current in another monitor window.
-  useEffect(() => {
-    if (!activeItem) return
-    const settings = activeItem.settings
-    setVolume(settings?.volume ?? 50)
-    setSpeed(settings?.speed ?? 1)
-    setScaling(settings?.scaling ?? '覆盖')
-    setFlip(settings?.flip ?? '无')
-  }, [activeItem])
-
-  // 监听实时设置更新
-  useEffect(() => {
-    const off = window.wallpaperBridge?.onSettingUpdate?.((key: string, value: unknown) => {
-      switch (key) {
-        case 'volume':
-          setVolume(value as number)
-          break
-        case 'speed':
-          setSpeed(value as number)
-          break
-        case 'scaling':
-          setScaling(value as string)
-          break
-        case 'flip':
-          setFlip(value as string)
-          break
-      }
-    })
-    return off
-  }, [])
-
   // 应用 volume 和 speed 到 video 元素
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = Math.max(0, Math.min(1, volume / 100))
-      videoRef.current.muted = volume === 0 || !videoStarted
+      videoRef.current.muted = !audioEnabled || volume === 0 || !videoStarted
     }
-  }, [activeItem, videoStarted, volume])
+  }, [activeItem, audioEnabled, videoStarted, volume])
 
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.playbackRate = speed
     }
   }, [activeItem, speed])
+
+  useEffect(() => {
+    const epoch = layout?.playback?.epochMs
+    if (epoch === undefined || activeItem?.type !== 'video' || capturePaused || (layout?.mode !== 'duplicate' && layout?.mode !== 'span')) return
+    const video = videoRef.current
+    if (!video) return
+    const synchronize = (): void => {
+      const expected = getSynchronizedVideoTime(epoch, Date.now(), video.duration, speed)
+      if (expected !== undefined && video.readyState >= 1 && needsVideoTimeCorrection(video.currentTime, expected, video.duration)) video.currentTime = expected
+    }
+    synchronize()
+    video.addEventListener('loadedmetadata', synchronize)
+    video.addEventListener('playing', synchronize)
+    const timer = setInterval(synchronize, 1000)
+    return () => { clearInterval(timer); video.removeEventListener('loadedmetadata', synchronize); video.removeEventListener('playing', synchronize) }
+  }, [activeItem?.source, activeItem?.type, capturePaused, layout?.mode, layout?.playback?.epochMs, speed])
 
   if (!activeItem) {
     return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
@@ -453,13 +430,13 @@ export function Wallpaper() {
     const surfaceSrc = toAssetUrl(surfaceItem.source) ?? ''
     const surfaceMediaStyle = { ...mediaStyle, display: 'block' as const }
     if (surfaceItem.type === 'video') {
-      return <video key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
+      return <video key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={!audioEnabled || volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
     }
     if (surfaceItem.type === 'image') {
       return <img key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? imgRef : undefined} crossOrigin="anonymous" src={surfaceSrc} onLoad={() => { if (index === 0) { markMediaReady(); captureFrame() } }} onError={() => { if (index === 0) { setErr(`image 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} alt="" />
     }
     if (surfaceItem.type === 'web') {
-      return <iframe key={`${surface.displayKey}:${surfaceItem.source}`} src={surfaceSrc} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
+      return <iframe key={`${surface.displayKey}:${surfaceItem.source}`} sandbox="allow-scripts allow-same-origin" src={surfaceItem.webUrl} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
     }
     return null
   }

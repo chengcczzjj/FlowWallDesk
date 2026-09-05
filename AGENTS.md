@@ -36,6 +36,7 @@
 - 单元与契约测试：`npm.cmd run test:unit`
 - 标准验证：`npm.cmd test`
 - 生产构建检查：`npm.cmd run build:check`
+- 隔离 Electron 冒烟验证（含生产构建）：`npm.cmd run test:electron:smoke`
 - Windows 安装包构建：`npm.cmd run build:win`
 - 未打包目录构建：`npm.cmd run build:dir`
 

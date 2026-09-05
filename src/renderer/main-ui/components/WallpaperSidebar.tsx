@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { WallpaperItem, WallpaperSettings } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
 import { Check, Monitor, RotateCcw, Trash2, X } from 'lucide-react'
@@ -39,47 +39,29 @@ export function WallpaperSidebar(props: {
   const [scaling, setScaling] = useState(item.settings?.scaling ?? DEFAULT_SETTINGS.scaling)
   const [flip, setFlip] = useState(item.settings?.flip ?? DEFAULT_SETTINGS.flip)
 
-  // 自动保存防抖
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const saveSettings = useCallback(
-    (s: WallpaperSettings) => {
-      clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(() => {
-        window.lingyue.wallpaper.saveSettings(item.id, s)
-      }, 500)
-    },
-    [item.id]
-  )
-
-  // 实时发送设置变更到壁纸窗口（如果当前壁纸已应用）
-  const sendUpdate = useCallback(
-    (key: string, value: unknown) => {
-      if (isApplied) {
-        window.lingyue.wallpaper.updateSetting(key, value)
-      }
-    },
-    [isApplied]
-  )
+  const [saveError, setSaveError] = useState('')
+  const saveSettings = useCallback((settings: WallpaperSettings) => {
+    setSaveError('')
+    void window.lingyue.wallpaper.saveSettings(item.id, settings).catch((error) => {
+      setSaveError(error instanceof Error ? error.message : '设置保存失败，请重试。')
+    })
+  }, [item.id])
 
   const handleVolume = (v: number) => {
     setVolume(v)
-    sendUpdate('volume', v)
-    saveSettings({ volume: v, speed, scaling, flip })
+    saveSettings({ volume: v })
   }
   const handleSpeed = (v: number) => {
     setSpeed(v)
-    sendUpdate('speed', v)
-    saveSettings({ volume, speed: v, scaling, flip })
+    saveSettings({ speed: v })
   }
   const handleScaling = (v: string) => {
     setScaling(v)
-    sendUpdate('scaling', v)
-    saveSettings({ volume, speed, scaling: v, flip })
+    saveSettings({ scaling: v })
   }
   const handleFlip = (v: string) => {
     setFlip(v)
-    sendUpdate('flip', v)
-    saveSettings({ volume, speed, scaling, flip: v })
+    saveSettings({ flip: v })
   }
   const handleReset = () => {
     setVolume(DEFAULT_SETTINGS.volume)
@@ -88,12 +70,6 @@ export function WallpaperSidebar(props: {
     setFlip(DEFAULT_SETTINGS.flip)
     const s = { ...DEFAULT_SETTINGS }
     saveSettings(s)
-    if (isApplied) {
-      sendUpdate('volume', s.volume)
-      sendUpdate('speed', s.speed)
-      sendUpdate('scaling', s.scaling)
-      sendUpdate('flip', s.flip)
-    }
   }
 
   const showVolume = item.type === 'video' || item.type === 'web'
@@ -125,6 +101,7 @@ export function WallpaperSidebar(props: {
       </div>
 
       <div className="sidebar__content">
+        {saveError && <div role="alert">{saveError}</div>}
         <div className="settings-group">
           <div className="settings-group__header">壁纸属性</div>
 

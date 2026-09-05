@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   WallpaperApplyTarget,
   WallpaperDisplayMode,
@@ -45,6 +45,7 @@ export function LibraryPage({
   const [loadedDisplaySettings, setLoadedDisplaySettings] = useState<WallpaperDisplaySettings | null>(displaySettings ?? null)
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [appliedId, setAppliedId] = useState<string | undefined>()
+  const lastSelectionTarget = useRef(wallpaperTarget)
   const [loading, setLoading] = useState(true)
   const [dragOver, setDragOver] = useState(false)
 
@@ -73,7 +74,9 @@ export function LibraryPage({
           : current?.current?.id
         if (effectiveId) {
           setAppliedId(effectiveId)
-          setSelectedId(effectiveId)
+          const targetChanged = lastSelectionTarget.current !== wallpaperTarget
+          lastSelectionTarget.current = wallpaperTarget
+          setSelectedId((previous) => !targetChanged && items.some((entry) => entry.id === previous) ? previous : effectiveId)
         } else if (items[0]) {
           setSelectedId(items[0].id)
         }
@@ -170,7 +173,7 @@ export function LibraryPage({
       const files = e.dataTransfer.files
       if (files.length > 0 && onDropFile) {
         const f = files[0]
-        const path = (f as File & { path?: string }).path
+        const path = window.lingyue.utils.getFilePath(f)
         if (path) {
           onDropFile({ path, name: f.name })
         }
