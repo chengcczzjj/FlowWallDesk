@@ -23,7 +23,8 @@ npm run dev
 ```powershell
 npm run typecheck      # TypeScript 类型检查
 npm run lint:check     # 只检查 ESLint，不自动改文件
-npm test               # 标准验证：typecheck + lint:check
+npm run test:unit      # Node 单元与契约测试
+npm test               # 标准验证：typecheck + lint:check + test:unit
 npm run build:check    # electron-vite 生产构建检查
 ```
 
@@ -31,7 +32,7 @@ npm run build:check    # electron-vite 生产构建检查
 
 ## Agent / Codex 开发
 
-README 面向开发者快速启动项目；Codex、VSCode/Copilot Agent 等智能体请先阅读 [AGENTS.md](AGENTS.md)，再按任务需要读取 `TempFile/文档资料/project-status.md`、`TempFile/文档资料/dev-log.md` 和相关设计文档。
+README 面向开发者快速启动项目；开发智能体先读 [AGENTS.md](AGENTS.md)。当前能力见 [项目状态](TempFile/文档资料/project-status.md)，故障约束见 [开发经验](TempFile/文档资料/dev-lessons.md)，旧方案与月度日志入口见 [知识索引](TempFile/文档资料/knowledge-index.md)。这些是工程记忆，与应用内用户记忆分开维护。
 
 ## 构建
 
@@ -47,16 +48,12 @@ npm run build:dir        # 仅生成未打包目录，便于本地调试
 
 正式版启动 15 秒后自动检查更新，之后每 6 小时检查一次；发现新版本后，左侧活动栏会出现更新按钮。用户点击后开始下载，下载完成后同一按钮会变为“重启并更新”。
 
-发布新版本时按以下顺序执行：
+发布必须有明确授权，区分本地构建、本机安装和远端发布：
 
-```powershell
-npm version 1.1.1 --no-git-tag-version
-npm test
-npm run build:win:signed  # 未配置证书时先用 build:win 做内部验证
-git tag -a v1.1.1 -m "LingyueDesk 1.1.1"
-```
-
-随后创建同版本 GitHub Release，并上传 `dist/latest.yml`、安装包和对应 `.blockmap`。`chengcczzjj/FlowWallDesk` 已设为公开仓库，客户端可直接发现公开 Release；如果后续改回私有仓库，需要同步切换到公共对象存储更新源。
+1. 确认本次目标版本，同步 `package.json`、`package-lock.json` 和发布说明/契约，不照抄旧版本号。
+2. 运行 `npm test`；按授权执行 `npm run build:win:signed`，未配置证书时仅用 `build:win` 做相应验证。
+3. 本地安装不等于远端发布。仅在获准发布后，为相同版本创建标签和 GitHub Release，并上传匹配的 `dist/latest.yml`、安装包和 `.blockmap`，验证大小与哈希。
+4. 更新源配置见 [electron-builder.yml](electron-builder.yml)；远端可访问性和客户端更新需要另行实测。Git push 与发布权限见根规则。
 
 ## 在线壁纸资源
 
@@ -86,7 +83,7 @@ src/
 │   ├── index.ts        # 入口：appReady、窗口、托盘、IPC 注册
 │   ├── store.ts        # electron-store 持久化封装
 │   ├── tray.ts         # 系统托盘
-│   ├── windows/        # 三个窗口：主界面 / 壁纸 / 组件画布
+│   ├── windows/        # 三类窗口：主界面 / 逐屏壁纸 / 单组件画布
 │   └── ipc/            # 各模块 IPC handlers
 ├── preload/            # 单文件 role-gated contextBridge：main-ui / wallpaper / canvas
 ├── renderer/
@@ -108,6 +105,6 @@ src/
 | `@shared/*` | `src/shared/*` |
 | `@resources/*` | `resources/*` |
 
-## 开发顺序
+## 架构与维护
 
 详见 [TempFile/文档资料/other/灵月项目开发指南 .md](TempFile/%E6%96%87%E6%A1%A3%E8%B5%84%E6%96%99/other/%E7%81%B5%E6%9C%88%E9%A1%B9%E7%9B%AE%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97%20.md)。
