@@ -1375,6 +1375,8 @@ export function ChatPage() {
 
   // ── Textarea ──
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Enter that confirms an IME composition must not send the message.
+    if (e.nativeEvent.isComposing) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -1403,7 +1405,8 @@ export function ChatPage() {
     fileInput.onchange = () => {
       const files = Array.from(fileInput.files ?? [])
       if (files.length === 0) return
-      const names = files.map((file) => (file as File & { path?: string }).path || file.name).join(', ')
+      // Electron 32+ removed File.path; resolve the local path through webUtils.
+      const names = files.map((file) => window.lingyue.utils.getFilePath(file) || file.name).join(', ')
       setInput((prev) => `${prev}${prev ? ' ' : ''}[附件: ${names}]`)
     }
     fileInput.click()
@@ -1501,6 +1504,7 @@ export function ChatPage() {
   }, [startChatStream])
 
   const handleDeleteConversation = useCallback(async (id: string) => {
+    if (!window.confirm('删除这段对话？删除后无法恢复。')) return
     await window.lingyue.chat.deleteConversation(id)
     if (activeConvId === id) {
       setActiveConvId(null)
@@ -1512,6 +1516,11 @@ export function ChatPage() {
   const handleStartRename = useCallback((id: string, currentTitle: string) => {
     setEditingConvId(id)
     setEditingTitle(currentTitle || '')
+  }, [])
+
+  const handleCancelRename = useCallback(() => {
+    setEditingConvId(null)
+    setEditingTitle('')
   }, [])
 
   const handleFinishRename = useCallback(async () => {
@@ -1751,6 +1760,7 @@ export function ChatPage() {
                             onStartRename={handleStartRename}
                             onEditTitleChange={setEditingTitle}
                             onFinishRename={handleFinishRename}
+                            onCancelRename={handleCancelRename}
                             onDelete={handleDeleteConversation}
                             indent
                           />
@@ -1802,6 +1812,7 @@ export function ChatPage() {
                 onStartRename={handleStartRename}
                 onEditTitleChange={setEditingTitle}
                 onFinishRename={handleFinishRename}
+                onCancelRename={handleCancelRename}
                 onDelete={handleDeleteConversation}
               />
             ))}
@@ -2659,13 +2670,14 @@ interface ConversationItemProps {
   onStartRename: (id: string, title: string) => void
   onEditTitleChange: (title: string) => void
   onFinishRename: () => void
+  onCancelRename: () => void
   onDelete: (id: string) => void
   indent?: boolean
 }
 
 function ConversationItem({
   conv, isActive, isEditing, editingTitle,
-  onSelect, onContextMenu, onStartRename, onEditTitleChange, onFinishRename, onDelete, indent,
+  onSelect, onContextMenu, onStartRename, onEditTitleChange, onFinishRename, onCancelRename, onDelete, indent,
 }: ConversationItemProps) {
   return (
     <div
@@ -2680,7 +2692,12 @@ function ConversationItem({
           value={editingTitle}
           onChange={(e) => onEditTitleChange(e.target.value)}
           onBlur={onFinishRename}
-          onKeyDown={(e) => { if (e.key === 'Enter') onFinishRename(); if (e.key === 'Escape') { onEditTitleChange(''); onFinishRename() } }}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return
+            if (e.key === 'Enter') onFinishRename()
+            // Escape discards the edit; finishing here saved the typed title anyway.
+            if (e.key === 'Escape') onCancelRename()
+          }}
           autoFocus
           onClick={(e) => e.stopPropagation()}
         />

@@ -755,7 +755,10 @@ function IconManagerPreview({
             title={multi ? '全部删除' : '删除'}
             onClick={(event) => {
               event.stopPropagation()
-              onRemoveAll()
+              const prompt = multi
+                ? `删除全部 ${count} 个“${catalog.name}”？收纳的桌面图标会尽量移回桌面。`
+                : `删除“${catalog.name}”？收纳的桌面图标会尽量移回桌面。`
+              if (window.confirm(prompt)) onRemoveAll()
             }}
             style={iconManagerRemoveButtonStyle}
           >

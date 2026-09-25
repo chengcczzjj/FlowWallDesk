@@ -36,6 +36,8 @@ import {
 import './todo-board.css'
 
 const TEAR_DURATION_MS = 540
+/** How long a note keeps editing after the whole canvas window loses activation. */
+const WINDOW_BLUR_FINISH_GRACE_MS = 360
 const TODO_CATEGORIES: TodoTaskCategory[] = ['work', 'study', 'life', 'health', 'other']
 const TODO_FORMATS = ['bold', 'italic', 'underline', 'strike', 'list'] as const
 type TodoFormat = typeof TODO_FORMATS[number]
@@ -174,6 +176,7 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
   const settingsRef = useRef<HTMLDivElement>(null)
   const tearTimerRef = useRef<number | null>(null)
   const editorSaveTimerRef = useRef<number | null>(null)
+  const windowBlurFinishTimerRef = useRef<number | null>(null)
   const handledTearRef = useRef<number | null>(null)
 
   const persistConfig = useCallback((patch: Partial<TodoWidgetConfig>) => {
@@ -200,14 +203,38 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
     }, 520)
   }, [persistEditorContent])
 
+  const cancelWindowBlurFinish = useCallback((): void => {
+    if (windowBlurFinishTimerRef.current === null) return
+    window.clearTimeout(windowBlurFinishTimerRef.current)
+    windowBlurFinishTimerRef.current = null
+  }, [])
+
   const finishEditing = useCallback((): void => {
+    cancelWindowBlurFinish()
     if (editorSaveTimerRef.current !== null) {
       window.clearTimeout(editorSaveTimerRef.current)
       editorSaveTimerRef.current = null
     }
     if (editorRef.current) persistEditorContent(editorRef.current.innerHTML)
     setEditingText(false)
-  }, [persistEditorContent])
+  }, [cancelWindowBlurFinish, persistEditorContent])
+
+  // The whole canvas window can lose activation for a moment while typing
+  // (IME candidate/mode switch UI, a system flyout). Ending the edit there
+  // made the note drop focus mid-composition and forced another click. Only
+  // finish if the canvas does not get focus back quickly; a click on the
+  // desktop or another app still ends editing after the grace period.
+  useEffect(() => {
+    if (!editingText) return undefined
+    const resumeAfterWindowFocus = () => {
+      if (document.activeElement === editorRef.current) cancelWindowBlurFinish()
+    }
+    window.addEventListener('focus', resumeAfterWindowFocus)
+    return () => {
+      window.removeEventListener('focus', resumeAfterWindowFocus)
+      cancelWindowBlurFinish()
+    }
+  }, [cancelWindowBlurFinish, editingText])
 
   useEffect(() => {
     if (!editingText) return undefined
@@ -267,6 +294,7 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
   useEffect(() => () => {
     if (tearTimerRef.current !== null) window.clearTimeout(tearTimerRef.current)
     if (editorSaveTimerRef.current !== null) window.clearTimeout(editorSaveTimerRef.current)
+    if (windowBlurFinishTimerRef.current !== null) window.clearTimeout(windowBlurFinishTimerRef.current)
   }, [])
 
   const hideAfterTear = useCallback((nextConfig: TodoWidgetConfig) => {
@@ -394,6 +422,7 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
   return (
     <section
       className="sticky-note"
+      data-widget-hit-area
       data-color={config.color}
       data-paper-style={config.paperStyle}
       data-tearing={tearing}
@@ -517,6 +546,14 @@ export function TodoBoardWidget({ widget }: { widget: WidgetInstance }) {
               onBlur={(event) => {
                 const nextTarget = event.relatedTarget as Node | null
                 if (nextTarget && toolbarRef.current?.contains(nextTarget)) return
+                if (!nextTarget && !document.hasFocus()) {
+                  cancelWindowBlurFinish()
+                  windowBlurFinishTimerRef.current = window.setTimeout(() => {
+                    windowBlurFinishTimerRef.current = null
+                    if (!document.hasFocus() || document.activeElement !== editorRef.current) finishEditing()
+                  }, WINDOW_BLUR_FINISH_GRACE_MS)
+                  return
+                }
                 finishEditing()
               }}
               onKeyDown={(event) => {

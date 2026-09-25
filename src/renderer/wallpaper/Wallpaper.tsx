@@ -67,6 +67,10 @@ function drawWallpaperFrame(
   ctx.restore()
 }
 
+function getWindowAspect(): number {
+  return Math.max(0.1, window.innerHeight / Math.max(1, window.innerWidth))
+}
+
 /** 壁纸窗口：根据 type 渲染 video / image / web(iframe)。 */
 export function Wallpaper() {
   const [item, setItem] = useState<WallpaperItem | null>(null)
@@ -149,9 +153,8 @@ export function Wallpaper() {
 
   useEffect(() => {
     const c = document.createElement('canvas')
-    const aspect = Math.max(0.1, window.innerHeight / Math.max(1, window.innerWidth))
     c.width = 768
-    c.height = Math.max(1, Math.round(c.width * aspect))
+    c.height = Math.max(1, Math.round(c.width * getWindowAspect()))
     captureCanvasRef.current = c
     return () => {
       playRequestGenerationRef.current += 1
@@ -203,11 +206,15 @@ export function Wallpaper() {
       source = imgRef.current
     }
     if (!source) return
+    // The window can be resized after mount (display topology or layout mode
+    // change); keep the frame's aspect equal to the window it represents.
+    const height = Math.max(1, Math.round(c.width * getWindowAspect()))
+    if (c.height !== height) c.height = height
     try {
       drawWallpaperFrame(ctx, source, c.width, c.height, objectFit, transform)
       const data = c.toDataURL('image/jpeg', 0.62)
       captureErrorKeyRef.current = null
-      window.wallpaperBridge?.sendFrame?.(data)
+      window.wallpaperBridge?.sendFrame?.(data, source instanceof HTMLVideoElement ? 'video' : 'image')
     } catch (error) {
       const errorKey = `${activeItem?.id ?? 'unknown'}:${error instanceof Error ? error.name : 'capture-error'}`
       if (captureErrorKeyRef.current !== errorKey) {
@@ -333,15 +340,22 @@ export function Wallpaper() {
   }, [])
 
   // Per-monitor assignments can have their own media settings and may change
-  // without changing wallpaper.current in another monitor window.
+  // without changing wallpaper.current in another monitor window. Every layout
+  // broadcast delivers a fresh item object, so only reset when the item or its
+  // saved settings actually changed; otherwise live slider values snap back.
+  const activeSettingsKey = activeItem
+    ? `${activeItem.id}\u0000${activeItem.source}\u0000${JSON.stringify(activeItem.settings ?? {})}`
+    : ''
+  const activeSettingsRef = useRef(activeItem?.settings)
+  activeSettingsRef.current = activeItem?.settings
   useEffect(() => {
-    if (!activeItem) return
-    const settings = activeItem.settings
+    if (!activeSettingsKey) return
+    const settings = activeSettingsRef.current
     setVolume(settings?.volume ?? 50)
     setSpeed(settings?.speed ?? 1)
     setScaling(settings?.scaling ?? '覆盖')
     setFlip(settings?.flip ?? '无')
-  }, [activeItem])
+  }, [activeSettingsKey])
 
   // 监听实时设置更新
   useEffect(() => {

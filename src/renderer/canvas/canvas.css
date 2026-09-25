@@ -20,6 +20,13 @@ textarea,
 	cursor: text !important;
 }
 
+/* Main process: another window covers the widget under the cursor. Electron
+   still forwards mouse moves to this click-through canvas, so drop hover
+   feedback instead of animating widgets behind the user's apps. */
+html[data-pointer-occluded='true'] body * {
+	pointer-events: none !important;
+}
+
 .widget-create-entering {
 	isolation: isolate;
 }

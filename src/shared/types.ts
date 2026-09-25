@@ -249,6 +249,18 @@ export interface CanvasOcclusionState {
   cursor: { x: number; y: number }
 }
 
+/** One wallpaper window's frame, keyed by its native window target (`display:<id>` or `span`). */
+export interface WallpaperFramePayload {
+  key: string
+  data: string
+}
+
+/** Where a wallpaper window's frames sit inside the transparent canvas, in canvas client pixels. */
+export interface WallpaperFrameSource {
+  key: string
+  bounds: DisplayBounds
+}
+
 export interface NativeDockClickEvent {
   widgetId: string
   screenX: number

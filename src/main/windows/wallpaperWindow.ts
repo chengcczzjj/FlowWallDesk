@@ -20,6 +20,7 @@ interface ManagedWallpaperWindow {
 }
 
 const wallpaperWindows = new Map<string, ManagedWallpaperWindow>()
+const reconcileListeners = new Set<() => void>()
 let boundsListenerRegistered = false
 let topologyRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -36,6 +37,17 @@ export function getWallpaperWindows(): BrowserWindow[] {
 /** Primary monitor (or the span window) is the capture source used by legacy callers. */
 export function getWallpaperWindow(): BrowserWindow | null {
   return getEntries()[0]?.window ?? null
+}
+
+/** Every live wallpaper window with the screen rectangle it covers. */
+export function getWallpaperWindowEntries(): Array<{ window: BrowserWindow; target: WallpaperWindowTarget }> {
+  return getEntries().map((entry) => ({ window: entry.window, target: entry.target }))
+}
+
+/** Notified after the set or bounds of wallpaper windows changed (mode switch, display topology). */
+export function onWallpaperWindowsReconciled(listener: () => void): () => void {
+  reconcileListeners.add(listener)
+  return () => reconcileListeners.delete(listener)
 }
 
 export function getWallpaperWindowTarget(webContentsId: number): WallpaperWindowTarget | null {
@@ -199,6 +211,13 @@ export function reconcileWallpaperWindows(): BrowserWindow[] {
       syncWallpaperBounds(existing, true)
     } else {
       createManagedWallpaperWindow(target)
+    }
+  }
+  for (const listener of reconcileListeners) {
+    try {
+      listener()
+    } catch (error) {
+      console.warn('[wallpaper] reconcile listener failed:', error)
     }
   }
   return getWallpaperWindows()

@@ -126,34 +126,52 @@ export function TodoNotesManager({
     setHighPriority(false)
   }
 
-  const updateConfig = async (record: TodoNoteRecord, config: TodoWidgetConfig): Promise<void> => {
-    await window.lingyue.widget.updateConfig(record.widget.id, { ...config })
+  // The desktop note keeps changing while this page is open (typing, moving,
+  // resizing). Mutations therefore start from the stored record instead of the
+  // snapshot this page rendered, which used to revert those desktop edits.
+  const readLatest = async (record: TodoNoteRecord): Promise<TodoNoteRecord | null> => {
+    const latest = (await window.lingyue.widget.list()).find((widget) => widget.id === record.widget.id)
+    if (!latest) return null
+    const config = normalizeTodoWidgetConfig(latest.config)
+    return { widget: latest, config, task: config.task }
+  }
+
+  const updateConfig = async (
+    record: TodoNoteRecord,
+    change: (latest: TodoNoteRecord) => TodoWidgetConfig | null,
+  ): Promise<void> => {
+    const latest = await readLatest(record)
+    const config = latest ? change(latest) : null
+    if (latest && config) await window.lingyue.widget.updateConfig(latest.widget.id, { ...config })
     await onRefresh()
   }
 
   const setVisible = async (record: TodoNoteRecord, enabled: boolean): Promise<void> => {
-    await window.lingyue.widget.update({ ...record.widget, enabled, config: { ...record.config } })
+    const latest = await readLatest(record)
+    if (latest) await window.lingyue.widget.update({ ...latest.widget, enabled })
     await onRefresh()
   }
 
   const complete = async (record: TodoNoteRecord): Promise<void> => {
     if (!record.task || record.task.done) return
     const requestedAt = Date.now()
-    await updateConfig(record, {
-      ...record.config,
-      task: setTodoTaskDone(record.task, true, requestedAt),
-      tearRequestedAt: requestedAt,
-    })
+    await updateConfig(record, (latest) => (
+      latest.task && !latest.task.done
+        ? { ...latest.config, task: setTodoTaskDone(latest.task, true, requestedAt), tearRequestedAt: requestedAt }
+        : null
+    ))
   }
 
   const reopen = async (record: TodoNoteRecord): Promise<void> => {
-    if (!record.task) return
-    const nextConfig: TodoWidgetConfig = {
-      ...record.config,
-      task: setTodoTaskDone(record.task, false),
-      tearRequestedAt: undefined,
+    const latest = await readLatest(record)
+    if (latest?.task) {
+      const nextConfig: TodoWidgetConfig = {
+        ...latest.config,
+        task: setTodoTaskDone(latest.task, false),
+        tearRequestedAt: undefined,
+      }
+      await window.lingyue.widget.update({ ...latest.widget, enabled: true, config: { ...nextConfig } })
     }
-    await window.lingyue.widget.update({ ...record.widget, enabled: true, config: { ...nextConfig } })
     await onRefresh()
   }
 
@@ -161,10 +179,11 @@ export function TodoNotesManager({
     if (!record.task) return
     const title = sanitizeTodoTitle(value)
     if (!title || title === record.task.title) return
-    await updateConfig(record, {
-      ...record.config,
-      task: { ...record.task, title, category: inferTodoCategory(title), updatedAt: Date.now() },
-    })
+    await updateConfig(record, (latest) => (
+      latest.task && latest.task.title !== title
+        ? { ...latest.config, task: { ...latest.task, title, category: inferTodoCategory(title), updatedAt: Date.now() } }
+        : null
+    ))
   }
 
   const weekRange = getTodoWeekRange(now, weekOffset)
@@ -176,7 +195,7 @@ export function TodoNotesManager({
     <div className="todo-studio">
       <section className="todo-studio__hero">
         <div className="todo-studio__hero-copy">
-          <span className="todo-studio__kicker"><Sparkles size={13} /> LINGYUE STICKY STUDIO</span>
+          <span className="todo-studio__kicker"><Sparkles size={13} /> 灵月任务便笺</span>
           <h2>桌面只留一件事。<br />其余的，在这里安排。</h2>
           <p>每张便利贴都是独立任务：可以任意叠放、直接拖动和缩放。完成时从桌面撕下，记录会自动回到这里。</p>
           <div className="todo-studio__hero-stats">
@@ -200,7 +219,7 @@ export function TodoNotesManager({
 
       <section className="todo-studio__composer">
         <div className="todo-studio__composer-main">
-          <span>NEW NOTE</span>
+          <span>新便笺</span>
           <textarea
             value={draft}
             maxLength={160}
@@ -322,7 +341,14 @@ export function TodoNotesManager({
               <span className="todo-studio__archive-check"><Check size={14} /></span>
               <div><strong>{record.task?.title}</strong><small>{record.task?.completedAt ? new Date(record.task.completedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '已完成'} · {record.task ? TODO_CATEGORY_META[record.task.category].label : ''}</small></div>
               <button type="button" onClick={() => void reopen(record)}><RotateCcw size={13} /> 重新贴回</button>
-              <button type="button" aria-label="永久删除" onClick={() => void onRemove(record.widget.id)}><Trash2 size={14} /></button>
+              <button
+                type="button"
+                aria-label="永久删除"
+                title="永久删除"
+                onClick={() => {
+                  if (window.confirm('永久删除这张便利贴？删除后无法恢复，也不再计入周统计。')) void onRemove(record.widget.id)
+                }}
+              ><Trash2 size={14} /></button>
             </article>
           ))}
         </section>
@@ -355,6 +381,7 @@ function NoteRow({
             aria-label={`编辑 ${task.title}`}
             onBlur={(event) => void onRename(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
               if (event.key === 'Enter') event.currentTarget.blur()
             }}
           />
@@ -368,7 +395,14 @@ function NoteRow({
       <button type="button" onClick={() => void onVisible(!record.widget.enabled)} title={record.widget.enabled ? '从桌面隐藏' : '显示到桌面'}>
         {record.widget.enabled ? <Eye size={15} /> : <EyeOff size={15} />}
       </button>
-      <button type="button" onClick={() => void onRemove()} title="永久删除"><Trash2 size={15} /></button>
+      <button
+        type="button"
+        onClick={() => {
+          if (window.confirm('永久删除这张便利贴？删除后无法恢复。')) void onRemove()
+        }}
+        title="永久删除"
+        aria-label="永久删除"
+      ><Trash2 size={15} /></button>
     </article>
   )
 }

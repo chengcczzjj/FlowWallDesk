@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import type {
+  WallpaperDisplaySettings,
   WallpaperApplyTarget,
   WallpaperItem,
   WallpaperOwnerStatus,
@@ -20,6 +21,12 @@ import type {
 } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
 import { WallpaperOwnerDialog } from '../components/WallpaperOwnerDialog'
+
+const ONLINE_TYPE_LABEL: Record<string, string> = {
+  video: '视频',
+  image: '图片',
+  web: '网页',
+}
 
 const EMPTY_CATALOG: WallpaperResourceCatalog = {
   source: 'empty',
@@ -42,7 +49,17 @@ function stateLabel(item: WallpaperResourceCatalogItem): string {
   return `版本 ${item.version}`
 }
 
-export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'current' }: { search: string; refreshKey?: number; wallpaperTarget?: WallpaperApplyTarget }) {
+export function OnlineWallpaperPage({
+  search,
+  refreshKey,
+  wallpaperTarget = 'current',
+  displaySettings,
+}: {
+  search: string
+  refreshKey?: number
+  wallpaperTarget?: WallpaperApplyTarget
+  displaySettings?: WallpaperDisplaySettings | null
+}) {
   const [catalog, setCatalog] = useState<WallpaperResourceCatalog>(EMPTY_CATALOG)
   const [localItems, setLocalItems] = useState<WallpaperItem[]>([])
   const [currentId, setCurrentId] = useState<string>()
@@ -72,6 +89,8 @@ export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'cur
         ? displaySettings.assignments[String(wallpaperTarget)] ?? current?.current?.id
         : current?.current?.id)
       setOwnerStatus(owner)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '在线壁纸库读取失败')
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -109,9 +128,14 @@ export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'cur
   const install = async (item: WallpaperResourceCatalogItem) => {
     setActionId(item.id)
     setActionError('')
-    const result = await window.lingyue.wallpaper.installResource(item.id)
-    setActionId(undefined)
-    if (!result.ok) setActionError(result.error || '安装失败')
+    try {
+      const result = await window.lingyue.wallpaper.installResource(item.id)
+      if (!result.ok) setActionError(result.error || '安装失败')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '安装失败')
+    } finally {
+      setActionId(undefined)
+    }
     await load(false)
   }
 
@@ -130,9 +154,14 @@ export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'cur
     if (!window.confirm(`删除已下载的“${item.title}”？在线资源仍可重新下载。`)) return
     setActionId(item.id)
     setActionError('')
-    const result = await window.lingyue.wallpaper.removeResource(item.id)
-    setActionId(undefined)
-    if (!result.ok) setActionError(result.error || '删除失败')
+    try {
+      const result = await window.lingyue.wallpaper.removeResource(item.id)
+      if (!result.ok) setActionError(result.error || '删除失败')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      setActionId(undefined)
+    }
     await load(false)
   }
 
@@ -140,7 +169,7 @@ export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'cur
     <div className="online-wallpaper-page">
       <header className="online-library-hero">
         <div>
-          <div className="online-library-hero__eyebrow">LINGYUE CLOUD LIBRARY</div>
+          <div className="online-library-hero__eyebrow">灵月在线壁纸</div>
           <h1>在线壁纸库</h1>
           <p>壁纸资源独立下载和更新，不再跟随整个应用安装包。</p>
         </div>
@@ -165,6 +194,14 @@ export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'cur
         </span>
         {catalog.updatedAt && <span>更新于 {new Date(catalog.updatedAt).toLocaleString()}</span>}
         <span>{catalog.items.length} 项资源</span>
+        {(() => {
+          // In per-display mode "应用" targets the monitor chosen on the local tab; say which.
+          if (displaySettings?.mode !== 'per-display' || typeof wallpaperTarget !== 'number') return null
+          const display = displaySettings.displays.find((candidate) => candidate.id === wallpaperTarget)
+          return display
+            ? <span>应用到：{display.label}{display.primary ? ' · 主显示器' : ''}（可在“本地壁纸”切换）</span>
+            : null
+        })()}
       </div>
 
       {(catalog.warning || actionError) && (
@@ -202,9 +239,9 @@ export function OnlineWallpaperPage({ search, refreshKey, wallpaperTarget = 'cur
                   {item.previewUrl || item.cachedPreview ? (
                     <img src={toAssetUrl(item.cachedPreview || item.previewUrl)} alt={item.title} loading="lazy" />
                   ) : (
-                    <div className="wallpaper-card__placeholder">{item.type.toUpperCase()}</div>
+                    <div className="wallpaper-card__placeholder">{ONLINE_TYPE_LABEL[item.type] ?? item.type}</div>
                   )}
-                  <span className="online-wallpaper-card__type">{item.type}</span>
+                  <span className="online-wallpaper-card__type">{ONLINE_TYPE_LABEL[item.type] ?? item.type}</span>
                   {applied && <span className="online-wallpaper-card__applied"><Check size={12} /> 已应用</span>}
                   {busy && itemProgress && (
                     <div className="online-wallpaper-card__progress">

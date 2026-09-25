@@ -22,7 +22,7 @@ import { PixelPetPage } from './pages/pet/PixelPetPage'
 import { ChatPage } from './pages/chat/ChatPage'
 import { SettingsGeneralPage } from './pages/settings/SettingsGeneralPage'
 import { DisplaySettingsPage } from './pages/settings/DisplaySettingsPage'
-import { AddWallpaperDialog } from './components/AddWallpaperDialog'
+import { AddWallpaperDialog, type InitialFile } from './components/AddWallpaperDialog'
 import { SidebarUpdateButton } from './components/SidebarUpdateButton'
 import {
   PIXEL_PET_SETTINGS_KEY,
@@ -149,11 +149,13 @@ export function App() {
   const [appThemeStyle, setAppThemeStyle] = useState<CSSProperties>(() => loadPixelPetAppThemeStyle())
   const [search, setSearch] = useState('')
   const [showAddDialog, setShowAddDialog] = useState(false)
+  const [droppedWallpaperFile, setDroppedWallpaperFile] = useState<InitialFile | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [displaySettings, setDisplaySettings] = useState<WallpaperDisplaySettings | null>(null)
   const [wallpaperTarget, setWallpaperTarget] = useState<WallpaperApplyTarget>('current')
 
-  const openAddDialog = useCallback(() => {
+  const openAddDialog = useCallback((file: InitialFile | null = null) => {
+    setDroppedWallpaperFile(file)
     setShowAddDialog(true)
   }, [])
 
@@ -296,7 +298,7 @@ export function App() {
             onClick={() => switchActivity('settings')}
             title="设置"
           />
-          <ActivityItem icon={<MoreHorizontal size={20} />} onClick={() => undefined} title="更多" />
+          <ActivityItem icon={<MoreHorizontal size={20} />} onClick={() => undefined} title="更多（即将推出）" disabled />
         </nav>
 
         <div className="app-content">
@@ -334,13 +336,19 @@ export function App() {
                 displaySettings={displaySettings}
                 onDisplaySelect={setWallpaperTarget}
                 onDisplaySettingsChange={setDisplaySettings}
+                onDropFile={openAddDialog}
               />
             )}
             {activity === 'library' && subPage === 'store' && (
-              <OnlineWallpaperPage search={search} refreshKey={refreshKey} wallpaperTarget={effectiveWallpaperTarget} />
+              <OnlineWallpaperPage
+                search={search}
+                refreshKey={refreshKey}
+                wallpaperTarget={effectiveWallpaperTarget}
+                displaySettings={displaySettings}
+              />
             )}
             {activity === 'library' && subPage === 'maker' && (
-              <EmptyPage icon={<ImageIcon size={48} />} title="壁纸制作" subtitle="敬请期待…" />
+              <EmptyPage icon={<ImageIcon size={48} />} title="壁纸制作" subtitle="即将推出" />
             )}
             {activity === 'widgets' && (
               <WidgetsPage subPage={subPage} />
@@ -353,7 +361,11 @@ export function App() {
               <DisplaySettingsPage />
             )}
             {activity === 'settings' && subPage !== 'settings-general' && subPage !== 'settings-displays' && (
-              <EmptyPage icon={<Settings size={48} />} title="设置" subtitle="即将到来…" />
+              <EmptyPage
+                icon={<Settings size={48} />}
+                title={tabs?.find((tab) => tab.id === subPage)?.label ?? '设置'}
+                subtitle="即将推出"
+              />
             )}
           </div>
           </>
@@ -363,7 +375,11 @@ export function App() {
 
       <AddWallpaperDialog
         open={showAddDialog}
-        onClose={() => setShowAddDialog(false)}
+        initialFile={droppedWallpaperFile}
+        onClose={() => {
+          setShowAddDialog(false)
+          setDroppedWallpaperFile(null)
+        }}
         onImported={() => setRefreshKey((k) => k + 1)}
       />
     </div>
@@ -375,12 +391,17 @@ function ActivityItem(props: {
   active?: boolean
   onClick: () => void
   title: string
+  disabled?: boolean
 }) {
   return (
     <button
+      type="button"
       className={`activity-bar__item ${props.active ? 'active' : ''}`}
       onClick={props.onClick}
       title={props.title}
+      aria-label={props.title}
+      aria-current={props.active ? 'page' : undefined}
+      disabled={props.disabled}
     >
       {props.icon}
     </button>

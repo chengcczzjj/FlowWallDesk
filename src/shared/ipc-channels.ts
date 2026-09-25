@@ -62,6 +62,10 @@ export const IPC = {
   WALLPAPER_READY: 'wallpaper:ready',
   // 壁纸抽帧（壁纸窗口 → 主进程 → 画布窗口）
   WALLPAPER_FRAME: 'wallpaper:frame',
+  // 主进程 → 画布：每个壁纸窗口在画布坐标中的区域（毛玻璃多显示器对齐）
+  WALLPAPER_FRAME_SOURCES: 'wallpaper:frame-sources',
+  // 画布 → 主进程：启动时拉取壁纸帧来源区域
+  WALLPAPER_FRAME_SOURCES_GET: 'wallpaper:frame-sources-get',
   // 画布根据当前组件声明是否需要实时壁纸帧
   WALLPAPER_CAPTURE_DEMAND: 'wallpaper:capture-demand',
 
@@ -100,6 +104,10 @@ export const IPC = {
   CANVAS_OCCLUSION_CHANGED: 'canvas:occlusion-changed',
   // 主进程 → 画布：原生鼠标抬起但 renderer 丢失 pointerup 时强制清理手势
   CANVAS_POINTER_RESET: 'canvas:pointer-reset',
+  // 画布 → 主进程：按实际 DOM 渲染结果上报可交互组件的命中区域
+  CANVAS_SET_HIT_REGIONS: 'canvas:set-hit-regions',
+  // 主进程 → 画布：光标处组件被其他窗口遮住，暂停悬停反馈
+  CANVAS_POINTER_OCCLUDED: 'canvas:pointer-occluded',
   // 主进程 → 壁纸窗口：暂停/恢复帧捕获（全屏遮挡优化）
   WALLPAPER_PAUSE_CAPTURE: 'wallpaper:pause-capture',
 

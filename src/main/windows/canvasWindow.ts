@@ -5,18 +5,21 @@ import { getWallpaperWindows, refreshWallpaperAttach } from './wallpaperWindow'
 import { IPC } from '@shared/ipc-channels'
 import { rectCoversDisplay, StableBooleanTransition } from '@shared/desktop-occlusion'
 import {
+  classifyNativeCursorSurface,
   findInteractiveWidgetAtPoint,
   isDesktopIconWidgetType,
   shouldRecreateCanvasAfterInitialOcclusion,
   shouldRecoverCanvasAfterDesktopReturn,
   shouldRepairCanvasInteraction,
   shouldIgnoreCanvasMouse,
+  type CanvasHitCandidate,
+  type CanvasHitRegion,
 } from '@shared/canvas-hit-test'
 import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared/native-dock-click'
 import { secureWindowNavigation } from './navigationSecurity'
 import { store } from '../store'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
-import { getDesktopRenderBounds } from './displayLayout'
+import { getDesktopRenderBounds, getWallpaperDisplayMode } from './displayLayout'
 
 
 let koffi: any
@@ -84,6 +87,9 @@ const CURSOR_HIT_TEST_ACTIVE_INTERVAL_MS = 25
 const CURSOR_HIT_TEST_IDLE_INTERVAL_MS = 80
 
 const GW_OWNER = 4
+const GW_HWNDPREV = 3
+/** Upper bound for z-order walks; a desktop session rarely has this many top-level windows. */
+const Z_ORDER_WALK_LIMIT = 2048
 const GA_ROOT = 2
 const SW_MINIMIZE = 6
 const GWL_STYLE = -16
@@ -180,9 +186,14 @@ function checkDesktopOccluded(): boolean {
       right: dipRect.x + dipRect.width,
       bottom: dipRect.y + dipRect.height,
     }
-    const covered = displays.length > 1
-      ? displays.every((display) => rectCoversDisplay(coverage, display.bounds))
-      : rectCoversDisplay(coverage, displays[0]?.bounds ?? getDesktopRenderBounds())
+    // Primary-only mode renders nothing on the other monitors, so covering the
+    // primary alone hides every widget.
+    const renderedDisplays = getWallpaperDisplayMode() === 'primary'
+      ? displays.filter((display) => display.id === screen.getPrimaryDisplay().id)
+      : displays
+    const covered = renderedDisplays.length > 1
+      ? renderedDisplays.every((display) => rectCoversDisplay(coverage, display.bounds))
+      : rectCoversDisplay(coverage, renderedDisplays[0]?.bounds ?? getDesktopRenderBounds())
     return finish(covered, 'display-coverage', { dipRect, displayCount: displays.length })
   } catch {
     lastOcclusionDiagnostic = { reason: 'occlusion-check-failed' }
@@ -257,12 +268,16 @@ function applyCanvasMousePassthrough(): void {
   const win = getCanvasWindow()
   if (!win) return
   const rendererHoverHint = !rendererMousePassthrough && Date.now() - rendererMousePassthroughAt < 250
+  // Inline text input keeps normal per-widget hit testing: the canvas stays on
+  // the desktop layer, so clicking the desktop or another app must reach it
+  // (and end editing through the window blur) instead of being swallowed.
   const ignore = shouldIgnoreCanvasMouse({
     desktopOccluded,
     recompositing: canvasRecompositing,
-    editing: isEditing || canvasTextInputActive,
+    editing: isEditing,
     pointerActive: rendererPointerActive,
     widgetUnderCursor: Boolean(cursorWidgetId) || rendererHoverHint,
+    cursorCovered: cursorSurfaceCovered,
   })
   if (nativeMousePassthrough === ignore) return
   nativeMousePassthrough = ignore
@@ -281,7 +296,83 @@ function applyCanvasMousePassthrough(): void {
     pointerActive: rendererPointerActive,
     cursorWidgetId,
     rendererHoverHint,
+    cursorCovered: cursorSurfaceCovered,
   })
+}
+
+/**
+ * Electron's Windows implementation of setFocusable() also calls
+ * SetSkipTaskbar(!focusable) and Deactivate(). Deactivate hands the foreground
+ * to whichever window sits below the canvas, so calling it on every occlusion
+ * change or sticky-note edit stole focus from the app the user just opened and
+ * flashed a canvas button on the taskbar. Only touch it on real transitions and
+ * immediately remove the transient taskbar tab again.
+ */
+function setCanvasFocusable(win: BrowserWindow, focusable: boolean): void {
+  if (canvasFocusable === focusable) return
+  canvasFocusable = focusable
+  win.setFocusable(focusable)
+  win.setSkipTaskbar(true)
+}
+
+/** Give the canvas keyboard focus for inline text input without lifting it above other apps. */
+function focusCanvasForTextInput(win: BrowserWindow): void {
+  setCanvasFocusable(win, true)
+  win.focus()
+  win.webContents.focus()
+  // Chromium's Activate() raises the window to HWND_TOP. The canvas is a
+  // full-screen transparent layer, so staying there would put every widget
+  // above the user's apps while they type. Z-order changes with
+  // SWP_NOACTIVATE keep the keyboard focus.
+  settleCanvasOnDesktop(win)
+}
+
+function isCoveredCursorSurface(surface: NativeCursorSurface | null): boolean {
+  if (!surface || surface.reason !== 'window-from-point') return false
+  return classifyNativeCursorSurface(surface) === 'foreign' && surface.aboveCanvas
+}
+
+let lastZOrderCheck: { rootHwnd: number; canvasHwnd: number; above: boolean; at: number } | null = null
+
+/**
+ * While the canvas is click-through, WindowFromPoint skips it and can return a
+ * window that sits *below* it (e.g. desktop skins parked at the bottom). Only
+ * windows above the canvas in z-order actually cover its widgets.
+ */
+function isWindowAboveCanvas(rootHwnd: number, canvasHwnd: number): boolean {
+  if (!u32 || !rootHwnd || !canvasHwnd) return true
+  const now = Date.now()
+  if (
+    lastZOrderCheck &&
+    lastZOrderCheck.rootHwnd === rootHwnd &&
+    lastZOrderCheck.canvasHwnd === canvasHwnd &&
+    now - lastZOrderCheck.at < 250
+  ) return lastZOrderCheck.above
+  let above = false
+  let hwnd = Number(u32.GetWindow(canvasHwnd, GW_HWNDPREV))
+  for (let steps = 0; hwnd && steps < Z_ORDER_WALK_LIMIT; steps += 1) {
+    if (hwnd === rootHwnd) {
+      above = true
+      break
+    }
+    hwnd = Number(u32.GetWindow(hwnd, GW_HWNDPREV))
+  }
+  lastZOrderCheck = { rootHwnd, canvasHwnd, above, at: now }
+  return above
+}
+
+/** Tell the renderer to drop hover feedback for widgets another window covers. */
+function notifyCanvasPointerOccluded(occluded: boolean): void {
+  if (pointerOccludedNotified === occluded) return
+  const win = getCanvasWindow()
+  if (!win || win.webContents.isDestroyed()) return
+  pointerOccludedNotified = occluded
+  win.webContents.send(IPC.CANVAS_POINTER_OCCLUDED, occluded)
+}
+
+/** Prefer the renderer's measured DOM footprint; fall back to persisted rects until it reports. */
+function getCanvasHitCandidates(): readonly CanvasHitCandidate[] {
+  return rendererHitRegions ?? store.get('widgets')
 }
 
 interface NativeCursorSurface {
@@ -290,6 +381,8 @@ interface NativeCursorSurface {
   canvasHwnd: number
   canvasTopmost: boolean
   desktopSurface: boolean
+  /** For foreign hits: the window is above the canvas, i.e. it really covers the widget. */
+  aboveCanvas: boolean
   hitClassName: string
   rootClassName: string
   reason: string
@@ -331,6 +424,7 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
     canvasHwnd: 0,
     canvasTopmost: false,
     desktopSurface: false,
+    aboveCanvas: false,
     hitClassName: '',
     rootClassName: '',
     reason,
@@ -347,12 +441,15 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
     const canvasHwnd = Number(win.getNativeWindowHandle().readBigInt64LE(0))
     const hitClassName = readNativeClassName(hitHwnd)
     const rootClassName = readNativeClassName(rootHwnd)
+    const canvasTopmost = isNativeCanvasSurfaceHit({ hitHwnd, rootHwnd, canvasHwnd })
+    const desktopSurface = isDesktopShellSurface(hitHwnd, rootHwnd, rootClassName)
     return {
       hitHwnd,
       rootHwnd,
       canvasHwnd,
-      canvasTopmost: isNativeCanvasSurfaceHit({ hitHwnd, rootHwnd, canvasHwnd }),
-      desktopSurface: isDesktopShellSurface(hitHwnd, rootHwnd, rootClassName),
+      canvasTopmost,
+      desktopSurface,
+      aboveCanvas: hitHwnd !== 0 && !canvasTopmost && !desktopSurface && isWindowAboveCanvas(rootHwnd || hitHwnd, canvasHwnd),
       hitClassName,
       rootClassName,
       reason: hitHwnd ? 'window-from-point' : 'no-window-at-cursor',
@@ -365,15 +462,25 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
 function refreshCanvasCursorHitTest(): void {
   const displayBounds = getDesktopRenderBounds()
   const cursor = screen.getCursorScreenPoint()
-  const widgets = store.get('widgets')
-  const widget = findInteractiveWidgetAtPoint(cursor, displayBounds, widgets)
+  const regionWidget = findInteractiveWidgetAtPoint(cursor, displayBounds, getCanvasHitCandidates())
   // Sample the native surface for every widget, not only Dock.  A fullscreen
   // transition can leave Chromium's renderer hover state looking healthy
   // while Windows still routes the point to the wallpaper/desktop surface.
   // Sticky notes have no native click fallback, so they otherwise remain
   // visibly present but completely inert until another Dock hover repairs the
   // shared canvas HWND.
-  const widgetSurface = widget ? inspectNativeCursorSurface() : null
+  const widgetSurface = regionWidget ? inspectNativeCursorSurface() : null
+  cursorInsideWidgetRegion = Boolean(regionWidget)
+  // A widget behind another window (an app, the taskbar, an IME candidate
+  // list) is not under the cursor as far as input is concerned. Capturing it
+  // anyway toggled the canvas' layered/transparent styles while the user
+  // worked in that window, which flickered the widgets and the cursor.
+  // Only a gesture the canvas owns (drag/resize that may pass under another
+  // window) overrides this; a press that started on another app must not.
+  const covered = !rendererPointerActive && isCoveredCursorSurface(widgetSurface)
+  cursorSurfaceCovered = covered
+  notifyCanvasPointerOccluded(covered)
+  const widget = covered ? undefined : regionWidget
   const iconSurface = widget && isDesktopIconWidgetType(widget.type) ? widgetSurface : null
   const previousIconSurface = lastNativeIconSurfaceSample
   const nextWidgetId = widget?.id ?? null
@@ -505,7 +612,8 @@ function refreshCanvasCursorHitTest(): void {
 }
 
 function getCursorHitTestInterval(): number {
-  return nativeLeftButtonDown || rendererPointerActive || cursorWidgetId !== null || canvasTextInputActive || isEditing
+  return nativeLeftButtonDown || rendererPointerActive || cursorWidgetId !== null || cursorInsideWidgetRegion ||
+    canvasTextInputActive || isEditing
     ? CURSOR_HIT_TEST_ACTIVE_INTERVAL_MS
     : CURSOR_HIT_TEST_IDLE_INTERVAL_MS
 }
@@ -669,10 +777,20 @@ function commitDesktopOcclusion(occluded: boolean): void {
   interactionRepairLastAt = 0
   lastNativeIconSurfaceSample = null
   lastRendererActionPointerDownAt = 0
+  cursorSurfaceCovered = false
+  cursorInsideWidgetRegion = false
+  notifyCanvasPointerOccluded(false)
   if (occluded) {
     cancelCanvasZOrderRefresh()
     canvasTextInputActive = false
-    getCanvasWindow()?.setFocusable(false)
+    const canvas = getCanvasWindow()
+    if (canvas && !isEditing && canvasFocusable) {
+      // Park the canvas above the desktop shell first so the Deactivate() side
+      // effect of setFocusable(false) cannot hand the foreground to (and
+      // minimise) the full-screen app that just covered the desktop.
+      settleCanvasOnDesktop(canvas)
+      setCanvasFocusable(canvas, false)
+    }
   }
   applyCanvasMousePassthrough()
 
@@ -716,6 +834,14 @@ function commitDesktopOcclusion(occluded: boolean): void {
 
 let canvasWindow: BrowserWindow | null = null
 let isEditing = false
+/** Mirrors the native WS_EX_NOACTIVATE state so setFocusable() only runs on transitions. */
+let canvasFocusable = false
+/** DOM-measured widget footprints from the current canvas renderer. */
+let rendererHitRegions: CanvasHitRegion[] | null = null
+/** The cursor is over a widget region, but another native window is on top of it. */
+let cursorSurfaceCovered = false
+let cursorInsideWidgetRegion = false
+let pointerOccludedNotified: boolean | null = null
 let canvasCreatedAt = 0
 let desktopOccludedSince = 0
 let initialOcclusionCanvasAgeMs = Number.POSITIVE_INFINITY
@@ -847,7 +973,9 @@ function registerCanvasDisplayListener(): void {
     // Display topology can move the virtual desktop origin (e.g. a monitor
     // added on the left). Migrate persisted widget coordinates asynchronously
     // to avoid a static widgetIpc <-> canvasWindow import cycle.
-    void import('../ipc/widgetIpc').then(({ ensureWidgetCoordinateOrigin }) => ensureWidgetCoordinateOrigin()).catch(() => undefined)
+    void import('../ipc/widgetIpc')
+      .then(({ ensureWidgetCoordinateOrigin }) => ensureWidgetCoordinateOrigin({ fit: 'deferred' }))
+      .catch(() => undefined)
   }
   screen.on('display-metrics-changed', sync)
   screen.on('display-added', sync)
@@ -917,6 +1045,11 @@ export function createCanvasWindow(): BrowserWindow {
   nativeExpectedPointerDown = null
   lastNativeIconSurfaceSample = null
   lastRendererActionPointerDownAt = 0
+  canvasFocusable = false
+  rendererHitRegions = null
+  cursorSurfaceCovered = false
+  cursorInsideWidgetRegion = false
+  pointerOccludedNotified = null
   applyCanvasMousePassthrough()
   registerCanvasDisplayListener()
 
@@ -996,6 +1129,11 @@ export function createCanvasWindow(): BrowserWindow {
     nativeExpectedPointerDown = null
     lastNativeIconSurfaceSample = null
     lastRendererActionPointerDownAt = 0
+    canvasFocusable = false
+    rendererHitRegions = null
+    cursorSurfaceCovered = false
+    cursorInsideWidgetRegion = false
+    pointerOccludedNotified = null
     canvasWindow = null
   })
 
@@ -1019,6 +1157,17 @@ export function isCanvasEditMode(): boolean {
 export function setCanvasMousePassthrough(ignore: boolean): void {
   // 丢弃遮挡期间到达的旧 mouseenter 请求，避免恢复后整屏截获鼠标。
   if (desktopOccluded && !ignore) return
+  if (!ignore && !isEditing && !rendererPointerActive) {
+    // With forward:true Electron posts WM_MOUSEMOVE to the canvas even when
+    // another window covers it, so the renderer can claim hover over a widget
+    // the user cannot actually reach. Verify against the native hit surface.
+    if (isCoveredCursorSurface(inspectNativeCursorSurface())) {
+      cursorSurfaceCovered = true
+      notifyCanvasPointerOccluded(true)
+      applyCanvasMousePassthrough()
+      return
+    }
+  }
   rendererMousePassthrough = ignore
   rendererMousePassthroughAt = Date.now()
   applyCanvasMousePassthrough()
@@ -1039,9 +1188,24 @@ export function setCanvasPointerActive(active: boolean): void {
   if (rendererPointerActive === active) return
   rendererPointerActive = active
   rendererPointerReleaseCandidateAt = 0
+  if (active) {
+    cursorSurfaceCovered = false
+    notifyCanvasPointerOccluded(false)
+  }
   logDockDiagnostic('canvas.pointer-active-changed', { active, cursorWidgetId })
   applyCanvasMousePassthrough()
+  // A click into the focused canvas can re-raise it above other apps while a
+  // sticky note is being edited; return it to the desktop layer.
+  const win = getCanvasWindow()
+  if (win && canvasTextInputActive && !isEditing) sendToBottom(win)
   restartCanvasCursorHitTest()
+}
+
+/** Store the renderer's DOM-measured widget footprints for native hit testing. */
+export function setCanvasHitRegions(webContentsId: number, regions: CanvasHitRegion[]): void {
+  const win = getCanvasWindow()
+  if (!win || win.webContents.id !== webContentsId) return
+  rendererHitRegions = regions
 }
 
 /** 只为桌面内联编辑临时开启键盘焦点，不改变组件层级或全局编辑状态。 */
@@ -1050,11 +1214,7 @@ export function setCanvasTextInputActive(active: boolean): boolean {
   if (!win || (desktopOccluded && active)) return false
   if (isEditing) return true
   if (canvasTextInputActive === active) {
-    if (active) {
-      win.setFocusable(true)
-      win.focus()
-      win.webContents.focus()
-    }
+    if (active && !win.isFocused()) focusCanvasForTextInput(win)
     return true
   }
 
@@ -1063,14 +1223,14 @@ export function setCanvasTextInputActive(active: boolean): boolean {
   rendererMousePassthroughAt = Date.now()
   if (active) {
     cancelCanvasZOrderRefresh()
-    win.setFocusable(true)
+    focusCanvasForTextInput(win)
     applyCanvasMousePassthrough()
-    win.focus()
-    win.webContents.focus()
   } else {
-    win.setFocusable(false)
-    applyCanvasMousePassthrough()
+    // Settle first: setFocusable(false) activates the window below the canvas,
+    // which must be the desktop shell rather than an unrelated app.
     settleCanvasOnDesktop(win)
+    setCanvasFocusable(win, false)
+    applyCanvasMousePassthrough()
   }
   logDockDiagnostic('canvas.text-input-active-changed', { active })
   restartCanvasCursorHitTest()
@@ -1107,17 +1267,17 @@ export function setCanvasEditMode(on: boolean): void {
     minimizeAllOtherWindows()
     rendererMousePassthrough = false
     applyCanvasMousePassthrough()
-    canvasWindow.setFocusable(true)
+    setCanvasFocusable(canvasWindow, true)
     canvasWindow.setAlwaysOnTop(true, 'screen-saver')
     canvasWindow.focus()
   } else {
     rendererMousePassthrough = true
-    canvasWindow.setFocusable(false)
-    applyCanvasMousePassthrough()
     canvasWindow.setAlwaysOnTop(false)
-    // 先设 owner 再推底层
-    disableShowDesktopMinimize(canvasWindow)
-    sendToBottom(canvasWindow)
+    // 先设 owner 再推底层，再关闭可聚焦：setFocusable(false) 会激活画布下方的窗口，
+    // 此时它应当是桌面而不是任意应用。
+    settleCanvasOnDesktop(canvasWindow)
+    setCanvasFocusable(canvasWindow, false)
+    applyCanvasMousePassthrough()
     // 编辑模式退出可能扰乱壁纸窗口的桌面层级，延迟刷新
     setTimeout(() => refreshWallpaperAttach(), 500)
   }

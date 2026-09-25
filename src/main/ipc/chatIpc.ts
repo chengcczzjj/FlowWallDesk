@@ -351,7 +351,13 @@ export function registerChatIpc(): void {
   })
 
   handleMain(IPC.CHAT_LIST_MODELS, async (_e, profile: ModelProfile) => {
-    return listModels(resolveProfileApiKey(modelProfileSchema.parse(profile)))
+    // Listing models is how users pick one, so a new profile may not have a
+    // name or model yet.
+    const listableProfile = modelProfileSchema.extend({
+      name: z.string().trim().max(80),
+      model: z.string().trim().max(240),
+    }).parse(profile)
+    return listModels(resolveProfileApiKey(listableProfile))
   })
 
   // ─── 人设 Persona ──────────────────────────────────────

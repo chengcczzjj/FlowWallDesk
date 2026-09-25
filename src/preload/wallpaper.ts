@@ -18,9 +18,9 @@ const api = {
   /** 渲染端主动拉取当前壁纸（避免错过 onLoad 事件） */
   getCurrent: (): Promise<{ current?: WallpaperItem } | undefined> =>
     ipcRenderer.invoke(IPC.WALLPAPER_GET_CURRENT),
-  /** 发送壁纸抽帧给主进程（用于组件毛玻璃效果） */
-  sendFrame: (data: string): void => {
-    ipcRenderer.send(IPC.WALLPAPER_FRAME, data)
+  /** 发送壁纸抽帧给主进程（用于组件毛玻璃效果）；mediaType 让主进程知道静态图无需持续兜底截图 */
+  sendFrame: (data: string, mediaType?: 'video' | 'image'): void => {
+    ipcRenderer.send(IPC.WALLPAPER_FRAME, data, mediaType)
   },
   /** 通知主进程壁纸内容已可显示，避免空白窗口先贴到桌面 */
   notifyReady: (itemId: string, source: string): void => {

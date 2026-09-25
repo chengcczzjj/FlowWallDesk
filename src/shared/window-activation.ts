@@ -1,4 +1,8 @@
-import { dirname, normalize } from 'path'
+import { win32 } from 'path'
+
+// Candidates are Windows process paths; parse them with Windows semantics on
+// every host so the matcher (and its tests) behave the same everywhere.
+const { dirname, normalize } = win32
 
 export interface AppWindowCandidate {
   hwnd: number

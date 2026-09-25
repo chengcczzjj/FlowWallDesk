@@ -28,6 +28,15 @@ import { runDockLaunchSelfTest } from './runtime/dockLaunchSelfTest'
 // 必须在 app.ready 之前注册
 registerAssetSchemePrivileged()
 
+// Chromium's native window-occlusion tracker marks the bottom-most transparent
+// canvas and the WorkerW-embedded wallpaper windows as occluded whenever a
+// maximised or full-screen app covers them, and does not reliably un-occlude
+// them afterwards. That left stale input surfaces (lost pointerdown) and
+// forced the always-on-top repairs that flash widgets over other apps.
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+}
+
 // 开发模式下把 Chromium 会话缓存挪到临时目录，避免默认 profile 缓存权限冲突刷屏。
 if (is.dev) {
   const sessionDataPath = join(app.getPath('temp'), 'LingyueDesk', `electron-session-${process.pid}`)

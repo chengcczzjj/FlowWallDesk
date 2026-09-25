@@ -22,6 +22,7 @@ import {
   isCanvasEditMode,
   noteCanvasRendererActionPointerDown,
   setCanvasEditMode,
+  setCanvasHitRegions,
   setCanvasMousePassthrough,
   setCanvasPointerActive,
   setCanvasTextInputActive,
@@ -38,8 +39,20 @@ import {
 import { getDesktopIconItems, restoreDesktopIconsForWidget } from './desktopIconIpc'
 import { assertTrustedIpcSender } from './ipcSecurity'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
-import { getDesktopRenderBounds, getDesktopRenderWorkArea } from '../windows/displayLayout'
+import {
+  getDesktopRenderBounds,
+  getDesktopRenderDisplays,
+  getPrimaryToRenderOffset,
+} from '../windows/displayLayout'
+import {
+  clampRectIntoArea,
+  clampRectPartiallyIntoArea,
+  fitWidgetsIntoDisplays,
+  getPrimaryFitDisplay,
+  pickDisplayForRect,
+} from '@shared/widget-display-fit'
 import { normalizeWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
+import { sanitizeCanvasHitRegions } from '@shared/canvas-hit-test'
 
 /* ===== 布局常量 ===== */
 const GRID_GAP = 16        // 组件之间间距
@@ -49,7 +62,8 @@ const DOCK_DEFAULT_WIDTH = 340
 const DOCK_DEFAULT_HEIGHT = 88
 const DOCK_MIN_RESTORED_WIDTH = 240
 const DOCK_MIN_RESTORED_HEIGHT = 72
-const DOCK_BOTTOM_MARGIN = 72
+/** Gap between the Dock and the top of the taskbar (the work area's bottom edge). */
+const DOCK_WORK_AREA_BOTTOM_MARGIN = 24
 const GLOBAL_ICON_WIDGET_TYPES = ['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock']
 const MAX_DESKTOP_SCENE_SNAPSHOTS = 20
 const STICKY_NOTE_GRAB_EDGE = 42
@@ -202,13 +216,34 @@ function mergeWidgetUpdate(currentWidget: WidgetInstance, incomingWidget: Widget
   }
 }
 
-async function readWidgetConfigFile(configPath: string): Promise<WidgetInstance[]> {
-  const txt = await fs.readFile(configPath, 'utf-8')
-  const data = JSON.parse(txt) as { widgets?: unknown }
-  return parseWidgetList(data.widgets)
+/**
+ * Widget config files store coordinates relative to the primary monitor. The
+ * canvas origin moves to the union's top-left when a monitor sits left of or
+ * above the primary one, so file coordinates are translated at the boundary;
+ * otherwise a wallpaper's default widgets land on the wrong monitor.
+ */
+const WIDGET_CONFIG_COORDINATE_SPACE = 'primary-display'
+
+interface WidgetConfigFile {
+  widgets: WidgetInstance[]
+  coordinateSpace?: string
 }
 
-async function tryReadWidgetConfigFile(configPath: string): Promise<WidgetInstance[] | null> {
+function translateWidgets(widgets: WidgetInstance[], offset: { x: number; y: number }): WidgetInstance[] {
+  if (offset.x === 0 && offset.y === 0) return widgets
+  return widgets.map((widget) => ({ ...widget, x: widget.x + offset.x, y: widget.y + offset.y }))
+}
+
+async function readWidgetConfigFile(configPath: string): Promise<WidgetConfigFile> {
+  const txt = await fs.readFile(configPath, 'utf-8')
+  const data = JSON.parse(txt) as { widgets?: unknown; coordinateSpace?: unknown }
+  return {
+    widgets: parseWidgetList(data.widgets),
+    coordinateSpace: typeof data.coordinateSpace === 'string' ? data.coordinateSpace : undefined,
+  }
+}
+
+async function tryReadWidgetConfigFile(configPath: string): Promise<WidgetConfigFile | null> {
   try {
     return await readWidgetConfigFile(configPath)
   } catch {
@@ -226,16 +261,32 @@ function getWallpaperDefaultWidgetConfigPath(wallpaperId: string): string {
   return join(getWallpaperRoot(), wallpaperId, 'widget-config.json')
 }
 
+/** Returns the wallpaper's widgets in current canvas coordinates. */
 async function readWallpaperWidgetConfig(wallpaperId: string): Promise<WidgetInstance[]> {
+  const offset = getPrimaryToRenderOffset()
   const override = await tryReadWidgetConfigFile(getWallpaperWidgetOverridePath(wallpaperId))
-  if (override) return override
-  return readWidgetConfigFile(getWallpaperDefaultWidgetConfigPath(wallpaperId))
+  if (override) {
+    // Overrides written before the coordinate marker used the canvas space of
+    // that moment; keep reading them unchanged rather than guessing an origin.
+    return override.coordinateSpace === WIDGET_CONFIG_COORDINATE_SPACE
+      ? translateWidgets(override.widgets, offset)
+      : override.widgets
+  }
+  // Packaged/imported defaults are authored for the primary monitor.
+  const defaults = await readWidgetConfigFile(getWallpaperDefaultWidgetConfigPath(wallpaperId))
+  return translateWidgets(defaults.widgets, offset)
 }
 
 async function writeWallpaperWidgetOverride(wallpaperId: string, widgets: WidgetInstance[]): Promise<void> {
   const configPath = getWallpaperWidgetOverridePath(wallpaperId)
+  const offset = getPrimaryToRenderOffset()
+  const portable = translateWidgets(widgets, { x: -offset.x, y: -offset.y })
   await fs.mkdir(dirname(configPath), { recursive: true })
-  await fs.writeFile(configPath, JSON.stringify({ widgets }, null, 2), 'utf-8')
+  await fs.writeFile(
+    configPath,
+    JSON.stringify({ coordinateSpace: WIDGET_CONFIG_COORDINATE_SPACE, widgets: portable }, null, 2),
+    'utf-8',
+  )
 }
 
 function resolveGlobalIconWidgets(wallpaperWidgets: WidgetInstance[]): WidgetInstance[] {
@@ -249,6 +300,9 @@ function resolveGlobalIconWidgets(wallpaperWidgets: WidgetInstance[]): WidgetIns
 }
 
 export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<WidgetInstance[]> {
+  // Bring persisted (global icon) widgets into the current canvas origin before
+  // merging them with freshly translated wallpaper widgets.
+  ensureWidgetCoordinateOrigin({ fit: 'none', sync: false })
   let wallpaperWidgets: WidgetInstance[] = []
   if (wallpaperId) {
     try {
@@ -259,22 +313,80 @@ export async function loadWidgetsForWallpaper(wallpaperId?: string): Promise<Wid
   }
 
   const merged = withDefaultWidgetConfigs([...getWallpaperScopedWidgets(wallpaperWidgets), ...resolveGlobalIconWidgets(wallpaperWidgets)])
-  persistWidgets(merged)
+  const fitted = fitWidgetsIntoDisplays(merged, getDesktopRenderDisplays(), { edgePadding: EDGE_PADDING }).widgets
+  persistWidgets(fitted)
   syncToCanvas()
-  return merged
+  return fitted
 }
 
-/** Keep persisted widget positions stable when the virtual desktop origin changes. */
-export function ensureWidgetCoordinateOrigin(): void {
+let deferredDisplayFitTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Move widgets that no visible monitor shows back onto the nearest monitor. */
+function fitStoredWidgetsToDisplays(): boolean {
+  const widgets = store.get('widgets')
+  const { widgets: fitted, movedIds } = fitWidgetsIntoDisplays(widgets, getDesktopRenderDisplays(), { edgePadding: EDGE_PADDING })
+  if (movedIds.length === 0) return false
+  console.log(`[widget] moved ${movedIds.length} off-screen widget(s) onto a visible display`)
+  persistWidgets(fitted)
+  autoSaveToWallpaper()
+  return true
+}
+
+/**
+ * Keep persisted widget positions stable when the virtual desktop origin
+ * changes, then make sure every widget is still on a visible monitor.
+ * Display hot-plug events defer the second step so a monitor that briefly
+ * drops out (DisplayPort sleep) does not reshuffle the layout.
+ */
+export function ensureWidgetCoordinateOrigin(options: { fit?: 'now' | 'deferred' | 'none'; sync?: boolean } = {}): void {
+  const fit = options.fit ?? 'now'
   const current = getDesktopRenderBounds()
   const previous = store.get('widgetCoordinateOrigin') ?? screen.getPrimaryDisplay().bounds
   const dx = previous.x - current.x
   const dy = previous.y - current.y
+  let changed = false
   if (dx !== 0 || dy !== 0) {
     const widgets = store.get('widgets').map((widget) => ({ ...widget, x: widget.x + dx, y: widget.y + dy }))
     persistWidgets(widgets)
+    changed = true
   }
   store.set('widgetCoordinateOrigin', { x: current.x, y: current.y })
+
+  if (deferredDisplayFitTimer && fit !== 'none') {
+    clearTimeout(deferredDisplayFitTimer)
+    deferredDisplayFitTimer = null
+  }
+  if (fit === 'now') {
+    changed = fitStoredWidgetsToDisplays() || changed
+  } else if (fit === 'deferred') {
+    deferredDisplayFitTimer = setTimeout(() => {
+      deferredDisplayFitTimer = null
+      if (fitStoredWidgetsToDisplays()) syncToCanvas()
+    }, 1_500)
+  }
+  // The canvas renders store coordinates; without a sync it kept drawing the
+  // old origin after a display mode switch until some unrelated update.
+  if (changed && options.sync !== false) syncToCanvas()
+}
+
+/** The primary monitor's work area in canvas coordinates (new widgets and the Dock start there). */
+function getPrimaryWorkArea(): { x: number; y: number; width: number; height: number } {
+  const primary = getPrimaryFitDisplay(getDesktopRenderDisplays())
+  if (primary) return primary.workArea
+  const bounds = getDesktopRenderBounds()
+  return { x: 0, y: 0, width: bounds.width, height: bounds.height }
+}
+
+/** The monitor a rectangle belongs to, in canvas coordinates. */
+function getDisplayAreaForRect(rect: { x: number; y: number; width: number; height: number }): {
+  bounds: { x: number; y: number; width: number; height: number }
+  workArea: { x: number; y: number; width: number; height: number }
+} {
+  const display = pickDisplayForRect(rect, getDesktopRenderDisplays())
+  if (display) return display
+  const bounds = getDesktopRenderBounds()
+  const area = { x: 0, y: 0, width: bounds.width, height: bounds.height }
+  return { bounds: area, workArea: area }
 }
 
 /** 根据 workArea 和已有组件，自动计算不重叠的放置位置 */
@@ -283,7 +395,7 @@ function findPlacement(
   h: number,
   existing: WidgetInstance[]
 ): { x: number; y: number } {
-  const workArea = getDesktopRenderWorkArea()
+  const workArea = getPrimaryWorkArea()
   return findSmartWidgetPlacement(w, h, existing, {
     x: workArea.x,
     y: workArea.y,
@@ -296,27 +408,25 @@ function findPlacement(
   })
 }
 
+/** Dock sits centred above the primary monitor's taskbar, never across a monitor seam. */
 function getDockPlacement(width: number, height: number): { x: number; y: number } {
-  const area = getDesktopRenderBounds()
-  const maxX = area.width - EDGE_PADDING - width
-  const maxY = area.height - BOTTOM_EDGE_PADDING - height
-  return {
-    x: Math.max(EDGE_PADDING, Math.min(Math.round((area.width - width) / 2), Math.max(EDGE_PADDING, maxX))),
-    y: Math.max(EDGE_PADDING, Math.min(Math.round(area.height - height - DOCK_BOTTOM_MARGIN), Math.max(EDGE_PADDING, maxY))),
-  }
+  const area = getPrimaryWorkArea()
+  return clampRectIntoArea({
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + area.height - height - DOCK_WORK_AREA_BOTTOM_MARGIN),
+    width,
+    height,
+  }, area, EDGE_PADDING)
 }
 
 function clampStickyNotePosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
-  const area = getDesktopRenderBounds()
-  return {
-    x: Math.round(Math.max(-width + STICKY_NOTE_GRAB_EDGE, Math.min(x, area.width - STICKY_NOTE_GRAB_EDGE))),
-    y: Math.round(Math.max(-height + STICKY_NOTE_GRAB_EDGE, Math.min(y, area.height - STICKY_NOTE_GRAB_EDGE))),
-  }
+  const rect = { x, y, width, height }
+  return clampRectPartiallyIntoArea(rect, getDisplayAreaForRect(rect).bounds, STICKY_NOTE_GRAB_EDGE)
 }
 
 /** 新便利贴有意错落叠放，避免把“可重叠”又退化成普通组件自动排版。 */
 function findStickyNotePlacement(width: number, height: number, existing: WidgetInstance[]): { x: number; y: number } {
-  const area = getDesktopRenderWorkArea()
+  const area = getPrimaryWorkArea()
   const count = existing.filter((widget) => widget.type === 'todo-board' && widget.enabled).length
   const column = count % 6
   const row = Math.floor(count / 6) % 3
@@ -346,17 +456,19 @@ function resolvePosition(
   allWidgets: WidgetInstance[],
   snapPosition = true
 ): { x: number; y: number } {
-  const area = getDesktopRenderBounds()
+  // Constrain to the monitor the widget was dropped on. The union rectangle
+  // of several monitors can contain areas no monitor shows.
+  const area = getDisplayAreaForRect({ x, y, width: w, height: h }).bounds
 
   // 1. 网格吸附
   let sx = snapPosition ? Math.round(x / GRID_GAP) * GRID_GAP : x
   let sy = snapPosition ? Math.round(y / GRID_GAP) * GRID_GAP : y
 
   // 2. 屏幕边界约束
-  const minX = EDGE_PADDING
-  const minY = EDGE_PADDING
-  const maxX = area.width - EDGE_PADDING - w
-  const maxY = area.height - BOTTOM_EDGE_PADDING - h
+  const minX = area.x + EDGE_PADDING
+  const minY = area.y + EDGE_PADDING
+  const maxX = area.x + area.width - EDGE_PADDING - w
+  const maxY = area.y + area.height - BOTTOM_EDGE_PADDING - h
   sx = Math.max(minX, Math.min(sx, Math.max(minX, maxX)))
   sy = Math.max(minY, Math.min(sy, Math.max(minY, maxY)))
 
@@ -762,6 +874,12 @@ export function registerWidgetIpc(): void {
     assertTrustedIpcSender(_e, ['canvas'])
     if (typeof active !== 'boolean') return
     setCanvasPointerActive(active)
+  })
+
+  ipcMain.on(IPC.CANVAS_SET_HIT_REGIONS, (_e, regions: unknown) => {
+    assertTrustedIpcSender(_e, ['canvas'])
+    const sanitized = sanitizeCanvasHitRegions(regions)
+    if (sanitized) setCanvasHitRegions(_e.sender.id, sanitized)
   })
 
   ipcMain.handle(IPC.CANVAS_SET_TEXT_INPUT_ACTIVE, (_e, active: boolean) => {

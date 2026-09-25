@@ -61,3 +61,40 @@ export function getDesktopRenderWorkArea(mode = getWallpaperDisplayMode()): Disp
   const bottom = Math.max(...displays.map((item) => item.workArea.y + item.workArea.height))
   return { x: left - render.x, y: top - render.y, width: right - left, height: bottom - top }
 }
+
+function toRenderLocal(rect: DisplayBounds, origin: DisplayBounds): DisplayBounds {
+  return { x: rect.x - origin.x, y: rect.y - origin.y, width: rect.width, height: rect.height }
+}
+
+/** Monitors covered by the canvas, in canvas client coordinates (primary-only mode exposes just the primary). */
+export function getDesktopRenderDisplays(mode = getWallpaperDisplayMode()): Array<{
+  id: number
+  primary: boolean
+  bounds: DisplayBounds
+  workArea: DisplayBounds
+}> {
+  const displays = getDisplayDescriptors()
+  if (displays.length === 0) return []
+  const render = getDesktopRenderBounds(mode)
+  const visible = mode === 'primary' ? [displays.find((item) => item.primary) ?? displays[0]] : displays
+  return visible.map((display) => ({
+    id: display.id,
+    primary: display.primary,
+    bounds: toRenderLocal(display.bounds, render),
+    workArea: toRenderLocal(display.workArea, render),
+  }))
+}
+
+/**
+ * Offset from primary-display coordinates to canvas client coordinates.
+ * Wallpaper widget configs are authored relative to the primary monitor, while
+ * the canvas origin moves to the union's top-left when a monitor sits to the
+ * left of or above the primary one.
+ */
+export function getPrimaryToRenderOffset(mode = getWallpaperDisplayMode()): { x: number; y: number } {
+  const displays = getDisplayDescriptors()
+  const primary = displays.find((item) => item.primary) ?? displays[0]
+  if (!primary) return { x: 0, y: 0 }
+  const render = getDesktopRenderBounds(mode)
+  return { x: primary.bounds.x - render.x, y: primary.bounds.y - render.y }
+}

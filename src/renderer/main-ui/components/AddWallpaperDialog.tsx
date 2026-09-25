@@ -135,10 +135,12 @@ export function AddWallpaperDialog(props: {
     const files = e.dataTransfer.files
     if (files.length > 0) {
       const f = files[0]
-      // Electron drag & drop 提供 path 属性
-      const path = (f as File & { path?: string }).path
+      // Electron 32+ 移除了 File.path，需经 preload 的 webUtils 解析本地路径
+      const path = window.lingyue.utils.getFilePath(f)
       if (path) {
-        handleFileSelected(path, f.name)
+        void handleFileSelected(path, f.name)
+      } else {
+        setError('无法读取拖入文件的本地路径，请使用“浏览文件”选择')
       }
     }
   }
@@ -180,6 +182,16 @@ export function AddWallpaperDialog(props: {
     }
   }
 
+  // Escape closes the dialog like the ✕ button (not while an import is running).
+  useEffect(() => {
+    if (!open || importing) return undefined
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [importing, onClose, open])
+
   if (!open) return null
 
   const hasFile = !!filePath
@@ -190,11 +202,11 @@ export function AddWallpaperDialog(props: {
       className="dialog-overlay active"
       onClick={handleOverlayClick}
     >
-      <div className="dialog" style={{ minWidth: 480, maxWidth: 520 }}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="add-wallpaper-title" style={{ minWidth: 480, maxWidth: 520 }}>
         <div className="dialog__header">
-          <span>添加壁纸</span>
+          <span id="add-wallpaper-title">添加壁纸</span>
           {!importing && (
-            <button className="dialog__close" onClick={onClose}>
+            <button type="button" className="dialog__close" onClick={onClose} aria-label="关闭" title="关闭">
               <X size={14} />
             </button>
           )}

@@ -37,12 +37,26 @@ function formatUpdateCheckTime(timestamp?: number): string {
   }).format(timestamp)}`
 }
 
+/** Strip Electron's "Error invoking remote method …: Error:" prefix so users see the real reason. */
+function formatIpcError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  const cleaned = message.replace(/^Error invoking remote method '[^']+':\s*(?:\w*Error:\s*)?/, '').trim()
+  if (!cleaned) return fallback
+  // zod issues arrive as a JSON array; the profile form checks required fields itself.
+  return cleaned.startsWith('[') ? fallback : cleaned
+}
+
+function getIncompleteProfileReason(profile: ModelProfile): string {
+  if (!profile.name.trim()) return '请填写配置名称'
+  if (!profile.model.trim()) return '请填写或从列表选择模型'
+  return ''
+}
+
 export function SettingsGeneralPage() {
   /* ── General settings state ── */
   const [autoStart, setAutoStart] = useState(false)
   const [autoStartBusy, setAutoStartBusy] = useState(false)
   const [autoStartMessage, setAutoStartMessage] = useState('')
-  const [animations, setAnimations] = useState(true)
   const [preciseLocationEnabled, setPreciseLocationEnabled] = useState(false)
   const [locationBusy, setLocationBusy] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
@@ -59,6 +73,7 @@ export function SettingsGeneralPage() {
   const [models, setModels] = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelListError, setModelListError] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
   const [activeId, setActiveId] = useState('')
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
@@ -79,7 +94,8 @@ export function SettingsGeneralPage() {
     const list = await window.lingyue.chat.listProfiles()
     setProfiles(list)
     const active = await window.lingyue.chat.getActiveProfile()
-    if (active) setActiveId(active.id)
+    // Clear the badge when the active profile was deleted.
+    setActiveId(active?.id ?? '')
   }, [])
 
   useEffect(() => {
@@ -190,14 +206,33 @@ export function SettingsGeneralPage() {
     setShowModelDropdown(false)
   }
 
+  const showProfileError = (message: string) => {
+    setTestStatus('error')
+    setTestError(message)
+  }
+
   const handleSave = async () => {
-    if (!editingProfile) return
-    await window.lingyue.chat.upsertProfile(editingProfile)
-    await loadProfiles()
-    setEditingProfile(null)
+    if (!editingProfile || savingProfile) return
+    const incomplete = getIncompleteProfileReason(editingProfile)
+    if (incomplete) {
+      showProfileError(incomplete)
+      return
+    }
+    setSavingProfile(true)
+    try {
+      await window.lingyue.chat.upsertProfile(editingProfile)
+      await loadProfiles()
+      setEditingProfile(null)
+    } catch (error) {
+      showProfileError(formatIpcError(error, '保存失败'))
+    } finally {
+      setSavingProfile(false)
+    }
   }
 
   const handleDelete = async (id: string) => {
+    const profile = profiles.find((item) => item.id === id)
+    if (!window.confirm(`删除模型配置“${profile?.name || '未命名配置'}”？API Key 也会一并移除。`)) return
     await window.lingyue.chat.deleteProfile(id)
     await loadProfiles()
     if (editingProfile?.id === id) setEditingProfile(null)
@@ -210,27 +245,41 @@ export function SettingsGeneralPage() {
 
   const handleTest = async () => {
     if (!editingProfile) return
+    const incomplete = getIncompleteProfileReason(editingProfile)
+    if (incomplete) {
+      showProfileError(incomplete)
+      return
+    }
     setTestStatus('testing')
     setTestError('')
-    const result = await window.lingyue.chat.testProfile(editingProfile)
-    if (result.ok) {
-      setTestStatus('success')
-    } else {
-      setTestStatus('error')
-      setTestError(result.error || '连接失败')
+    try {
+      const result = await window.lingyue.chat.testProfile(editingProfile)
+      if (result.ok) {
+        setTestStatus('success')
+      } else {
+        showProfileError(result.error || '连接失败')
+      }
+    } catch (error) {
+      showProfileError(formatIpcError(error, '连接失败'))
     }
   }
 
   const handleListModels = async () => {
     if (!editingProfile) return
+    const profile = editingProfile
     setModelsLoading(true)
     setModelListError('')
-    const result = await window.lingyue.chat.listModels(editingProfile)
-    setModels(result.models)
-    setModelsLoading(false)
-    setShowModelDropdown(false)
-    if (result.error) setModelListError(result.error)
-    setEditingProfile({ ...editingProfile, availableModels: result.models })
+    try {
+      const result = await window.lingyue.chat.listModels(profile)
+      setModels(result.models)
+      setShowModelDropdown(false)
+      if (result.error) setModelListError(result.error)
+      setEditingProfile((current) => (current?.id === profile.id ? { ...current, availableModels: result.models } : current))
+    } catch (error) {
+      setModelListError(formatIpcError(error, '获取模型列表失败'))
+    } finally {
+      setModelsLoading(false)
+    }
   }
 
   const selectModel = (model: string) => {
@@ -415,11 +464,11 @@ export function SettingsGeneralPage() {
           <div className="settings-card__icon"><Monitor size={18} /></div>
           <div className="settings-card__body">
             <div className="settings-card__title">系统托盘图标</div>
-            <div className="settings-card__desc">在系统托盘区域显示图标</div>
+            <div className="settings-card__desc">灵月常驻系统托盘，用于打开主界面和退出应用，不能关闭</div>
           </div>
           <div className="settings-card__action">
-            <label className="toggle-switch">
-              <input type="checkbox" defaultChecked />
+            <label className="toggle-switch toggle-switch--disabled" title="托盘是关闭主界面后唯一的入口">
+              <input type="checkbox" checked disabled readOnly aria-label="系统托盘图标" />
               <div className="toggle-switch__track">
                 <div className="toggle-switch__thumb" />
               </div>
@@ -432,11 +481,11 @@ export function SettingsGeneralPage() {
           <div className="settings-card__icon"><Sparkles size={18} /></div>
           <div className="settings-card__body">
             <div className="settings-card__title">动画效果</div>
-            <div className="settings-card__desc">启用 UI 动画和过渡效果</div>
+            <div className="settings-card__desc">启用 UI 动画和过渡效果（即将推出）</div>
           </div>
           <div className="settings-card__action">
-            <label className="toggle-switch">
-              <input type="checkbox" checked={animations} onChange={(e) => setAnimations(e.target.checked)} />
+            <label className="toggle-switch toggle-switch--disabled" title="即将推出">
+              <input type="checkbox" checked disabled readOnly aria-label="动画效果" />
               <div className="toggle-switch__track">
                 <div className="toggle-switch__thumb" />
               </div>
@@ -449,12 +498,11 @@ export function SettingsGeneralPage() {
           <div className="settings-card__icon"><Globe size={18} /></div>
           <div className="settings-card__body">
             <div className="settings-card__title">语言</div>
-            <div className="settings-card__desc">选择应用显示语言</div>
+            <div className="settings-card__desc">应用显示语言（更多语言即将推出）</div>
           </div>
           <div className="settings-card__action">
-            <select className="settings-select" defaultValue="zh-CN">
+            <select className="settings-select" value="zh-CN" disabled aria-label="语言">
               <option value="zh-CN">简体中文</option>
-              <option value="en">English</option>
             </select>
           </div>
         </div>
@@ -703,7 +751,10 @@ export function SettingsGeneralPage() {
               </div>
               <div className="profile-editor__footer-right">
                 <button className="settings-btn" onClick={() => setEditingProfile(null)}>取消</button>
-                <button className="settings-btn settings-btn--primary" onClick={handleSave}>保存</button>
+                <button className="settings-btn settings-btn--primary" onClick={handleSave} disabled={savingProfile}>
+                  {savingProfile && <Loader2 size={14} className="spin" />}
+                  保存
+                </button>
               </div>
             </div>
           </div>

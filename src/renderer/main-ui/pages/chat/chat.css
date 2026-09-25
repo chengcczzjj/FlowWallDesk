@@ -694,6 +694,10 @@
 
 /* ── Input Area ── */
 .chat-input-area {
+  /* Above the pet dock: at narrower widths the dock overlaps the right end of
+     the input, and its hit box swallowed clicks on the send/stop button. */
+  position: relative;
+  z-index: 5;
   padding: 16px 24px 20px;
   max-width: 800px;
   width: 100%;

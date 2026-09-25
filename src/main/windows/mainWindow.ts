@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from 'electron'
+import { BrowserWindow, app, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { store } from '../store'
@@ -24,7 +24,7 @@ export function createMainWindow(target?: MainWindowNavTarget): BrowserWindow {
     return mainWindow
   }
 
-  const bounds = store.get('mainWindowBounds')
+  const bounds = getRestorableMainWindowBounds(store.get('mainWindowBounds'))
 
   mainWindow = new BrowserWindow({
     width: bounds?.width ?? 1200,
@@ -34,7 +34,8 @@ export function createMainWindow(target?: MainWindowNavTarget): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    backgroundColor: '#1c1c1c',
+    // Match the light UI so resizing/maximising never flashes dark edges before repaint.
+    backgroundColor: '#eef2f7',
     frame: false,
     titleBarStyle: 'hidden',
     title: '灵月 LingyueDesk',
@@ -99,6 +100,30 @@ export function createMainWindow(target?: MainWindowNavTarget): BrowserWindow {
   }
 
   return mainWindow
+}
+
+/**
+ * Only reuse the saved position while enough of the title bar is still on a
+ * connected monitor; after a monitor is unplugged the window would otherwise
+ * open off-screen. Size is kept, position falls back to Electron's centring.
+ */
+function getRestorableMainWindowBounds(
+  saved: Electron.Rectangle | undefined,
+): { width: number; height: number; x?: number; y?: number } | undefined {
+  if (!saved || !Number.isFinite(saved.width) || !Number.isFinite(saved.height)) return undefined
+  const size = { width: Math.max(960, saved.width), height: Math.max(640, saved.height) }
+  if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return size
+  try {
+    const titleBar = { x: saved.x, y: saved.y, width: size.width, height: 48 }
+    const visible = screen.getAllDisplays().some(({ workArea }) => {
+      const width = Math.min(titleBar.x + titleBar.width, workArea.x + workArea.width) - Math.max(titleBar.x, workArea.x)
+      const height = Math.min(titleBar.y + titleBar.height, workArea.y + workArea.height) - Math.max(titleBar.y, workArea.y)
+      return width >= 160 && height >= 24
+    })
+    return visible ? { ...size, x: saved.x, y: saved.y } : size
+  } catch {
+    return size
+  }
 }
 
 export function getMainWindow(): BrowserWindow | null {

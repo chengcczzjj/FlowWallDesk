@@ -14,7 +14,10 @@ import type {
   DesktopIconLaunchResult,
   CanvasOcclusionState,
   NativeDockClickEvent,
+  WallpaperFramePayload,
+  WallpaperFrameSource,
 } from '@shared/types'
+import type { CanvasHitRegion } from '@shared/canvas-hit-test'
 
 const api = {
   onSync: (cb: (list: WidgetInstance[]) => void): (() => void) => {
@@ -62,6 +65,16 @@ const api = {
   setPointerActive: (active: boolean): void => {
     ipcRenderer.send(IPC.CANVAS_SET_POINTER_ACTIVE, active)
   },
+  /** 上报组件实际渲染的命中区域（画布坐标），主进程据此判断光标是否在组件上 */
+  setHitRegions: (regions: CanvasHitRegion[]): void => {
+    ipcRenderer.send(IPC.CANVAS_SET_HIT_REGIONS, regions)
+  },
+  /** 光标处组件被其他窗口遮住时暂停悬停反馈 */
+  onPointerOccluded: (cb: (occluded: boolean) => void): (() => void) => {
+    const handler = (_: unknown, occluded: boolean) => cb(occluded === true)
+    ipcRenderer.on(IPC.CANVAS_POINTER_OCCLUDED, handler)
+    return () => ipcRenderer.off(IPC.CANVAS_POINTER_OCCLUDED, handler)
+  },
   setTextInputActive: (active: boolean): Promise<boolean> =>
     ipcRenderer.invoke(IPC.CANVAS_SET_TEXT_INPUT_ACTIVE, active),
   logDiagnostic: (event: string, details: Record<string, unknown> = {}): void => {
@@ -95,11 +108,18 @@ const api = {
   openExplorer: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_EXPLORER),
   openRecycleBin: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_RECYCLE_BIN),
   showDesktop: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_SHOW_DESKTOP),
-  /** 监听壁纸抽帧（用于毛玻璃效果） */
-  onFrame: (cb: (data: string) => void): (() => void) => {
-    const handler = (_: unknown, data: string) => cb(data)
+  /** 监听壁纸抽帧（用于毛玻璃效果），每个壁纸窗口独立一路 */
+  onFrame: (cb: (frame: WallpaperFramePayload) => void): (() => void) => {
+    const handler = (_: unknown, frame: WallpaperFramePayload) => cb(frame)
     ipcRenderer.on(IPC.WALLPAPER_FRAME, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_FRAME, handler)
+  },
+  /** 壁纸窗口在画布坐标中的区域，用于多显示器毛玻璃对齐 */
+  getFrameSources: (): Promise<WallpaperFrameSource[]> => ipcRenderer.invoke(IPC.WALLPAPER_FRAME_SOURCES_GET),
+  onFrameSources: (cb: (sources: WallpaperFrameSource[]) => void): (() => void) => {
+    const handler = (_: unknown, sources: WallpaperFrameSource[]) => cb(sources)
+    ipcRenderer.on(IPC.WALLPAPER_FRAME_SOURCES, handler)
+    return () => ipcRenderer.off(IPC.WALLPAPER_FRAME_SOURCES, handler)
   },
   setWallpaperFrameDemand: (enabled: boolean): void => {
     ipcRenderer.send(IPC.WALLPAPER_CAPTURE_DEMAND, enabled)

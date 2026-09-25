@@ -5,9 +5,9 @@ import type { DesktopSceneLayoutPlan, PlannedSceneWidget } from '@shared/desktop
 import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } from '../widgets'
 import { FloatingToolbar } from '../widgets/FloatingToolbar'
 import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
-import { setWallpaperFrame } from './wallpaperFrameStore'
+import { setWallpaperFrame, setWallpaperFrameSources } from './wallpaperFrameStore'
 import { CanvasPointerGate } from '@shared/canvas-pointer-gate'
-import { isCanvasInteractiveWidgetType } from '@shared/canvas-hit-test'
+import { isCanvasInteractiveWidgetType, type CanvasHitRegion } from '@shared/canvas-hit-test'
 import { getWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
 
 const GRID = 16
@@ -92,6 +92,47 @@ function applyConfigUpdate(widget: WidgetInstance, newConfig: Record<string, unk
     height: Math.max(MIN_SIZE, widget.height + heightDelta),
     config: { ...nextConfig, storageTitleExpanded: nextStyle === 'titled' },
   }
+}
+
+/**
+ * Measure what is actually painted for every interactive widget. The main
+ * process polls the native cursor against these regions, so it agrees with
+ * the renderer's elementFromPoint() about rotated notes, fit-content widgets
+ * and elements that extend past the persisted rect.
+ */
+function measureCanvasHitRegions(widgets: readonly WidgetInstance[]): CanvasHitRegion[] {
+  const byId = new Map(widgets.map((widget, index) => [widget.id, { widget, index }]))
+  const regions: CanvasHitRegion[] = []
+  document.querySelectorAll<HTMLElement>('[data-widget][data-widget-interactive="true"]').forEach((element) => {
+    const entry = byId.get(element.dataset.widget ?? '')
+    if (!entry || entry.widget.enabled === false) return
+    const rect = element.getBoundingClientRect()
+    let left = rect.left
+    let top = rect.top
+    let right = rect.right
+    let bottom = rect.bottom
+    element.querySelectorAll<HTMLElement>('[data-widget-hit-area]').forEach((area) => {
+      const areaRect = area.getBoundingClientRect()
+      if (areaRect.width <= 0 || areaRect.height <= 0) return
+      left = Math.min(left, areaRect.left)
+      top = Math.min(top, areaRect.top)
+      right = Math.max(right, areaRect.right)
+      bottom = Math.max(bottom, areaRect.bottom)
+    })
+    if (right - left <= 0 || bottom - top <= 0) return
+    const x = Math.floor(left)
+    const y = Math.floor(top)
+    regions.push({
+      id: entry.widget.id,
+      type: entry.widget.type,
+      x,
+      y,
+      width: Math.ceil(right) - x,
+      height: Math.ceil(bottom) - y,
+      stackOrder: getWidgetStackOrder(entry.widget, entry.index),
+    })
+  })
+  return regions
 }
 
 function needsWidgetUpdate(prev: WidgetInstance, next: WidgetInstance): boolean {
@@ -376,6 +417,18 @@ export function Canvas() {
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
   const lastMousePassthroughRef = useRef<boolean | null>(true)
   const lastDockActionPointerDownAtRef = useRef(0)
+  const pointerOccludedRef = useRef(false)
+  const scheduleHitRegionPublishRef = useRef<() => void>(() => undefined)
+
+  const setPointerOccluded = useCallback((occluded: boolean) => {
+    if (pointerOccludedRef.current === occluded) return
+    pointerOccludedRef.current = occluded
+    // Another window covers the widget under the cursor. Electron still
+    // forwards WM_MOUSEMOVE to the canvas, so without this the covered Dock
+    // magnified and notes showed hover states behind the user's apps.
+    if (occluded) document.documentElement.dataset.pointerOccluded = 'true'
+    else delete document.documentElement.dataset.pointerOccluded
+  }, [])
 
   const reconcileMousePassthrough = useCallback((clientX: number, clientY: number, force = false) => {
     lastPointerPositionRef.current = { x: clientX, y: clientY }
@@ -435,6 +488,9 @@ export function Canvas() {
     window.canvasBridge?.getWidgets().then(syncWidgets)
     const offSync = window.canvasBridge?.onSync(syncWidgets)
     const offFrame = window.canvasBridge?.onFrame(setWallpaperFrame)
+    window.canvasBridge?.getFrameSources?.().then(setWallpaperFrameSources).catch(() => undefined)
+    const offFrameSources = window.canvasBridge?.onFrameSources?.(setWallpaperFrameSources)
+    const offPointerOccluded = window.canvasBridge?.onPointerOccluded?.(setPointerOccluded)
     const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
     const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
     const offPointerReset = window.canvasBridge?.onPointerReset(() => {
@@ -470,6 +526,8 @@ export function Canvas() {
     return () => {
       offSync?.()
       offFrame?.()
+      offFrameSources?.()
+      offPointerOccluded?.()
       offScenePreview?.()
       offScenePreviewClear?.()
       offPointerReset?.()
@@ -477,7 +535,7 @@ export function Canvas() {
       for (const timer of entryTimers.values()) window.clearTimeout(timer)
       entryTimers.clear()
     }
-  }, [reconcileLastPointer, reconcileMousePassthrough, syncWidgets])
+  }, [reconcileLastPointer, reconcileMousePassthrough, setPointerOccluded, syncWidgets])
 
   useEffect(() => {
     return window.canvasBridge?.onNativeDockClick((event) => {
@@ -524,6 +582,9 @@ export function Canvas() {
     }
     const handlePointerDown = (event: PointerEvent) => {
       rememberPointer(event)
+      // Windows only delivers a real button press when the canvas is on top at
+      // this point, so an occlusion hint that is still set must be stale.
+      if (pointerOccludedRef.current) setPointerOccluded(false)
       const target = event.target as Element | null
       const widget = target?.closest('[data-widget]') as HTMLElement | null
       const action = Boolean(target?.closest('[data-desktop-icon-action]'))
@@ -602,7 +663,53 @@ export function Canvas() {
       window.removeEventListener('pointercancel', releasePointer, true)
       window.removeEventListener('blur', resetPointers)
     }
-  }, [reconcileLastPointer, reconcileMousePassthrough])
+  }, [reconcileLastPointer, reconcileMousePassthrough, setPointerOccluded])
+
+  // Keep the main-process hit test in sync with the rendered DOM. Publishing is
+  // coalesced per animation frame and repeated once after CSS transitions
+  // (widgets glide 250ms into place after a drop or collision push).
+  useEffect(() => {
+    let frame = 0
+    let settleTimer = 0
+    let lastSignature = ''
+    const publish = () => {
+      frame = 0
+      const regions = measureCanvasHitRegions(widgetsRef.current)
+      const signature = JSON.stringify(regions)
+      if (signature === lastSignature) return
+      lastSignature = signature
+      window.canvasBridge?.setHitRegions?.(regions)
+    }
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(publish)
+    }
+    const scheduleSettled = () => {
+      schedule()
+      window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(schedule, 320)
+    }
+    scheduleHitRegionPublishRef.current = scheduleSettled
+    window.addEventListener('resize', scheduleSettled)
+    document.addEventListener('transitionend', schedule, true)
+    document.addEventListener('animationend', schedule, true)
+    scheduleSettled()
+    return () => {
+      scheduleHitRegionPublishRef.current = () => undefined
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(settleTimer)
+      window.removeEventListener('resize', scheduleSettled)
+      document.removeEventListener('transitionend', schedule, true)
+      document.removeEventListener('animationend', schedule, true)
+    }
+  }, [])
+
+  useEffect(() => {
+    scheduleHitRegionPublishRef.current()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(() => scheduleHitRegionPublishRef.current())
+    document.querySelectorAll<HTMLElement>('[data-widget]').forEach((element) => observer.observe(element))
+    return () => observer.disconnect()
+  }, [widgets, editing, enteringIds])
 
   useEffect(() => {
     const glassTypes = new Set([

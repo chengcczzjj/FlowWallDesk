@@ -67,8 +67,25 @@ test('desktop note editing opens a scoped keyboard-focus session without enterin
   assert.match(todoSource, /contentEditable/)
   assert.match(todoSource, /className="sticky-note__formatbar"/)
   assert.match(todoSource, /document\.execCommand\(FORMAT_COMMANDS\[format\]/)
-  assert.match(canvasWindowSource, /editing: isEditing \|\| canvasTextInputActive/)
-  assert.match(canvasWindowSource, /export function setCanvasTextInputActive[\s\S]*win\.setFocusable\(true\)[\s\S]*win\.webContents\.focus\(\)/)
+  // Typing keeps normal per-widget hit testing so clicks on the desktop or other
+  // apps are not swallowed while a note has keyboard focus.
+  assert.match(canvasWindowSource, /editing: isEditing,/)
+  assert.doesNotMatch(canvasWindowSource, /editing: isEditing \|\| canvasTextInputActive/)
+  assert.match(canvasWindowSource, /export function setCanvasTextInputActive[\s\S]*focusCanvasForTextInput\(win\)/)
+  // Keyboard focus is granted without lifting the full-screen canvas above other apps.
+  assert.match(
+    canvasWindowSource,
+    /function focusCanvasForTextInput[\s\S]*setCanvasFocusable\(win, true\)[\s\S]*win\.focus\(\)[\s\S]*win\.webContents\.focus\(\)[\s\S]*settleCanvasOnDesktop\(win\)/,
+  )
+  // Electron's setFocusable() re-adds a taskbar tab and deactivates the window;
+  // it may only run on real transitions and must hide the tab again.
+  assert.match(
+    canvasWindowSource,
+    /function setCanvasFocusable[\s\S]*if \(canvasFocusable === focusable\) return[\s\S]*win\.setFocusable\(focusable\)[\s\S]*win\.setSkipTaskbar\(true\)/,
+  )
+  assert.equal(canvasWindowSource.match(/\.setFocusable\(/g)?.length, 1)
+  // A brief loss of window activation (IME UI, flyouts) must not end the edit immediately.
+  assert.match(todoSource, /!document\.hasFocus\(\)[\s\S]*WINDOW_BLUR_FINISH_GRACE_MS/)
   assert.doesNotMatch(todoSource, /setEditMode\(/)
 })
 

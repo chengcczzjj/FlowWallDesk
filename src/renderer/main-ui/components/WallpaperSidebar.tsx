@@ -55,10 +55,10 @@ export function WallpaperSidebar(props: {
   const sendUpdate = useCallback(
     (key: string, value: unknown) => {
       if (isApplied) {
-        window.lingyue.wallpaper.updateSetting(key, value)
+        void window.lingyue.wallpaper.updateSetting(key, value, item.id)
       }
     },
-    [isApplied]
+    [isApplied, item.id]
   )
 
   const handleVolume = (v: number) => {
@@ -128,7 +128,7 @@ export function WallpaperSidebar(props: {
         <div className="settings-group">
           <div className="settings-group__header">壁纸属性</div>
 
-          <Property label="显示策略 (Scaling)">
+          <Property label="显示策略">
             <select className="combo-box" value={scaling} onChange={(e) => handleScaling(e.target.value)}>
               <option>覆盖</option>
               <option>填充</option>
@@ -138,7 +138,7 @@ export function WallpaperSidebar(props: {
             </select>
           </Property>
 
-          <Property label="镜像翻转 (Flip)">
+          <Property label="镜像翻转">
             <select className="combo-box" value={flip} onChange={(e) => handleFlip(e.target.value)}>
               <option>无</option>
               <option>水平</option>
@@ -147,7 +147,7 @@ export function WallpaperSidebar(props: {
           </Property>
 
           {showSpeed && (
-            <Property label="播放速度 (Speed)">
+            <Property label="播放速度">
               <div className="slider-container">
                 <input
                   type="range"
@@ -164,7 +164,7 @@ export function WallpaperSidebar(props: {
           )}
 
           {showVolume && (
-            <Property label="音量 (Volume)">
+            <Property label="音量">
               <div className="slider-container">
                 <input
                   type="range"

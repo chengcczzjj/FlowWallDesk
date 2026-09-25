@@ -1,5 +1,30 @@
 # 灵月桌面 开发日志
 
+## [2026-09-25 21:44] 整治桌面层级闪烁、多显示器对齐与主界面规范问题
+
+**变更摘要**: 系统排查桌面组件在开启应用、操作输入法时的闪烁与指针跳变、需要多次点击才能输入/拖拽的问题，修复多显示器下毛玻璃错位与组件落位，并按审查结果修正主界面和设置页的层级、状态与设计规范问题。
+
+**涉及模块**:
+- `src/main/windows/canvasWindow.ts` / `src/shared/canvas-hit-test.ts`: `setFocusable` 只在状态变化时调用并立即隐藏任务栏标签；便利贴获取键盘焦点后回到桌面层；输入期间不再整屏截获鼠标；原生命中改用 renderer 上报的 DOM 命中区域，并在光标处组件被其他窗口遮住（且该窗口确在画布之上）时保持穿透、通知 renderer 暂停悬停。
+- `src/main/index.ts`: Windows 下关闭 Chromium `CalculateNativeWinOcclusion`。
+- `src/renderer/canvas/Canvas.tsx` / `canvas.css` / `src/renderer/widgets/TodoBoard/TodoBoard.tsx`: 上报命中区域、遮挡时关闭指针事件；便利贴窗口短暂失焦（输入法/系统浮层）不立即结束编辑。
+- `src/main/ipc/wallpaperIpc.ts` / `src/main/windows/wallpaperWindow.ts` / `src/renderer/canvas/wallpaperFrameStore.ts` / `src/renderer/widgets/FrostedGlassBackground.tsx` / `src/renderer/wallpaper/Wallpaper.tsx`: 每个壁纸窗口独立抽帧并按画布坐标对齐毛玻璃；静态图片不再持续主进程截图；应用壁纸不再触发置顶闪烁；壁纸属性实时调整不再被旧布局回弹。
+- `src/shared/widget-display-fit.ts` / `src/main/ipc/widgetIpc.ts` / `src/main/windows/displayLayout.ts`: Dock、新组件和便利贴落在主显示器工作区；拖放按所在显示器约束；切换布局/拔插显示器后移回不可见组件并同步画布；组件配置文件改为相对主显示器坐标。
+- `src/renderer/main-ui/`：修复添加壁纸对话框被壁纸网格遮挡、Electron 39 下拖放路径失效、模型配置按钮卡在加载中、壁纸库每次应用都闪烁重载、显示器拓扑比例失真与状态提示、聊天发送按钮被桌宠遮挡、重命名 Esc 仍保存、便笺管理页覆盖桌面编辑、样式串扰与焦点可见性等问题。
+
+**遇到的问题**:
+- Electron 在 Windows 上的 `setFocusable()` 会调用 `SetSkipTaskbar(!focusable)` 和 `Deactivate()` → 每次全屏遮挡或便利贴输入都可能把前台交给画布下方的窗口并闪出任务栏按钮；改为仅在状态变化时调用，并先把画布放回桌面层。
+- `forward: true` 会把鼠标移动转发给被其他窗口遮住的画布，renderer 据此声称悬停 → 主进程以 `WindowFromPoint` 和 z-order 判断是否真的被遮挡后再决定是否截获。
+- 多屏模式下只抽取主屏壁纸帧并拉伸到整个虚拟桌面，偏移还叠加了 `screenX` → 按壁纸窗口分别抽帧并下发各自在画布中的区域。
+
+**验证结果**:
+- `npm test` 通过全部 65 项测试（新增 `tests/desktop-layer.test.mjs`）；`npm run build:check` 成功。
+- 未在 Windows 实机验证：涉及原生窗口层级的行为需安装后按“开应用/切输入法/多屏拖放”场景复测。
+
+**Git Commit**: 已提交 — `fix(desktop): stop widget layer flicker and align multi-monitor glass`
+
+---
+
 ## [2026-08-30 21:23] 发布 1.1.10 多显示器壁纸布局恢复版
 
 **变更摘要**: 将多显示器模式链路修复升版为 1.1.10，生成自动更新资产、完成本机覆盖安装并发布 GitHub Release。

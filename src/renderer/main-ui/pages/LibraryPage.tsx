@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   WallpaperApplyTarget,
   WallpaperDisplayMode,
@@ -6,6 +6,7 @@ import type {
   WallpaperItem,
 } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
+import { DISPLAY_MODE_OPTIONS, formatDisplayResolution, getDisplayModeOption } from '@shared/display-topology'
 import { WallpaperSidebar } from '../components/WallpaperSidebar'
 import { ImageOff, Monitor, Plus } from 'lucide-react'
 import type { InitialFile } from '../components/AddWallpaperDialog'
@@ -16,12 +17,6 @@ const TYPE_LABEL: Record<WallpaperItem['type'], string> = {
   web: '网页',
 }
 
-const DISPLAY_MODE_COPY: Record<WallpaperDisplayMode, { label: string; description: string }> = {
-  primary: { label: '仅主显示器', description: '壁纸只铺满 Windows 主显示器。' },
-  duplicate: { label: '复制到每台显示器', description: '同一张壁纸会在每台显示器上独立铺满。' },
-  'per-display': { label: '每台显示器单独设置', description: '当前选择只会替换指定显示器的壁纸。' },
-  span: { label: '跨屏延展', description: '一张壁纸会铺满整个 Windows 虚拟桌面。' },
-}
 
 export function LibraryPage({
   search,
@@ -47,9 +42,16 @@ export function LibraryPage({
   const [loading, setLoading] = useState(true)
   const [dragOver, setDragOver] = useState(false)
 
+  const [loadError, setLoadError] = useState('')
+  const [currentWallpaperId, setCurrentWallpaperId] = useState<string | undefined>()
+  const hasLoadedRef = useRef(false)
+
+  // The catalogue only changes on import/delete (refreshKey). Applying a
+  // wallpaper or switching display layout used to refetch it too, which
+  // replaced the grid with "加载中…" and threw the scroll position away.
   useEffect(() => {
     let alive = true
-    setLoading(true)
+    if (!hasLoadedRef.current) setLoading(true)
     Promise.all([
       window.lingyue.wallpaper.list(),
       window.lingyue.wallpaper.getCurrent(),
@@ -57,30 +59,37 @@ export function LibraryPage({
     ]).then(
       ([items, current, nextDisplaySettings]) => {
         if (!alive) return
+        hasLoadedRef.current = true
         setList(items)
         setLoadedDisplaySettings(nextDisplaySettings)
+        setCurrentWallpaperId(current?.current?.id)
+        setLoadError('')
         setLoading(false)
-        const displayId = typeof wallpaperTarget === 'number' && nextDisplaySettings.displays.some((display) => display.id === wallpaperTarget)
-          ? wallpaperTarget
-          : nextDisplaySettings.displays.find((display) => display.primary)?.id ?? nextDisplaySettings.displays[0]?.id
-        if (nextDisplaySettings.mode === 'per-display' && displayId !== undefined && displayId !== wallpaperTarget) {
-          onDisplaySelect?.(displayId)
-        }
-        const effectiveId = nextDisplaySettings.mode === 'per-display' && displayId !== undefined
-          ? nextDisplaySettings.assignments[String(displayId)] ?? current?.current?.id
-          : current?.current?.id
-        if (effectiveId) {
-          setAppliedId(effectiveId)
-          setSelectedId(effectiveId)
-        } else if (items[0]) {
-          setSelectedId(items[0].id)
-        }
-      }
+        setSelectedId((selected) => (
+          selected && items.some((item) => item.id === selected) ? selected : undefined
+        ))
+      },
+      (error: unknown) => {
+        if (!alive) return
+        setLoadError(error instanceof Error ? error.message : '壁纸列表读取失败')
+        setLoading(false)
+      },
     )
     return () => {
       alive = false
     }
-  }, [refreshKey, wallpaperTarget, displaySettings, onDisplaySelect])
+  }, [refreshKey])
+
+  // Display layout changes only move the "applied" badge and the target monitor.
+  useEffect(() => {
+    let alive = true
+    void window.lingyue.wallpaper.getCurrent().then((current) => {
+      if (alive) setCurrentWallpaperId(current?.current?.id)
+    }).catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [displaySettings])
 
   const activeSettings = displaySettings ?? loadedDisplaySettings
   const activeDisplayId = typeof wallpaperTarget === 'number' && activeSettings?.displays.some((display) => display.id === wallpaperTarget)
@@ -88,7 +97,29 @@ export function LibraryPage({
     : activeSettings?.displays.find((display) => display.primary)?.id ?? activeSettings?.displays[0]?.id
   const activeDisplay = activeSettings?.displays.find((display) => display.id === activeDisplayId)
   const activeMode = activeSettings?.mode ?? 'primary'
-  const activeModeCopy = DISPLAY_MODE_COPY[activeMode]
+  const activeModeCopy = getDisplayModeOption(activeMode)
+  const effectiveAppliedId = activeMode === 'per-display' && activeDisplayId !== undefined
+    ? activeSettings?.assignments[String(activeDisplayId)] ?? currentWallpaperId
+    : currentWallpaperId
+
+  // Per-display mode always targets a concrete monitor.
+  useEffect(() => {
+    if (activeMode === 'per-display' && activeDisplayId !== undefined && activeDisplayId !== wallpaperTarget) {
+      onDisplaySelect?.(activeDisplayId)
+    }
+  }, [activeDisplayId, activeMode, onDisplaySelect, wallpaperTarget])
+
+  // Follow the applied wallpaper when it changes (another monitor picked,
+  // wallpaper applied elsewhere) without overriding a manual selection otherwise.
+  const lastAppliedIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (loading) return
+    setAppliedId(effectiveAppliedId)
+    if (effectiveAppliedId !== lastAppliedIdRef.current) {
+      lastAppliedIdRef.current = effectiveAppliedId
+      setSelectedId(effectiveAppliedId ?? list[0]?.id)
+    }
+  }, [effectiveAppliedId, list, loading])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return list
@@ -108,7 +139,9 @@ export function LibraryPage({
         : 'current'
       await window.lingyue.wallpaper.apply(item, target)
       const nextSettings = await window.lingyue.wallpaper.getDisplaySettings()
+      const current = await window.lingyue.wallpaper.getCurrent()
       setAppliedId(item.id)
+      setCurrentWallpaperId(current?.current?.id)
       setLoadedDisplaySettings(nextSettings)
       onDisplaySettingsChange?.(nextSettings)
     } catch (error) {
@@ -119,14 +152,10 @@ export function LibraryPage({
   const updateDisplayMode = async (mode: WallpaperDisplayMode) => {
     try {
       const nextSettings = await window.lingyue.wallpaper.setDisplayMode(mode)
+      const current = await window.lingyue.wallpaper.getCurrent()
+      setCurrentWallpaperId(current?.current?.id)
       setLoadedDisplaySettings(nextSettings)
       onDisplaySettingsChange?.(nextSettings)
-      const current = await window.lingyue.wallpaper.getCurrent()
-      const effectiveId = mode === 'per-display' && activeDisplayId !== undefined
-        ? nextSettings.assignments[String(activeDisplayId)] ?? current?.current?.id
-        : current?.current?.id
-      setAppliedId(effectiveId)
-      if (effectiveId) setSelectedId(effectiveId)
     } catch (error) {
       window.alert(error instanceof Error ? error.message : '显示器布局应用失败')
     }
@@ -167,7 +196,8 @@ export function LibraryPage({
       const files = e.dataTransfer.files
       if (files.length > 0 && onDropFile) {
         const f = files[0]
-        const path = (f as File & { path?: string }).path
+        // Electron 32+ 移除了 File.path，需经 preload 的 webUtils 解析本地路径
+        const path = window.lingyue.utils.getFilePath(f)
         if (path) {
           onDropFile({ path, name: f.name })
         }
@@ -200,11 +230,20 @@ export function LibraryPage({
       <div className="library-content" style={{ marginRight: selected ? 320 : 0 }}>
         <div className="library-toolbar">
           <div className="library-toolbar__copy">
-            <span className="library-toolbar__eyebrow">WALLPAPER DISPLAY</span>
-            <strong>{activeMode === 'per-display' && activeDisplay
-              ? `${activeModeCopy.label} · ${activeDisplay.label}${activeDisplay.primary ? ' · 主屏' : ''}`
-              : activeModeCopy.label}</strong>
-            <small>{activeMode === 'per-display' && !activeDisplay ? '正在读取 Windows 显示器…' : activeModeCopy.description}</small>
+            {(() => {
+              const title = activeMode === 'per-display' && activeDisplay
+                ? `${activeModeCopy.label} · ${activeDisplay.label}${activeDisplay.primary ? ' · 主显示器' : ''}`
+                : activeModeCopy.label
+              const description = activeMode === 'per-display'
+                ? activeDisplay ? '应用的壁纸只会替换所选显示器。' : '正在读取 Windows 显示器…'
+                : activeModeCopy.description
+              return (
+                <>
+                  <strong title={title}>{title}</strong>
+                  <small title={description}>{description}</small>
+                </>
+              )
+            })()}
           </div>
           <div className="library-display-controls">
             <label className="library-display-select">
@@ -215,8 +254,8 @@ export function LibraryPage({
                 onChange={(event) => void updateDisplayMode(event.target.value as WallpaperDisplayMode)}
                 aria-label="选择显示器布局"
               >
-                {Object.entries(DISPLAY_MODE_COPY).map(([mode, copy]) => (
-                  <option key={mode} value={mode}>{copy.label}</option>
+                {DISPLAY_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
@@ -233,7 +272,7 @@ export function LibraryPage({
                   {!activeSettings?.displays.length && <option value="">读取中…</option>}
                   {(activeSettings?.displays ?? []).map((display) => (
                     <option key={display.id} value={display.id}>
-                      {display.label}{display.primary ? ' · 主屏' : ''} · {display.bounds.width} × {display.bounds.height}
+                      {display.label}{display.primary ? ' · 主显示器' : ''} · {formatDisplayResolution(display)}
                     </option>
                   ))}
                 </select>
@@ -243,6 +282,12 @@ export function LibraryPage({
         </div>
         {loading ? (
           <div className="empty-page">加载中…</div>
+        ) : loadError ? (
+          <div className="empty-page">
+            <ImageOff size={48} />
+            <div className="empty-page__title">壁纸列表读取失败</div>
+            <div>{loadError}</div>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="empty-page">
             <ImageOff size={48} />

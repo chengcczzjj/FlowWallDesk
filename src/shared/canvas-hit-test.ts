@@ -1,6 +1,29 @@
-import type { WidgetInstance } from './types'
+/** Anything the native hit test can resolve: persisted widgets or DOM regions reported by the canvas. */
+export interface CanvasHitCandidate {
+  id: string
+  type: string
+  x: number
+  y: number
+  width: number
+  height: number
+  enabled?: boolean
+  stackOrder?: number
+}
 
-function getWidgetStackOrder(widget: WidgetInstance, fallbackIndex = 0): number {
+/**
+ * A widget's rendered footprint in canvas client coordinates, measured from
+ * the DOM. Persisted rects can differ from what is painted (rotated sticky
+ * notes, fit-content clocks, animated Dock icons), and every disagreement
+ * between the main-process poll and the renderer used to flip the transparent
+ * canvas between capture and click-through.
+ */
+export interface CanvasHitRegion extends CanvasHitCandidate {
+  stackOrder: number
+}
+
+export const CANVAS_HIT_REGION_LIMIT = 200
+
+function getWidgetStackOrder(widget: CanvasHitCandidate, fallbackIndex = 0): number {
   return typeof widget.stackOrder === 'number' && Number.isFinite(widget.stackOrder)
     ? widget.stackOrder
     : fallbackIndex
@@ -95,15 +118,15 @@ export function isCanvasInteractiveWidgetType(type: string): boolean {
   return !isPassiveWidgetType(type)
 }
 
-export function findInteractiveWidgetAtPoint(
+export function findInteractiveWidgetAtPoint<T extends CanvasHitCandidate>(
   point: CanvasPoint,
   displayBounds: CanvasBounds,
-  widgets: readonly WidgetInstance[],
-): WidgetInstance | undefined {
+  widgets: readonly T[],
+): T | undefined {
   const clientX = point.x - displayBounds.x
   const clientY = point.y - displayBounds.y
 
-  let topWidget: WidgetInstance | undefined
+  let topWidget: T | undefined
   let topOrder = Number.NEGATIVE_INFINITY
   for (let index = 0; index < widgets.length; index += 1) {
     const widget = widgets[index]
@@ -125,16 +148,61 @@ export function findInteractiveWidgetAtPoint(
   return topWidget && isCanvasInteractiveWidgetType(topWidget.type) ? topWidget : undefined
 }
 
+/** Validates renderer-reported hit regions before the main process trusts them for input routing. */
+export function sanitizeCanvasHitRegions(value: unknown): CanvasHitRegion[] | null {
+  if (!Array.isArray(value) || value.length > CANVAS_HIT_REGION_LIMIT) return null
+  const regions: CanvasHitRegion[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') return null
+    const { id, type, x, y, width, height, stackOrder } = entry as Record<string, unknown>
+    if (typeof id !== 'string' || id.length === 0 || id.length > 160) return null
+    if (typeof type !== 'string' || type.length === 0 || type.length > 80) return null
+    const numbers = [x, y, width, height, stackOrder]
+    if (!numbers.every((number) => typeof number === 'number' && Number.isFinite(number))) return null
+    if ((width as number) <= 0 || (height as number) <= 0) continue
+    regions.push({
+      id,
+      type,
+      x: x as number,
+      y: y as number,
+      width: Math.min(width as number, 32_768),
+      height: Math.min(height as number, 32_768),
+      stackOrder: stackOrder as number,
+    })
+  }
+  return regions
+}
+
+export type NativeCursorSurfaceKind = 'canvas' | 'desktop' | 'foreign' | 'unknown'
+
+/**
+ * Classifies the native window under the cursor. `foreign` means another
+ * window (an app, the taskbar, an IME candidate list, a menu) is physically on
+ * top of the canvas at that point, so the widget underneath is not reachable.
+ */
+export function classifyNativeCursorSurface(surface: {
+  hitHwnd: number
+  canvasTopmost: boolean
+  desktopSurface: boolean
+}): NativeCursorSurfaceKind {
+  if (surface.canvasTopmost) return 'canvas'
+  if (surface.desktopSurface) return 'desktop'
+  return surface.hitHwnd ? 'foreign' : 'unknown'
+}
+
 export function shouldIgnoreCanvasMouse(options: {
   desktopOccluded: boolean
   recompositing?: boolean
   editing: boolean
   pointerActive: boolean
   widgetUnderCursor: boolean
+  /** Another window covers the canvas at the cursor; capturing would only fight that window. */
+  cursorCovered?: boolean
 }): boolean {
   if (options.desktopOccluded || options.recompositing) return true
-  if (options.editing || options.pointerActive || options.widgetUnderCursor) return false
-  return true
+  if (options.editing || options.pointerActive) return false
+  if (options.cursorCovered) return true
+  return !options.widgetUnderCursor
 }
 
 export function shouldRepairCanvasInteraction(options: {
