@@ -212,6 +212,9 @@ test('Windows release workflow verifies assets before publishing and never overw
   assert.match(workflow, /"dist\/latest\.yml"/)
   assert.match(workflow, /--draft=false --latest/)
   assert.match(workflow, /already published; bump the version/)
+  // Manual runs create the tag at exactly the commit that was built and verified.
+  assert.match(workflow, /--target "\$GITHUB_SHA"/)
+  assert.match(workflow, /Tag \$RELEASE_TAG points at \$TAG_SHA, but this run builds \$GITHUB_SHA/)
   assert.ok(workflow.indexOf('npm test') < workflow.indexOf('build:win'))
   assert.ok(workflow.indexOf('Check draft assets') < workflow.indexOf('--draft=false'))
   // The verifier compares the manifest with the installer and the packaged app with package.json.

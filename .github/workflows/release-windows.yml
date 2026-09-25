@@ -4,6 +4,10 @@ name: Release Windows
 # GitHub Release that electron-updater reads (electron-builder.yml → publish).
 # Assets are uploaded to a draft first and the release only goes public once
 # the installer, blockmap and latest.yml are all present and consistent.
+#
+# Triggers: pushing a v* tag, or running the workflow manually on a branch
+# with the tag to create. A manual run builds the branch head and creates the
+# tag at exactly that commit when the release is published.
 
 on:
   push:
@@ -12,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to build and publish, e.g. v1.1.13'
+        description: 'Release tag, e.g. v1.1.13 (created at the built commit if it does not exist yet)'
         required: true
 
 permissions:
@@ -33,8 +37,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
 
       - uses: actions/setup-node@v4
         with:
@@ -51,6 +53,13 @@ jobs:
           NOTES="doc/发布说明/$VERSION.md"
           if [ ! -f "$NOTES" ]; then
             echo "::error::Missing release notes $NOTES"
+            exit 1
+          fi
+          # An existing tag must point at the commit being built.
+          TAG_SHA=$(git ls-remote origin "refs/tags/$RELEASE_TAG^{}" | cut -f1)
+          [ -n "$TAG_SHA" ] || TAG_SHA=$(git ls-remote origin "refs/tags/$RELEASE_TAG" | cut -f1)
+          if [ -n "$TAG_SHA" ] && [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::Tag $RELEASE_TAG points at $TAG_SHA, but this run builds $GITHUB_SHA"
             exit 1
           fi
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -92,7 +101,7 @@ jobs:
           { cat "doc/发布说明/$APP_VERSION.md"; echo; cat build-verification.md; } > release-notes.md
           gh release create "$RELEASE_TAG" \
             --draft \
-            --verify-tag \
+            --target "$GITHUB_SHA" \
             --title "LingyueDesk $APP_VERSION" \
             --notes-file release-notes.md \
             "dist/$INSTALLER" \
@@ -118,7 +127,14 @@ jobs:
         run: gh release edit "$RELEASE_TAG" --draft=false --latest
 
       - name: Verify the public update feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::Published tag $RELEASE_TAG resolves to $TAG_SHA, expected $GITHUB_SHA"
+            exit 1
+          fi
           BASE="https://github.com/${GITHUB_REPOSITORY}/releases"
           for ATTEMPT in 1 2 3 4 5 6; do
             if curl -fsSL "$BASE/download/$RELEASE_TAG/latest.yml" -o remote-latest.yml && cmp -s remote-latest.yml dist/latest.yml; then

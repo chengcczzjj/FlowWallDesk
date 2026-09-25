@@ -52,7 +52,7 @@ npm run build:dir        # 仅生成未打包目录，便于本地调试
 
 1. 确认本次目标版本，同步 `package.json`、`package-lock.json` 和发布说明/契约，不照抄旧版本号。
 2. 运行 `npm test`；按授权执行 `npm run build:win:signed`，未配置证书时仅用 `build:win` 做相应验证。
-3. 本地安装不等于远端发布。仅在获准发布后，为相同版本创建标签和 GitHub Release，并上传匹配的 `dist/latest.yml`、安装包和 `.blockmap`，验证大小与哈希。推送 `v<版本>` 标签会触发 [Windows 发布流程](.github/workflows/release-windows.yml)：在 windows-latest 上运行 `npm test`、Electron 冒烟和 `build:win -- --publish never`，由 [scripts/verify-windows-release.mjs](scripts/verify-windows-release.mjs) 核对清单、哈希与 asar 版本，先上传到草稿 Release、核对资产后再发布并复核公开更新源；同版本已发布时直接失败。
+3. 本地安装不等于远端发布。仅在获准发布后，为相同版本创建标签和 GitHub Release，并上传匹配的 `dist/latest.yml`、安装包和 `.blockmap`，验证大小与哈希。推送 `v<版本>` 标签，或在 Actions 中手动运行 [Windows 发布流程](.github/workflows/release-windows.yml) 并填写标签（构建所选分支的最新提交，发布时在该提交上创建标签）：在 windows-latest 上运行 `npm test`、Electron 冒烟和 `build:win -- --publish never`，由 [scripts/verify-windows-release.mjs](scripts/verify-windows-release.mjs) 核对清单、哈希与 asar 版本，先上传到草稿 Release、核对资产后再发布并复核公开更新源；同版本已发布时直接失败。
 4. 更新源配置见 [electron-builder.yml](electron-builder.yml)；远端可访问性和客户端更新需要另行实测。Git push 与发布权限见根规则。
 
 ## 在线壁纸资源
