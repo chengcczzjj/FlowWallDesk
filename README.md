@@ -46,13 +46,13 @@ npm run build:dir        # 仅生成未打包目录，便于本地调试
 
 ## 版本与自动更新
 
-正式版启动 15 秒后自动检查更新，之后每 6 小时检查一次；发现新版本后，左侧活动栏会出现更新按钮。用户点击后开始下载，下载完成后同一按钮会变为“重启并更新”。
+正式版启动 15 秒后自动检查更新，之后每 6 小时以及电脑唤醒后（距上次检查超过 1 小时）检查一次；检查或下载失败按 2、10、30、60 分钟退避重试。发现新版本后自动在后台下载，完成后弹出系统通知，托盘菜单和左侧活动栏的更新按钮都会变为“重启并更新”，安装由用户确认。
 
 发布必须有明确授权，区分本地构建、本机安装和远端发布：
 
 1. 确认本次目标版本，同步 `package.json`、`package-lock.json` 和发布说明/契约，不照抄旧版本号。
 2. 运行 `npm test`；按授权执行 `npm run build:win:signed`，未配置证书时仅用 `build:win` 做相应验证。
-3. 本地安装不等于远端发布。仅在获准发布后，为相同版本创建标签和 GitHub Release，并上传匹配的 `dist/latest.yml`、安装包和 `.blockmap`，验证大小与哈希。
+3. 本地安装不等于远端发布。仅在获准发布后，为相同版本创建标签和 GitHub Release，并上传匹配的 `dist/latest.yml`、安装包和 `.blockmap`，验证大小与哈希。推送 `v<版本>` 标签会触发 [Windows 发布流程](.github/workflows/release-windows.yml)：在 windows-latest 上运行 `npm test`、Electron 冒烟和 `build:win -- --publish never`，由 [scripts/verify-windows-release.mjs](scripts/verify-windows-release.mjs) 核对清单、哈希与 asar 版本，先上传到草稿 Release、核对资产后再发布并复核公开更新源；同版本已发布时直接失败。
 4. 更新源配置见 [electron-builder.yml](electron-builder.yml)；远端可访问性和客户端更新需要另行实测。Git push 与发布权限见根规则。
 
 ## 在线壁纸资源

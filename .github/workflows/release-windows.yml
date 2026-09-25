@@ -1,0 +1,139 @@
+name: Release Windows
+
+# Builds the NSIS installer on Windows, verifies it, and publishes it as the
+# GitHub Release that electron-updater reads (electron-builder.yml → publish).
+# Assets are uploaded to a draft first and the release only goes public once
+# the installer, blockmap and latest.yml are all present and consistent.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish, e.g. v1.1.13'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check tag, version and release notes
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "v$VERSION" != "$RELEASE_TAG" ]; then
+            echo "::error::Tag $RELEASE_TAG does not match package.json version $VERSION"
+            exit 1
+          fi
+          NOTES="doc/发布说明/$VERSION.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::Missing release notes $NOTES"
+            exit 1
+          fi
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "INSTALLER=lingyue-desk-$VERSION-setup.exe" >> "$GITHUB_ENV"
+
+      - name: Refuse to overwrite a published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if IS_DRAFT=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$IS_DRAFT" = "true" ]; then
+              echo "Removing unpublished draft left by an earlier failed run"
+              gh release delete "$RELEASE_TAG" --yes
+            else
+              echo "::error::Release $RELEASE_TAG is already published; bump the version instead of overwriting it"
+              exit 1
+            fi
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Standard validation
+        run: npm test
+
+      - name: Electron smoke tests
+        run: npm run test:electron:smoke
+
+      - name: Build installer without publishing
+        run: npm run build:win -- --publish never
+
+      - name: Verify installer, manifest and packaged app
+        run: node scripts/verify-windows-release.mjs --summary build-verification.md
+
+      - name: Upload assets to a draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          { cat "doc/发布说明/$APP_VERSION.md"; echo; cat build-verification.md; } > release-notes.md
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --verify-tag \
+            --title "LingyueDesk $APP_VERSION" \
+            --notes-file release-notes.md \
+            "dist/$INSTALLER" \
+            "dist/$INSTALLER.blockmap" \
+            "dist/latest.yml"
+
+      - name: Check draft assets before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for FILE in "$INSTALLER" "$INSTALLER.blockmap" "latest.yml"; do
+            LOCAL=$(stat -c %s "dist/$FILE")
+            REMOTE=$(gh release view "$RELEASE_TAG" --json assets --jq ".assets[] | select(.name == \"$FILE\") | .size")
+            if [ "$LOCAL" != "$REMOTE" ]; then
+              echo "::error::$FILE uploaded as '$REMOTE' bytes, expected $LOCAL"
+              exit 1
+            fi
+          done
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+
+      - name: Verify the public update feed
+        run: |
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases"
+          for ATTEMPT in 1 2 3 4 5 6; do
+            if curl -fsSL "$BASE/download/$RELEASE_TAG/latest.yml" -o remote-latest.yml && cmp -s remote-latest.yml dist/latest.yml; then
+              break
+            fi
+            [ "$ATTEMPT" = 6 ] && { echo "::error::Public latest.yml is missing or differs from the build"; exit 1; }
+            sleep 10
+          done
+          SIZE=$(curl -fsSIL "$BASE/download/$RELEASE_TAG/$INSTALLER" | tr -d '\r' | awk 'tolower($1) == "content-length:" { size = $2 } END { print size }')
+          if [ "$SIZE" != "$(stat -c %s "dist/$INSTALLER")" ]; then
+            echo "::error::Public installer size '$SIZE' does not match the build"
+            exit 1
+          fi
+          LATEST=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$BASE/latest")
+          case "$LATEST" in
+            */tag/"$RELEASE_TAG") echo "Update feed now points at $RELEASE_TAG" ;;
+            *) echo "::error::releases/latest resolves to $LATEST, not $RELEASE_TAG"; exit 1 ;;
+          esac

@@ -64,7 +64,7 @@ async function run() {
   ipcMain.handle(IPC.WALLPAPER_LIST, () => wallpapers)
   ipcMain.handle(IPC.WALLPAPER_GET_CURRENT, () => ({ current: wallpapers[0], volume: .5, muted: true }))
   ipcMain.handle(IPC.WALLPAPER_DISPLAY_GET_SETTINGS, () => settings)
-  ipcMain.handle(IPC.APP_UPDATE_GET_STATUS, () => ({ phase: 'idle', currentVersion: '1.1.12' }))
+  ipcMain.handle(IPC.APP_UPDATE_GET_STATUS, () => ({ phase: 'idle', currentVersion: '1.1.13' }))
   ipcMain.handle(IPC.WALLPAPER_DISPLAY_SET_MODE, async (_event, mode) => {
     calls.push(mode)
     if (failNext) { failNext = false; throw new Error('Test layout unavailable') }

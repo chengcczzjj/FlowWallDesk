@@ -5,6 +5,30 @@
 
 历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
 
+## [2026-09-25] 聊天伙伴组件控制、自动更新可靠性与 1.1.13 发布流程
+
+**变更摘要**: 审查聊天 Agent 对桌面组件的控制链路，补齐布局与生成卡片编辑能力并校验所有设置；修复自动更新“有时不灵”；合并已发布的 1.1.12，升版 1.1.13 并新增 Windows Actions 发布流程，让其他电脑可通过自动更新获取。
+
+**涉及模块**:
+- `src/shared/widget-config-spec.ts` / `src/main/memory/tools/definitions/widgets.ts` / `src/main/ipc/widgetIpc.ts`: 组件设置单一规格与校验（拒绝项返回可选值）；新增 `arrange_widget`（锚点/缩放/隐藏恢复/置顶，按组件所在显示器的本地工作区落位）与 `update_generated_widget`；预设、锚点、删除常驻组件确认、摘要瘦身。
+- `src/main/memory/tools/toolRouter.ts` / `chatService.ts` / `ChatPage.tsx`: 追问沿用最近的组件工具类别；修正过程标题。
+- `src/main/services/update-service.ts` / `src/main/tray.ts`: 失败退避重试、唤醒复查、发现即后台下载、系统通知与托盘“重启并更新”。
+- 合并 v1.1.12：画布命中回退改用 `materializeWidgetsForCanvas`，毛玻璃采用 1.1.12 逐屏帧（替代 09-25 早先的逐窗口帧来源方案），移除被替代的并集矩形适配与渲染偏移辅助函数。
+- `.github/workflows/release-windows.yml` / `scripts/verify-windows-release.mjs`: Windows 构建→核验清单/哈希/asar 版本与入口→草稿上传→核对资产→发布→复核公开更新源。
+
+**遇到的问题**:
+- 旧 `update_widget_config` 直接合并任意键，模型写入组件不读取的配置后仍宣称成功；预设里也有不存在的样式值。
+- 自动更新只在启动和每 6 小时检查一次，失败后不重试，且需要用户进主界面手动下载，托盘常驻时几乎发现不了新版本。
+- `@electron/asar` 3.4.1 的打包函数在 Node 22 下不返回（仅影响测试造包，读取与 electron-builder 构建不受影响）。
+
+**验证结果**:
+- Linux 容器：`npm test` 类型检查、lint 通过，117 项测试 116 通过；失败项为依赖 Windows 路径分隔符的桌面图标导入测试，在未改动的 v1.1.12 上同样失败。Xvfb 下 `test:electron:smoke` 三组通过；`build:check` 成功；发布核验脚本用合成产物验证了通过与篡改检测。
+- 未在 Windows 实机安装验收；远端构建与发布结果以 Actions 运行和 Release 复核为准。
+
+**提交意图**: `chore(release): prepare LingyueDesk 1.1.13`
+
+---
+
 ## [2026-09-25 21:44] 整治桌面层级闪烁、多显示器对齐与主界面规范问题
 
 **变更摘要**: 系统排查桌面组件在开启应用、操作输入法时的闪烁与指针跳变、需要多次点击才能输入/拖拽的问题，修复多显示器下毛玻璃错位与组件落位，并按审查结果修正主界面和设置页的层级、状态与设计规范问题。
@@ -222,41 +246,5 @@
 **验证结果**:
 - `npm.cmd test` 通过全部 54 项测试；`npm.cmd run build:check` 成功。
 - 未拆分为多个 Electron 窗口，未改变全屏恢复、锁屏 Canvas 重建或 ToDesk 前台保护链路。
-
----
-
-## [2026-08-30 14:30] 修复 ToDesk 远程控制时桌面组件前台闪烁并发布 1.1.8
-
-**变更摘要**: 定位到 Canvas 在任意“桌面未遮挡”前台状态都执行 `alwaysOnTop` z-order 自愈，ToDesk 的 `H-SMILE-FRAME`/`TWINCONTROL` 窗口因此被桌面组件短暂盖住。现在仅在确认 Windows Shell 或无前台窗口时恢复层级，远程控制和普通应用前台状态跳过恢复。
-
-**涉及模块**:
-- `src/shared/canvas-hit-test.ts` / `src/main/windows/canvasWindow.ts`: 新增桌面 Shell 前台判定与 ToDesk 类名保护，记录跳过恢复的诊断事件。
-- `tests/shared-contracts.test.mjs` / `tests/release-contracts.test.mjs`: 增加 ToDesk/普通窗口不触发恢复、Shell 状态仍恢复的回归契约。
-- `package.json` / `package-lock.json` / `doc/发布说明/1.1.8.md`: 升级版本并记录发布校验信息。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 52 项测试；`npm.cmd run build:win` 成功生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`。
-- 本机已停止 1.1.7 并静默覆盖安装 1.1.8；EXE、`app.asar`、卸载注册表均为 1.1.8，8 个组件、2 个全局图标组件和当前壁纸配置保留，运行进程响应正常。
-
-**Git Commit**: 已提交 — `9ab45d0 chore(release): publish LingyueDesk 1.1.8`
-
----
-
-## [2026-08-29 13:26] 发布 1.1.7 启动锁屏输入恢复版
-
-**变更摘要**: 将长时间启动锁屏后 Canvas 丢失 `pointerdown` 的根因修复升版为 1.1.7，生成自动更新资产并完成本机覆盖安装验证。
-
-**涉及模块**:
-- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 将应用版本和发布契约同步升级到 1.1.7。
-- `doc/发布说明/1.1.7.md`: 记录锁屏输入恢复策略、验证结果、安装包大小和 SHA-256/SHA-512 校验值。
-- `dist/`: 生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`；构建产物不进入 Git。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 51 项测试；`npm.cmd run build:win` 成功。
-- 本机 EXE、`app.asar` 和卸载注册表均更新到 1.1.7，8 个壁纸组件、2 个全局图标组件和当前壁纸配置完整保留。
-
-**Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.7`
-**Git Tag**: `v1.1.7`（已推送）
-**GitHub Release**: `https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.7`（安装包、blockmap、`latest.yml` 大小与 SHA-256 均已校验）
 
 ---

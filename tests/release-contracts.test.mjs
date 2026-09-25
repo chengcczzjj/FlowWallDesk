@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.1.12')
+  assert.equal(packageJson.version, '1.1.13')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -197,4 +197,25 @@ test('auto-update retries, downloads in the background and surfaces readiness ou
   assert.match(updateService, /new Notification\(/)
   assert.match(updateService, /setTrayUpdateEntry\(\{ label: `重启并更新到/)
   assert.match(traySource, /popUpContextMenu\(buildTrayMenu\(\)\)/)
+})
+
+test('Windows release workflow verifies assets before publishing and never overwrites a release', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release-windows.yml', import.meta.url), 'utf8')
+  const verifier = await readFile(new URL('../scripts/verify-windows-release.mjs', import.meta.url), 'utf8')
+  assert.match(workflow, /runs-on: windows-latest/)
+  assert.match(workflow, /contents: write/)
+  // Build and upload are separate: nothing reaches the update feed until it is verified.
+  assert.match(workflow, /npm run build:win -- --publish never/)
+  assert.match(workflow, /node scripts\/verify-windows-release\.mjs/)
+  assert.match(workflow, /gh release create "\$RELEASE_TAG" \\\n\s+--draft/)
+  assert.match(workflow, /"dist\/\$INSTALLER\.blockmap"/)
+  assert.match(workflow, /"dist\/latest\.yml"/)
+  assert.match(workflow, /--draft=false --latest/)
+  assert.match(workflow, /already published; bump the version/)
+  assert.ok(workflow.indexOf('npm test') < workflow.indexOf('build:win'))
+  assert.ok(workflow.indexOf('Check draft assets') < workflow.indexOf('--draft=false'))
+  // The verifier compares the manifest with the installer and the packaged app with package.json.
+  assert.match(verifier, /manifest\.sha512 === sha512/)
+  assert.match(verifier, /entry\?\.size === installerStat\.size/)
+  assert.match(verifier, /packagedJson\.version === version/)
 })

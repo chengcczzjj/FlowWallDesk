@@ -103,7 +103,8 @@
 - 适用：收尾、版本状态、Windows 原生问题和发布说明。
 - 根因：源码契约能通过但原生 ABI 调用失败；代码版本不等于实际运行版本，本机包不等于 GitHub Release，单屏不等于多屏验收。09-05 本机已装新版而公司电脑拿不到更新，说明本地提交、git push 与更新渠道资产发布不能互相替代。
 - 当前约束：分别记录测试、构建、安装/进程版本、远端资产验证；缺哪个就明确写未做。先读已脱敏的持久日志缩小问题，不把“UI 能保存设置”当完整链路证据。
-- 代码：[diagnosticLog.ts](../../src/main/runtime/diagnosticLog.ts)、[electron-builder.yml](../../electron-builder.yml)。测试：[release-contracts.test.mjs](../../tests/release-contracts.test.mjs)；它只约束配置和源码，不能证明安装/发布成功。
+- 代码：[diagnosticLog.ts](../../src/main/runtime/diagnosticLog.ts)、[electron-builder.yml](../../electron-builder.yml)、[release-windows.yml](../../.github/workflows/release-windows.yml)、[verify-windows-release.mjs](../../scripts/verify-windows-release.mjs)。测试：[release-contracts.test.mjs](../../tests/release-contracts.test.mjs)；它只约束配置和源码，不能证明安装/发布成功。
+- 2026-09-25 起无 Windows 本机时由 Actions 构建发布：流程通过只说明 CI 构建、清单核验和公开资产可下载，仍不等于实机安装与客户端更新验收。
 - 隔离 Electron 测试显式控制退出：清理窗口时不能由自动退出掩盖断言失败，启动器必须同时检查退出码和成功标记。09-05 的静态壁纸回归已验证“先失败、修复后通过”。
 - 验证：运行时主要诊断文件为 `dock-diagnostics.jsonl`、`display-diagnostics.jsonl`、`update-diagnostics.jsonl`（userData/logs）；核对 pid、时间、版本及真实场景。网络/设备无法验证时不推测通过。
 - 来源：2026-08-29 安装版不一致、09-04 Koffi 原生实测与 1.1.11 仅本地安装、09-05 跨电脑更新缺失。用户已在根规则明确“提交/打包”的交付约定，替代旧的独立推送/发布确认要求；历史记录的本地交付结论仍保留，不能据此假定旧版已远端发布。
