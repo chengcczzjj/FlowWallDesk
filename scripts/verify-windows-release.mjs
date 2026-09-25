@@ -27,7 +27,8 @@ function hashFile(path, algorithm, encoding) {
 }
 
 /** Minimal reader for electron-builder's latest.yml (flat keys plus one files list). */
-function readManifest(text) {
+function readManifest(raw) {
+  const text = raw.replace(/\r\n/g, '\n')
   const scalar = (key) => new RegExp(`^${key}:\\s*'?([^'\\n]+)'?\\s*$`, 'm').exec(text)?.[1]?.trim()
   const files = [...text.matchAll(/^\s+- url:\s*(.+)\n\s+sha512:\s*(.+)\n\s+size:\s*(\d+)/gm)]
     .map((match) => ({ url: match[1].trim(), sha512: match[2].trim(), size: Number(match[3]) }))
