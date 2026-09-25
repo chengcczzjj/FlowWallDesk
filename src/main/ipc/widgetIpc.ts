@@ -18,6 +18,7 @@ import {
 } from '@shared/desktop-scene'
 import { store } from '../store'
 import {
+  getCanvasWidgetRenderedRect,
   getCanvasWindow,
   isCanvasEditMode,
   noteCanvasRendererActionPointerDown,
@@ -50,6 +51,8 @@ import {
   fitWidgetsIntoDisplays,
   getPrimaryFitDisplay,
   pickDisplayForRect,
+  positionAtAnchor,
+  type FitAnchor,
 } from '@shared/widget-display-fit'
 import { normalizeWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
 import { sanitizeCanvasHitRegions } from '@shared/canvas-hit-test'
@@ -983,7 +986,7 @@ export function listWidgetsForTool(): WidgetInstance[] {
   return list
 }
 
-export function addWidgetForTool(widget: WidgetInstance): { ok: boolean; added: boolean; widget: WidgetInstance; list: WidgetInstance[]; reason?: string } {
+export function addWidgetForTool(widget: WidgetInstance, options: { anchor?: FitAnchor } = {}): { ok: boolean; added: boolean; widget: WidgetInstance; list: WidgetInstance[]; reason?: string } {
   const list = store.get('widgets')
   const existing = !canAddMultipleWidgetType(widget.type)
     ? list.find((item) => item.type === widget.type)
@@ -993,8 +996,11 @@ export function addWidgetForTool(widget: WidgetInstance): { ok: boolean; added: 
   }
 
   const normalized = withDefaultWidgetConfig(widget)
+  const layoutSize = { width: normalized.width || FIT_CONTENT_LAYOUT_SIZE.width, height: normalized.height || FIT_CONTENT_LAYOUT_SIZE.height }
   const placement = normalized.type === 'desktop-icons-dock'
     ? getDockPlacement(normalized.width, normalized.height)
+    : options.anchor
+      ? resolveAnchoredPosition(normalized, options.anchor, getPrimaryWorkArea(), layoutSize, list)
     : isFreeformStickyNote(normalized.type)
       ? findStickyNotePlacement(normalized.width, normalized.height, list)
     : findPlacement(normalized.width, normalized.height, list)
@@ -1050,6 +1056,133 @@ export function updateWidgetForTool(params: {
   syncToCanvas()
   autoSaveToWallpaper()
   return { ok: true, widget: nextWidget, list: updated }
+}
+
+/** Fit-content widgets (clocks, weather, text) have no stored size until the user resizes them. */
+const FIT_CONTENT_LAYOUT_SIZE = { width: 240, height: 120 }
+/** Card widgets are reset to their grid size on startup (WIDGET_SIZE_MAP); icon containers snap to icon cells. */
+const FIXED_SIZE_WIDGET_TYPES = new Set([
+  'stocks', 'news', 'calendar', 'quicktools', 'pet', 'sysmonitor',
+  'desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock',
+])
+/** Scaled around their natural content size by the canvas; only a scale factor is meaningful. */
+const NATURAL_SIZE_WIDGET_TYPES = new Set(['clock', 'elegantclock', 'pixelclock', 'graphicdatetime', 'weather', 'whitenoise', 'text'])
+
+function resolveAnchoredPosition(
+  widget: WidgetInstance,
+  anchor: FitAnchor,
+  area: { x: number; y: number; width: number; height: number },
+  size: { width: number; height: number },
+  list: WidgetInstance[],
+): { x: number; y: number } {
+  const target = positionAtAnchor(anchor, size, area)
+  return isFreeformStickyNote(widget.type)
+    ? clampStickyNotePosition(target.x, target.y, size.width, size.height)
+    : resolvePosition(widget.id, target.x, target.y, size.width, size.height, list, !canAddMultipleWidgetType(widget.type))
+}
+
+export interface ArrangeWidgetParams {
+  id?: string
+  type?: string
+  anchor?: FitAnchor
+  x?: number
+  y?: number
+  scale?: number
+  width?: number
+  height?: number
+  visible?: boolean
+  bringToFront?: boolean
+}
+
+/**
+ * Move, resize, hide/restore or raise one widget for the AI companion. Every
+ * change goes through the same display-aware clamping and overlap avoidance as
+ * a user drag, and sizes stay within what each widget type can render well.
+ */
+export function arrangeWidgetForTool(params: ArrangeWidgetParams): {
+  ok: boolean
+  widget?: WidgetInstance
+  list: WidgetInstance[]
+  error?: string
+  notes: string[]
+} {
+  let list = withDefaultWidgetConfigs(store.get('widgets'))
+  const target = params.id ? list.find((item) => item.id === params.id) : params.type ? list.find((item) => item.type === params.type) : undefined
+  if (!target) return { ok: false, list, error: 'widget-not-found', notes: [] }
+  const capability = getWidgetCapability(target.type)
+  const notes: string[] = []
+  const next: WidgetInstance = { ...target }
+
+  if (params.visible === false) {
+    if (capability && !capability.canAutoHide) {
+      return { ok: false, list, error: 'cannot-hide-persistent-widget', notes: ['Dock 与图标收纳是常驻入口，不能隐藏；可以调整透明度或位置。'] }
+    }
+    next.enabled = false
+  } else if (params.visible === true) {
+    next.enabled = true
+  }
+
+  const rendered = getCanvasWidgetRenderedRect(target.id)
+  const wantsResize = params.scale !== undefined || params.width !== undefined || params.height !== undefined
+  if (wantsResize) {
+    if (FIXED_SIZE_WIDGET_TYPES.has(target.type)) {
+      notes.push(`${capability?.displayName ?? target.type} 使用固定规格尺寸，未调整大小。`)
+    } else if (NATURAL_SIZE_WIDGET_TYPES.has(target.type)) {
+      const base = target.width > 0 && target.height > 0
+        ? { width: target.width, height: target.height }
+        : rendered
+      if (!base) {
+        notes.push('组件还没有渲染出尺寸，稍后再调整大小。')
+      } else {
+        const requestedScale = params.scale
+          ?? (params.width !== undefined ? params.width / base.width : params.height !== undefined ? params.height / base.height : 1)
+        const scale = Math.max(0.5, Math.min(3, requestedScale))
+        next.width = Math.max(48, Math.min(1400, Math.round(base.width * scale)))
+        next.height = Math.max(32, Math.min(900, Math.round(base.height * scale)))
+        if (params.width !== undefined || params.height !== undefined) notes.push('该组件按内容等比缩放，已换算为统一缩放比例。')
+      }
+    } else {
+      const minSize = capability?.minSize ?? { width: 80, height: 80 }
+      const maxSize = capability?.maxSize ?? { width: 1200, height: 900 }
+      const base = { width: target.width || rendered?.width || minSize.width, height: target.height || rendered?.height || minSize.height }
+      const width = params.width ?? (params.scale ? base.width * params.scale : base.width)
+      const height = params.height ?? (params.scale ? base.height * params.scale : base.height)
+      next.width = Math.round(Math.max(minSize.width, Math.min(maxSize.width, width)))
+      next.height = Math.round(Math.max(minSize.height, Math.min(maxSize.height, height)))
+      if (next.width !== Math.round(width) || next.height !== Math.round(height)) {
+        notes.push(`尺寸已限制在 ${minSize.width}×${minSize.height} 到 ${maxSize.width}×${maxSize.height} 之间。`)
+      }
+    }
+  }
+
+  const layoutSize = {
+    width: next.width || rendered?.width || FIT_CONTENT_LAYOUT_SIZE.width,
+    height: next.height || rendered?.height || FIT_CONTENT_LAYOUT_SIZE.height,
+  }
+  const moved = params.anchor !== undefined || params.x !== undefined || params.y !== undefined
+  if (moved || wantsResize) {
+    const currentRect = { x: target.x, y: target.y, width: layoutSize.width, height: layoutSize.height }
+    const others = list.filter((item) => item.id !== target.id)
+    let position = { x: params.x ?? target.x, y: params.y ?? target.y }
+    if (params.anchor) {
+      position = resolveAnchoredPosition(next, params.anchor, getDisplayAreaForRect(currentRect).workArea, layoutSize, others)
+    } else {
+      position = isFreeformStickyNote(target.type)
+        ? clampStickyNotePosition(position.x, position.y, layoutSize.width, layoutSize.height)
+        : resolvePosition(target.id, position.x, position.y, layoutSize.width, layoutSize.height, list, !canAddMultipleWidgetType(target.type))
+    }
+    next.x = position.x
+    next.y = position.y
+  }
+
+  list = list.map((item) => (item.id === target.id ? next : item))
+  if (params.bringToFront) list = moveWidgetToFront(list, target.id)
+  persistWidgets(list)
+  syncToCanvas()
+  autoSaveToWallpaper()
+  if (!isCanvasEditMode()) setCanvasMousePassthrough(true)
+  const persisted = store.get('widgets')
+  return { ok: true, widget: persisted.find((item) => item.id === target.id), list: persisted, notes }
 }
 
 export async function removeWidgetForTool(params: { id?: string; type?: string }): Promise<{ ok: boolean; deleted: boolean; list: WidgetInstance[]; error?: string }> {

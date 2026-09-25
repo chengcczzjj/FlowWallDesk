@@ -749,18 +749,14 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
     }
   }
 
-  if (tc.toolName === 'list_widgets' || tc.toolName === 'add_widget' || tc.toolName === 'create_generated_widget' || tc.toolName === 'update_widget_config' || tc.toolName === 'remove_widget') {
+  if (WIDGET_TOOL_TITLES[tc.toolName]) {
     const widget = asRecord(output?.widget)
-    const type = stringValue(input, 'type') ?? stringValue(widget, 'type')
-    const id = stringValue(input, 'id') ?? stringValue(widget, 'id')
-    const detail = [type, id].filter(Boolean).join(' · ') || '桌面组件'
-    const runningTitle = tc.toolName === 'list_widgets'
-      ? '查看桌面组件'
-      : tc.toolName === 'add_widget'
-        ? '添加桌面组件'
-        : tc.toolName === 'update_widget_config'
-          ? '调整桌面组件'
-          : '移除桌面组件'
+    // Show the widget's display name, never internal ids like "clock-1726…".
+    const detail = stringValue(widget, 'displayName')
+      ?? (tc.toolName === 'list_widgets' && typeof output?.count === 'number' ? `${output.count} 个组件` : undefined)
+      ?? stringValue(input, 'title')
+      ?? '桌面组件'
+    const runningTitle = WIDGET_TOOL_TITLES[tc.toolName]
     return {
       title: ok === false || tc.status === 'error' ? `${runningTitle}没完成` : tc.status === 'running' ? runningTitle : `${runningTitle}完成`,
       detail,
@@ -774,6 +770,16 @@ function toolActivityInfo(tc: ToolCallDisplay): { title: string; detail: string;
   }
 
   return { title: label, detail: pathValue ?? toolErrorDetail(tc.toolName, rawError, userMessage), meta: rawError ?? undefined, path: pathValue ?? undefined, ok }
+}
+
+const WIDGET_TOOL_TITLES: Record<string, string> = {
+  list_widgets: '查看桌面组件',
+  add_widget: '添加桌面组件',
+  create_generated_widget: '生成专属组件',
+  update_widget_config: '调整桌面组件',
+  arrange_widget: '摆放桌面组件',
+  update_generated_widget: '修改专属组件',
+  remove_widget: '移除桌面组件',
 }
 
 function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus, elapsedSeconds = 0): string {
@@ -803,6 +809,8 @@ function toolProgressSentence(toolCalls: ToolCallDisplay[], _status: ChatStatus,
     if (latest.toolName === 'create_generated_widget') return `我把这个专属小组件做好并放到桌面上${target}。`
     if (latest.toolName === 'manage_todo_tasks') return `我直接在任务便笺里处理一下${target}。`
     if (latest.toolName === 'update_widget_config') return `我调整一下这个小组件${target}。`
+    if (latest.toolName === 'arrange_widget') return `我把这个小组件摆到合适的位置${target}。`
+    if (latest.toolName === 'update_generated_widget') return `我改一下这个专属小组件的内容${target}。`
     if (latest.toolName === 'remove_widget') return `我把这个小组件从桌面上拿掉${target}。`
     if (latest.toolName === 'read_file' || latest.toolName === 'list_directory' || latest.toolName === 'get_file_info') return `我先翻一下相关文件${target}。`
     if (latest.toolName === 'create_checkpoint') return `我先留一个可恢复的保护点${target}。`

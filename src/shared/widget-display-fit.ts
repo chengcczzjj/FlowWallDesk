@@ -124,3 +124,31 @@ export function fitWidgetsIntoDisplays<T extends FitWidget>(
   })
   return { widgets: next, movedIds }
 }
+
+export type FitAnchor =
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'center-left'
+  | 'center-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right'
+
+/** Position a widget at a named spot of a monitor's work area, keeping a consistent margin. */
+export function positionAtAnchor(
+  anchor: FitAnchor,
+  size: { width: number; height: number },
+  area: FitRect,
+  margin = 32,
+): { x: number; y: number } {
+  const left = area.x + margin
+  const right = area.x + area.width - margin - size.width
+  const top = area.y + margin
+  const bottom = area.y + area.height - margin - size.height
+  const centerX = area.x + (area.width - size.width) / 2
+  const centerY = area.y + (area.height - size.height) / 2
+  const x = anchor.endsWith('left') ? left : anchor.endsWith('right') ? right : centerX
+  const y = anchor.startsWith('top') ? top : anchor.startsWith('bottom') ? bottom : centerY
+  return clampRectIntoArea({ x: Math.round(x), y: Math.round(y), ...size }, area, Math.min(margin, 24))
+}

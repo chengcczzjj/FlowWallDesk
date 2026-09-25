@@ -95,15 +95,16 @@ function applyConfigUpdate(widget: WidgetInstance, newConfig: Record<string, unk
 }
 
 /**
- * Measure what is actually painted for every interactive widget. The main
- * process polls the native cursor against these regions, so it agrees with
- * the renderer's elementFromPoint() about rotated notes, fit-content widgets
- * and elements that extend past the persisted rect.
+ * Measure what is actually painted for every widget. The main process polls
+ * the native cursor against these regions (passive widgets still occlude, as
+ * elementFromPoint() does), so both sides agree about rotated notes,
+ * fit-content widgets and elements that extend past the persisted rect. The
+ * rendered sizes also let AI layout edits scale fit-content widgets.
  */
 function measureCanvasHitRegions(widgets: readonly WidgetInstance[]): CanvasHitRegion[] {
   const byId = new Map(widgets.map((widget, index) => [widget.id, { widget, index }]))
   const regions: CanvasHitRegion[] = []
-  document.querySelectorAll<HTMLElement>('[data-widget][data-widget-interactive="true"]').forEach((element) => {
+  document.querySelectorAll<HTMLElement>('[data-widget]').forEach((element) => {
     const entry = byId.get(element.dataset.widget ?? '')
     if (!entry || entry.widget.enabled === false) return
     const rect = element.getBoundingClientRect()

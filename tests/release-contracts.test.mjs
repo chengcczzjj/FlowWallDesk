@@ -185,3 +185,20 @@ test('frosted glass frame updates avoid React commits without changing the visua
   assert.ok(glassSource.includes('blurPx ** 2 - BASE_WALLPAPER_FRAME_BLUR_PX ** 2'))
   assert.ok(glassSource.includes('saturate(1.08)'))
 })
+
+test('auto-update retries, downloads in the background and surfaces readiness outside the main window', async () => {
+  const updateService = await readFile(new URL('../src/main/services/update-service.ts', import.meta.url), 'utf8')
+  const traySource = await readFile(new URL('../src/main/tray.ts', import.meta.url), 'utf8')
+  // A failed boot-time check or dropped download is retried with back-off instead of waiting 6h.
+  assert.match(updateService, /RETRY_DELAYS_MS = \[2 \* 60_000, 10 \* 60_000, 30 \* 60_000, 60 \* 60_000\]/)
+  assert.match(updateService, /scheduleRetry\('check-failed'\)/)
+  assert.match(updateService, /scheduleRetry\('download-failed'\)/)
+  assert.match(updateService, /powerMonitor\.on\('resume'/)
+  // New versions download automatically; installing still waits for the user.
+  assert.match(updateService, /function onUpdateAvailable[\s\S]*setImmediate\(\(\) => \{ void downloadAppUpdate\(\) \}\)/)
+  assert.match(updateService, /autoUpdater\.autoInstallOnAppQuit = false/)
+  // The tray app tells the user an update is ready even with the main window closed.
+  assert.match(updateService, /new Notification\(/)
+  assert.match(updateService, /setTrayUpdateEntry\(\{ label: `重启并更新到/)
+  assert.match(traySource, /popUpContextMenu\(buildTrayMenu\(\)\)/)
+})

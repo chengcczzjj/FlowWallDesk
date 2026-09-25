@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, Notification, powerMonitor } from 'electron'
 import { spawn } from 'child_process'
 import { statSync } from 'fs'
 import { constants as osConstants, setPriority } from 'os'
@@ -9,11 +9,21 @@ import type { AppUpdateStatus } from '@shared/types'
 import { toSafeUpdateErrorMessage } from '@shared/update-error'
 import { logUpdateDiagnostic } from '../runtime/diagnosticLog'
 import { getMainWindow } from '../windows/mainWindow'
+import { setTrayUpdateEntry } from '../tray'
 
 const INITIAL_CHECK_DELAY_MS = 15_000
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 const INSTALLER_QUIT_DELAY_MS = 450
 const INSTALLER_ARGS = ['--updated', '/S', '--force-run'] as const
+/**
+ * Back-off after a failed check or download. The first check runs shortly
+ * after login, often before Wi-Fi/proxy is ready, and GitHub downloads can
+ * drop midway; waiting the full 6h interval made updates feel unreliable.
+ */
+const RETRY_DELAYS_MS = [2 * 60_000, 10 * 60_000, 30 * 60_000, 60 * 60_000] as const
+/** After sleep/hibernate, re-check if the last check is older than this. */
+const RESUME_RECHECK_AFTER_MS = 60 * 60_000
+const RESUME_CHECK_DELAY_MS = 20_000
 
 let initialized = false
 let checkingPromise: Promise<void> | null = null
@@ -22,6 +32,9 @@ let installPromise: Promise<boolean> | null = null
 let initialCheckTimer: ReturnType<typeof setTimeout> | null = null
 let scheduledCheckTimer: ReturnType<typeof setInterval> | null = null
 let downloadedInstallerPath: string | null = null
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+let consecutiveFailures = 0
+let notifiedDownloadedVersion: string | null = null
 
 let updateStatus: AppUpdateStatus = {
   phase: app.isPackaged ? 'idle' : 'unsupported',
@@ -37,6 +50,70 @@ function publishStatus(patch: Partial<AppUpdateStatus>): void {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send(IPC.APP_UPDATE_STATE_CHANGED, updateStatus)
   }
+  syncTrayUpdateEntry()
+}
+
+/**
+ * The app normally lives in the tray with the main window closed, so the
+ * sidebar button alone was easy to miss. Mirror actionable states in the
+ * tray menu.
+ */
+function syncTrayUpdateEntry(): void {
+  const version = updateStatus.availableVersion ? ` v${updateStatus.availableVersion}` : ''
+  if (updateStatus.phase === 'downloaded') {
+    setTrayUpdateEntry({ label: `重启并更新到${version}`, enabled: true, onClick: () => { installDownloadedUpdate() } })
+  } else if (updateStatus.phase === 'downloading') {
+    setTrayUpdateEntry({ label: `正在下载更新${version}（${Math.round(updateStatus.progressPercent ?? 0)}%）`, enabled: false })
+  } else if (updateStatus.phase === 'installing') {
+    setTrayUpdateEntry({ label: '正在安装更新…', enabled: false })
+  } else if (updateStatus.phase === 'error' && updateStatus.availableVersion) {
+    setTrayUpdateEntry({ label: `重试下载更新${version}`, enabled: true, onClick: () => { void downloadAppUpdate() } })
+  } else {
+    setTrayUpdateEntry(null)
+  }
+}
+
+function clearRetry(): void {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+}
+
+function scheduleRetry(reason: string): void {
+  consecutiveFailures += 1
+  if (retryTimer) return
+  const delay = RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length) - 1]
+  logUpdateDiagnostic('update.retry.scheduled', { reason, attempt: consecutiveFailures, delayMs: delay })
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    void runUpdateCycle('retry')
+  }, delay)
+  retryTimer.unref()
+}
+
+/** One unattended step: resume a failed download, or look for a new version. */
+async function runUpdateCycle(trigger: string): Promise<void> {
+  logUpdateDiagnostic('update.cycle', { trigger, phase: updateStatus.phase })
+  if (updateStatus.phase === 'error' && updateStatus.availableVersion) {
+    await downloadAppUpdate()
+    return
+  }
+  await checkForAppUpdates()
+}
+
+function notifyUpdateReady(version: string): void {
+  if (notifiedDownloadedVersion === version || !Notification.isSupported()) return
+  notifiedDownloadedVersion = version
+  try {
+    const notification = new Notification({
+      title: '灵月桌面已准备好更新',
+      body: `新版本 v${version} 已下载完成。点击这里重启完成更新，也可以稍后从托盘菜单更新。`,
+      silent: true,
+    })
+    notification.on('click', () => { installDownloadedUpdate() })
+    notification.show()
+  } catch (error) {
+    logUpdateDiagnostic('update.notification.failed', { message: error instanceof Error ? error.message : String(error) })
+  }
 }
 
 function onUpdateAvailable(info: UpdateInfo): void {
@@ -50,10 +127,12 @@ function onUpdateAvailable(info: UpdateInfo): void {
     availableVersion: info.version,
     progressPercent: 0,
     lastCheckedAt: Date.now(),
-    message: `发现新版本 ${info.version}，可从左侧更新按钮下载。`,
+    message: `发现新版本 ${info.version}，正在后台下载。`,
     canCheck: false,
     canInstall: false,
   })
+  // Download in the background right away; installing still waits for the user.
+  setImmediate(() => { void downloadAppUpdate() })
 }
 
 function onUpdateNotAvailable(info: UpdateInfo): void {
@@ -91,10 +170,13 @@ function onUpdateDownloaded(info: UpdateInfo): void {
     availableVersion: info.version,
     progressPercent: 100,
     lastCheckedAt: Date.now(),
-    message: `版本 ${info.version} 已下载。点击左侧按钮后会以低占用模式安装并自动重启。`,
+    message: `版本 ${info.version} 已下载。点击左侧按钮或托盘菜单后会以低占用模式安装并自动重启。`,
     canCheck: true,
     canInstall: true,
   })
+  consecutiveFailures = 0
+  clearRetry()
+  notifyUpdateReady(info.version)
 }
 
 export function initializeAutoUpdate(): void {
@@ -144,18 +226,28 @@ export function initializeAutoUpdate(): void {
   })
 
   initialCheckTimer = setTimeout(() => {
-    void checkForAppUpdates()
+    void runUpdateCycle('startup')
   }, INITIAL_CHECK_DELAY_MS)
   initialCheckTimer.unref()
 
   scheduledCheckTimer = setInterval(() => {
-    void checkForAppUpdates()
+    void runUpdateCycle('interval')
   }, CHECK_INTERVAL_MS)
   scheduledCheckTimer.unref()
+
+  // Laptops mostly sleep instead of restarting; the interval alone could skip
+  // days of releases. Give the network a moment to come back first.
+  powerMonitor.on('resume', () => {
+    setTimeout(() => {
+      const lastCheckedAt = updateStatus.lastCheckedAt ?? 0
+      if (Date.now() - lastCheckedAt >= RESUME_RECHECK_AFTER_MS) void runUpdateCycle('resume')
+    }, RESUME_CHECK_DELAY_MS).unref()
+  })
 
   app.once('will-quit', () => {
     if (initialCheckTimer) clearTimeout(initialCheckTimer)
     if (scheduledCheckTimer) clearInterval(scheduledCheckTimer)
+    clearRetry()
   })
 }
 
@@ -192,6 +284,12 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
     })
     .finally(() => {
       checkingPromise = null
+      if (updateStatus.phase === 'error' && !updateStatus.availableVersion) {
+        scheduleRetry('check-failed')
+      } else if (updateStatus.phase !== 'error') {
+        consecutiveFailures = 0
+        clearRetry()
+      }
     })
   await checkingPromise
   return getAppUpdateStatus()
@@ -232,6 +330,7 @@ export async function downloadAppUpdate(): Promise<AppUpdateStatus> {
       })
       .finally(() => {
         downloadPromise = null
+        if (updateStatus.phase === 'error' && updateStatus.availableVersion) scheduleRetry('download-failed')
       })
   }
   await downloadPromise

@@ -62,17 +62,6 @@ export interface DesktopSize {
   height: number
 }
 
-export interface WidgetConfigField {
-  key: string
-  type: 'string' | 'number' | 'boolean' | 'enum' | 'array' | 'object'
-  label: string
-  description?: string
-  options?: string[]
-  min?: number
-  max?: number
-  defaultValue?: unknown
-}
-
 export interface WidgetPreset {
   id: string
   label: string
@@ -109,7 +98,7 @@ export interface WidgetCapability {
   persistent: boolean
   canAutoHide: boolean
   aesthetics: WidgetAestheticHints
-  configSchema: WidgetConfigField[]
+  /** Editable settings live in widget-config-spec.ts (validated against the real widgets). */
   presets: WidgetPreset[]
   layoutHints: WidgetLayoutHints
   allowedOps: WidgetOperation[]
@@ -290,13 +279,9 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'text-only', maxDefaultInstances: 1, canBeHero: true, shouldGroupWith: ['weather'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'style', type: 'enum', label: '样式', options: ['minimal', 'elegant', 'tech', 'classic'] },
-      { key: 'themeId', type: 'string', label: '主题' },
-    ],
     presets: [
-      { id: 'minimal-light', label: '轻时间', intent: ['minimal'], config: { style: 'minimal' } },
-      { id: 'elegant-focus', label: '专注时间', intent: ['focus'], config: { style: 'elegant' } },
+      { id: 'minimal-light', label: '轻时间', intent: ['minimal'], config: { style: 'minimal', opacity: 0.85 } },
+      { id: 'elegant-focus', label: '竖排专注时间', intent: ['focus'], config: { style: 'stacked', opacity: 0.9 } },
     ],
     layoutHints: { preferredAnchors: ['top-left', 'top-right'], avoidCenter: true },
     allowedOps: LOW_RISK_DECORATION_OPS,
@@ -313,7 +298,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'text-only', maxDefaultInstances: 1, canBeHero: true, shouldGroupWith: ['weather'], wallpaperContrast: 'auto' },
-    configSchema: [{ key: 'themeId', type: 'string', label: '主题' }],
     presets: [{ id: 'soft-date', label: '柔和日期', intent: ['soft', 'focus'] }],
     layoutHints: { preferredAnchors: ['top-left', 'top-right', 'bottom-left'], avoidCenter: true },
     allowedOps: LOW_RISK_DECORATION_OPS,
@@ -330,11 +314,7 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'pixel', maxDefaultInstances: 1, canBeHero: true, shouldGroupWith: ['pet'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'style', type: 'enum', label: '像素样式', options: ['terminal', 'block', 'retro'] },
-      { key: 'themeId', type: 'string', label: '主题' },
-    ],
-    presets: [{ id: 'retro-pixel', label: '复古像素', intent: ['pixel', 'game'], config: { style: 'retro' } }],
+    presets: [{ id: 'retro-pixel', label: '复古像素周历', intent: ['pixel', 'game'], config: { style: 'weekday' } }],
     layoutHints: { preferredAnchors: ['top-left', 'bottom-left'], avoidCenter: true },
     allowedOps: LOW_RISK_DECORATION_OPS,
     risk: 'low',
@@ -350,10 +330,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'strong', material: 'text-only', maxDefaultInstances: 1, canBeHero: true, shouldGroupWith: ['weather'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'themeId', type: 'string', label: '主题' },
-      { key: 'darkMode', type: 'boolean', label: '暗色文字' },
-    ],
     presets: [
       { id: 'quiet-date', label: '安静图形时间', intent: ['night', 'focus'], config: { themeId: 'yellow', darkMode: true } },
       { id: 'poster-date', label: '海报图形时间', intent: ['poster'], config: { darkMode: false } },
@@ -375,11 +351,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'strong', material: 'neon', maxDefaultInstances: 1, canBeHero: true, shouldGroupWith: ['clock'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'style', type: 'enum', label: '形态', options: ['bars', 'wave', 'spectrum', 'dna'] },
-      { key: 'themeId', type: 'string', label: '主题' },
-      { key: 'opacity', type: 'number', label: '透明度', min: 0.2, max: 1 },
-    ],
     presets: [
       { id: 'soft-wave', label: '柔和波形', intent: ['ambient'], config: { style: 'wave', opacity: 0.78 } },
       { id: 'neon-bars', label: '霓虹频谱', intent: ['music', 'neon'], config: { style: 'bars', opacity: 0.9 } },
@@ -399,10 +370,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'quiet', material: 'text-only', maxDefaultInstances: 1, canBeHero: false, shouldGroupWith: ['clock', 'graphicdatetime'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'style', type: 'enum', label: '样式', options: ['minimal', 'realism', 'glass', 'neon'] },
-      { key: 'city', type: 'string', label: '城市' },
-    ],
     presets: [
       { id: 'minimal', label: '极简天气', intent: ['minimal', 'focus'], config: { style: 'minimal' } },
       { id: 'soft-glass', label: '轻毛玻璃天气', intent: ['daily'], config: { style: 'glass' } },
@@ -422,14 +389,9 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'quiet', material: 'glass', maxDefaultInstances: 1, canBeHero: false, shouldGroupWith: ['text'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'sound', type: 'enum', label: '声音', options: ['rain', 'wind', 'wave', 'coffee', 'fireplace'] },
-      { key: 'volumeLevel', type: 'number', label: '音量', min: 0, max: 4 },
-      { key: 'darkMode', type: 'boolean', label: '暗色模式' },
-    ],
     presets: [
-      { id: 'rain-low', label: '小声雨声', intent: ['focus', 'night'], config: { sound: 'rain', volumeLevel: 1, darkMode: true } },
-      { id: 'coffee-soft', label: '轻咖啡馆', intent: ['rest'], config: { sound: 'coffee', volumeLevel: 1 } },
+      { id: 'rain-low', label: '小音量深色', intent: ['focus', 'night'], config: { style: 'glass', volume: 1, darkMode: true } },
+      { id: 'coffee-soft', label: '轻量浅色', intent: ['rest'], config: { style: 'minimal', volume: 1 } },
     ],
     layoutHints: { preferredAnchors: ['bottom-right', 'bottom-left'], avoidCenter: true },
     allowedOps: [...LOW_RISK_DECORATION_OPS, 'play', 'pause'],
@@ -446,11 +408,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'quiet', material: 'text-only', maxDefaultInstances: 1, canBeHero: false, shouldGroupWith: ['whitenoise'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'text', type: 'string', label: '文字' },
-      { key: 'author', type: 'string', label: '署名' },
-      { key: 'themeId', type: 'string', label: '主题' },
-    ],
     presets: [
       { id: 'focus-line', label: '专注短句', intent: ['focus'], config: { text: '今晚只做一件事' } },
       { id: 'soft-note', label: '轻便签', intent: ['note'], config: { text: '别忘了休息一下' } },
@@ -472,14 +429,7 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'quiet', material: 'paper', maxDefaultInstances: 5, canBeHero: false, shouldGroupWith: ['calendar'], wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'task', type: 'object', label: '单项任务' },
-      { key: 'color', type: 'enum', label: '纸张颜色', options: ['butter', 'rose', 'mint', 'sky', 'lilac'] },
-      { key: 'paperStyle', type: 'enum', label: '固定方式', options: ['tape', 'pin', 'plain'] },
-      { key: 'rotation', type: 'number', label: '自然倾斜角度' },
-      { key: 'textStyle', type: 'object', label: '文字样式' },
-    ],
-    presets: [{ id: 'blank-note', label: '空白便利贴', intent: ['todo', 'note'], config: { version: 2, color: 'butter', paperStyle: 'tape', rotation: -1.4 } }],
+    presets: [{ id: 'blank-note', label: '空白便利贴', intent: ['todo', 'note'], config: { color: 'butter', paperStyle: 'tape', rotation: -1.4 } }],
     layoutHints: { preferredAnchors: ['top-right', 'center-right', 'top-left'], avoidCenter: true },
     allowedOps: CARD_OPS,
     risk: 'low',
@@ -495,10 +445,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'strong', material: 'card', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'symbols', type: 'array', label: '股票列表' },
-      { key: 'refreshInterval', type: 'number', label: '刷新间隔' },
-    ],
     presets: [{ id: 'compact-market', label: '紧凑看盘', intent: ['market'] }],
     layoutHints: { preferredAnchors: ['center-right', 'top-right'], avoidCenter: true },
     allowedOps: CARD_OPS,
@@ -515,10 +461,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'card', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'source', type: 'enum', label: '来源', options: ['toutiao', 'weibo', 'baidu', 'zhihu', 'bilibili'] },
-      { key: 'maxItems', type: 'number', label: '数量', min: 3, max: 8 },
-    ],
     presets: [{ id: 'light-hotlist', label: '轻热点', intent: ['information'], config: { source: 'toutiao', maxItems: 5 } }],
     layoutHints: { preferredAnchors: ['top-right', 'center-right'], avoidCenter: true },
     allowedOps: CARD_OPS,
@@ -535,7 +477,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'card', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [],
     presets: [{ id: 'small-calendar', label: '小日历', intent: ['plan'] }],
     layoutHints: { preferredAnchors: ['top-right', 'bottom-right'], avoidCenter: true },
     allowedOps: CARD_OPS,
@@ -552,7 +493,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'card', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [],
     presets: [{ id: 'basic-tools', label: '基础工具', intent: ['tools'] }],
     layoutHints: { preferredAnchors: ['bottom-right'], avoidCenter: true },
     allowedOps: CARD_OPS,
@@ -569,7 +509,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'pixel', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [{ key: 'pixelPet', type: 'object', label: '像素宠物配置' }],
     presets: [{ id: 'companion-idle', label: '安静陪伴', intent: ['companion'] }],
     layoutHints: { preferredAnchors: ['bottom-right', 'bottom-left'], avoidCenter: true },
     allowedOps: ['create', 'update-layout', 'update-config', 'hide', 'restore'],
@@ -586,7 +525,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'card', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [{ key: 'metrics', type: 'array', label: '指标' }],
     presets: [{ id: 'compact-system', label: '紧凑系统状态', intent: ['work'] }],
     layoutHints: { preferredAnchors: ['top-right', 'center-right'], avoidCenter: true },
     allowedOps: CARD_OPS,
@@ -605,7 +543,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: false,
     canAutoHide: true,
     aesthetics: { visualWeight: 'normal', material: 'glass', maxDefaultInstances: 3, canBeHero: true, wallpaperContrast: 'auto' },
-    configSchema: [{ key: 'definition', type: 'object', label: '声明式组件定义' }],
     presets: [],
     layoutHints: { preferredAnchors: ['top-right', 'bottom-right', 'top-left', 'bottom-left'], avoidCenter: true },
     allowedOps: CARD_OPS,
@@ -623,10 +560,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: true,
     canAutoHide: false,
     aesthetics: { visualWeight: 'normal', material: 'glass', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'title', type: 'string', label: '标题' },
-      { key: 'opacity', type: 'number', label: '透明度', min: 0, max: 1 },
-    ],
     presets: [{ id: 'quiet-box', label: '轻收纳盒', intent: ['organize'] }],
     layoutHints: { preferredAnchors: ['center-left', 'center-right'], avoidCenter: true },
     allowedOps: PERSISTENT_OPS,
@@ -644,10 +577,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: true,
     canAutoHide: false,
     aesthetics: { visualWeight: 'normal', material: 'glass', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'title', type: 'string', label: '标题' },
-      { key: 'opacity', type: 'number', label: '透明度', min: 0, max: 1 },
-    ],
     presets: [{ id: 'quiet-horizontal', label: '轻横向收纳', intent: ['organize'] }],
     layoutHints: { preferredAnchors: ['bottom-center', 'top-center'], avoidCenter: true, reserveEdge: 'bottom' },
     allowedOps: PERSISTENT_OPS,
@@ -665,10 +594,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: true,
     canAutoHide: false,
     aesthetics: { visualWeight: 'normal', material: 'glass', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'title', type: 'string', label: '标题' },
-      { key: 'opacity', type: 'number', label: '透明度', min: 0, max: 1 },
-    ],
     presets: [{ id: 'adaptive-box', label: '自适应收纳', intent: ['organize'] }],
     layoutHints: { preferredAnchors: ['center-left', 'center-right', 'bottom-right'], avoidCenter: true },
     allowedOps: PERSISTENT_OPS,
@@ -686,10 +611,6 @@ export const WIDGET_CAPABILITIES: WidgetCapability[] = [
     persistent: true,
     canAutoHide: false,
     aesthetics: { visualWeight: 'normal', material: 'glass', maxDefaultInstances: 1, canBeHero: false, wallpaperContrast: 'auto' },
-    configSchema: [
-      { key: 'dockOpacity', type: 'number', label: '透明度', min: 0, max: 1 },
-      { key: 'dockHoverScale', type: 'number', label: '悬浮放大', min: 1, max: 2 },
-    ],
     presets: [
       { id: 'quiet-dock', label: '轻 Dock', intent: ['minimal'], config: { dockOpacity: 0.18 } },
       { id: 'focus-dock', label: '专注 Dock', intent: ['focus'], config: { dockOpacity: 0.14 } },

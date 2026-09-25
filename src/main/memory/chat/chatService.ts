@@ -452,7 +452,14 @@ export const ChatService = {
 
     // 4. 获取最近消息构建上下文
     const recent = EventStore.listRecent(conv.id, 30)
-    const toolRoute = decideToolRoute({ text, workspace })
+    // Keep widget/scene tools available for short follow-ups ("再大一点", "撤回")
+    // that only make sense after the previous turns' widget work.
+    const recentToolNames = recent
+      .slice(-12)
+      .filter((event) => event.eventType === 'tool_call')
+      .map((event) => (event.content as { toolName?: unknown } | undefined)?.toolName)
+      .filter((name): name is string => typeof name === 'string')
+    const toolRoute = decideToolRoute({ text, workspace, recentToolNames })
 
     // 5. 获取 model profile
     const profile = ModelConfig.getActive()

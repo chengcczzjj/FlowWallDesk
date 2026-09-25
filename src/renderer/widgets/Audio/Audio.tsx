@@ -235,6 +235,26 @@ export function AudioWidget({ config }: AudioWidgetProps) {
         ctx.fill()
         ctx.globalAlpha = 1
         ctx.stroke()
+      } else if (style === 'circle') {
+        // Radial pulse: bars grow outward from a ring (offered by the toolbar
+        // style picker as "Radial Pulse", previously rendered nothing).
+        const barsCount = 72
+        const mapped = mirrorFrequencyMap(audioData, barsCount)
+        const centerX = w / 2
+        const radius = Math.max(8, Math.min(w, h) * 0.2)
+        const maxLength = Math.max(6, Math.min(w, h) / 2 - radius - 2)
+        ctx.lineCap = 'round'
+        ctx.lineWidth = Math.max(1.5, ((2 * Math.PI * radius) / barsCount) * 0.55)
+        for (let i = 0; i < barsCount; i++) {
+          const angle = (i / barsCount) * Math.PI * 2 - Math.PI / 2
+          const length = Math.max(1.5, mapped[i] * maxLength)
+          const cos = Math.cos(angle)
+          const sin = Math.sin(angle)
+          ctx.beginPath()
+          ctx.moveTo(centerX + cos * radius, centerY + sin * radius)
+          ctx.lineTo(centerX + cos * (radius + length), centerY + sin * (radius + length))
+          ctx.stroke()
+        }
       } else if (style === 'dna') {
         const bars = 40
         const mapped = mirrorFrequencyMap(audioData, bars)

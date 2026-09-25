@@ -99,3 +99,80 @@ export function isGeneratedWidgetDefinition(value: unknown): value is GeneratedW
     return false
   })
 }
+
+export const GENERATED_WIDGET_MIN_SIZE = { width: 220, height: 120 } as const
+export const GENERATED_WIDGET_MAX_SIZE = { width: 760, height: 720 } as const
+
+/** Rough rendered width of a string: CJK glyphs are ~1em, Latin ~0.56em. */
+function estimateTextWidth(text: string, fontSize: number): number {
+  let width = 0
+  for (const char of text) width += /[\u2e80-\uffff]/.test(char) ? fontSize : fontSize * 0.56
+  return width
+}
+
+function estimateLines(text: string, fontSize: number, contentWidth: number): number {
+  return text.split(/\n/).reduce((lines, paragraph) => (
+    lines + Math.max(1, Math.ceil(estimateTextWidth(paragraph, fontSize) / Math.max(40, contentWidth)))
+  ), 0)
+}
+
+/**
+ * Height that fits the declared blocks in the GeneratedWidget layout (20px
+ * padding, 12px header gap, 10px block gap). A fixed default height either
+ * clipped longer cards behind a scrollbar or left short cards half empty.
+ */
+export function estimateGeneratedWidgetHeight(
+  definition: Pick<GeneratedWidgetDefinition, 'subtitle' | 'blocks'>,
+  width: number,
+): number {
+  const contentWidth = Math.max(120, width - 44)
+  const header = 21 + (definition.subtitle ? 6 + estimateLines(definition.subtitle, 11, contentWidth - 18) * 15 : 0)
+  const blockHeights = definition.blocks.map((block) => {
+    if (block.type === 'divider') return 1
+    if (block.type === 'text') {
+      const size = block.style === 'headline' ? 22 : block.style === 'caption' ? 11 : block.style === 'quote' ? 16 : 13
+      return Math.ceil(estimateLines(block.text, size, contentWidth) * size * 1.55)
+    }
+    if (block.type === 'metric') return block.trend ? 36 : 30
+    if (block.type === 'progress') return 30
+    if (block.type === 'clock') return 30
+    if (block.type === 'countdown') return 50
+    const title = block.title ? 21 : 0
+    const items = block.items.reduce((total, item) => total + estimateLines(item.text, 12, contentWidth - 22) * 18, 0)
+    return title + items + Math.max(0, block.items.length - 1) * 6
+  })
+  const body = blockHeights.reduce((total, height) => total + height, 0) + Math.max(0, blockHeights.length - 1) * 10
+  const total = Math.ceil(40 + header + 12 + body + 8)
+  return Math.max(GENERATED_WIDGET_MIN_SIZE.height, Math.min(GENERATED_WIDGET_MAX_SIZE.height, total))
+}
+
+function parseHexColor(hex: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim())
+  return match ? [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)] : null
+}
+
+function relativeLuminance([r, g, b]: [number, number, number]): number {
+  const channel = (value: number) => {
+    const normalized = value / 255
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+function mixHex([r, g, b]: [number, number, number], target: number, amount: number): string {
+  const mix = (value: number) => Math.round(value + (target - value) * amount).toString(16).padStart(2, '0')
+  return `#${mix(r)}${mix(g)}${mix(b)}`
+}
+
+/**
+ * Accent used for text (countdowns, trends). The model may pick any accent;
+ * a pale one on the light paper theme or a near-black one on dark themes
+ * would make that text unreadable, so shift it toward readable contrast.
+ */
+export function getReadableGeneratedAccent(accent: string, theme: GeneratedWidgetTheme): string {
+  const rgb = parseHexColor(accent)
+  if (!rgb) return theme === 'paper' ? '#9a5b13' : '#ffb86b'
+  const luminance = relativeLuminance(rgb)
+  if (theme === 'paper') return luminance > 0.35 ? mixHex(rgb, 0, Math.min(0.7, (luminance - 0.2) * 1.4)) : accent
+  return luminance < 0.12 ? mixHex(rgb, 255, 0.55) : accent
+}

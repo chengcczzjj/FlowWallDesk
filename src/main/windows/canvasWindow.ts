@@ -1201,6 +1201,12 @@ export function setCanvasPointerActive(active: boolean): void {
   restartCanvasCursorHitTest()
 }
 
+/** Rendered footprint of one widget in canvas coordinates, if the renderer has reported it. */
+export function getCanvasWidgetRenderedRect(id: string): { x: number; y: number; width: number; height: number } | null {
+  const region = rendererHitRegions?.find((candidate) => candidate.id === id)
+  return region ? { x: region.x, y: region.y, width: region.width, height: region.height } : null
+}
+
 /** Store the renderer's DOM-measured widget footprints for native hit testing. */
 export function setCanvasHitRegions(webContentsId: number, regions: CanvasHitRegion[]): void {
   const win = getCanvasWindow()

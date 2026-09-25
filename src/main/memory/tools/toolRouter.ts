@@ -1,6 +1,7 @@
 import type { ChatProject } from '@shared/types'
 import {
   TOOL_MANIFEST,
+  getToolManifest,
   getToolNamesByCategory,
   type RegisteredToolName,
 } from '@shared/tool-manifest'
@@ -48,8 +49,18 @@ function includesAny(text: string, pattern: RegExp): boolean {
   return pattern.test(text)
 }
 
+const WIDGET_NOUN = /组件|小组件|挂件|桌面组件|桌面文字|便签|便笺|便利贴|贴纸|待办|任务|周记|周总结|提醒|天气|日历|时钟|时间组件|日期|白噪音|音频可视化|频谱|快捷工具|桌宠|萌宠|股票|行情|自选股|看盘|新闻|热搜|清单|倒计时|进度卡|目标卡|信息卡|仪表盘|dock|程序坞|图标收纳|收纳盒|系统监控/i
+const WIDGET_ACTION = /放到桌面|加到桌面|摆到桌面|添加|加一个|放一个|删掉|移除|隐藏|显示出来|恢复|挪|移到|移动|放到|左上|右上|左下|右下|角落|居中|放大|缩小|大一点|小一点|换成|换个|改成|改为|样式|风格|颜色|配色|主题|透明|深色|浅色|霓虹|毛玻璃|置顶/i
+
 function isWidgetIntent(text: string): boolean {
-  return includesAny(text, /组件|小组件|挂件|桌面组件|桌面文字|便签|贴纸|待办|任务|周记|周总结|提醒|天气卡片|天气组件|日历组件|时钟组件|白噪音|快捷工具|桌宠|萌宠|股票|行情|自选股|看盘|清单|倒计时|进度卡|目标卡|信息卡|仪表盘|放到桌面|加到桌面|摆到桌面|调整.*桌面|改.*组件/i)
+  if (includesAny(text, /放到桌面|加到桌面|摆到桌面|调整.*桌面|改.*组件|桌面上.*(有什么|哪些)/i)) return true
+  if (includesAny(text, /组件|小组件|挂件|便利贴|便笺|便签|待办|周总结|倒计时|仪表盘|自选股|看盘/i)) return true
+  return includesAny(text, WIDGET_NOUN) && includesAny(text, WIDGET_ACTION)
+}
+
+/** Short follow-ups ("再大一点", "换回去", "撤回") refer to the widget work of the previous turns. */
+function recentlyUsedCategory(recentToolNames: readonly string[] | undefined, category: 'widget' | 'desktop-scene'): boolean {
+  return (recentToolNames ?? []).some((name) => getToolManifest(name)?.category === category)
 }
 
 function isDesktopSceneIntent(text: string): boolean {
@@ -82,11 +93,16 @@ function addTools(target: Set<RegisteredToolName>, names: readonly RegisteredToo
   for (const name of names) target.add(name)
 }
 
-export function decideToolRoute(params: { text: string; workspace?: ChatProject | null }): ToolRouteDecision {
+export function decideToolRoute(params: {
+  text: string
+  workspace?: ChatProject | null
+  /** Tool names called in the last few turns of this conversation. */
+  recentToolNames?: readonly string[]
+}): ToolRouteDecision {
   const text = params.text ?? ''
   const hasWorkspace = Boolean(params.workspace?.rootPath ?? params.workspace?.path)
-  const usesDesktopScene = isDesktopSceneIntent(text)
-  const usesWidgets = isWidgetIntent(text) || usesDesktopScene
+  const usesDesktopScene = isDesktopSceneIntent(text) || recentlyUsedCategory(params.recentToolNames, 'desktop-scene')
+  const usesWidgets = isWidgetIntent(text) || usesDesktopScene || recentlyUsedCategory(params.recentToolNames, 'widget')
   const usesDocuments = isDocumentIntent(text)
   const usesProblemInspection = isProblemInspectionIntent(text)
   const usesCommand = isCommandIntent(text) && hasWorkspace
@@ -128,7 +144,7 @@ export function buildToolRouterPrompt(params: { workspace?: ChatProject | null; 
   ]
 
   if (route.usesWidgets) {
-    blocks.push(`【桌面组件操作】\n用户要求添加、查看、调整或移除桌面组件时，优先使用组件工具完成真实操作。组件操作是轻量桌面陪伴能力，不要把它说成文件任务、项目任务或工作区任务。\n内置组件类型包括：clock、elegantclock、pixelclock、graphicdatetime、audio、weather、whitenoise、text、todo-board、stocks、news、calendar、quicktools、pet、sysmonitor、desktop-icons-box、desktop-icons-horizontal、desktop-icons-adaptive、desktop-icons-dock。\n用户说待办、任务、完成某件事、删除某条任务或周总结时，使用 manage_todo_tasks 操作 todo-board 中的真实任务；修改、完成和删除前先 list 获取准确 taskId，禁止猜测。纯文字便签才用 text。实时股票、天气、新闻必须使用对应内置组件，绝不能用生成式组件编造静态数据。创建 stocks 时把用户指定的六位 A 股代码放进 stockSymbols；用户没说具体股票时只问一次名称或代码，不要先创建空卡片。只有不属于任务便笺的个性化进度、倒计时、组合静态信息卡才调用 create_generated_widget。`)
+    blocks.push(`【桌面组件操作】\n用户要求添加、查看、调整或移除桌面组件时，优先使用组件工具完成真实操作。组件操作是轻量桌面陪伴能力，不要把它说成文件任务、项目任务或工作区任务。\n内置组件类型包括：clock、elegantclock、pixelclock、graphicdatetime、audio、weather、whitenoise、text、todo-board、stocks、news、calendar、quicktools、pet、sysmonitor、desktop-icons-box、desktop-icons-horizontal、desktop-icons-adaptive、desktop-icons-dock。\n操作流程：改动已有组件前先 list_widgets 取得准确 id；改样式、配色、透明度、文字等用 update_widget_config，只能使用 widget_capability_list 或 list_widgets(includeOptions=true) 列出的设置项和取值；移动、缩放、隐藏/恢复、置顶用 arrange_widget；修改已生成的 AI 组件用 update_generated_widget。工具返回 rejected 或 ok=false 时，说明没有生效，按返回的 allowed 修正后再试一次，不要对用户说已经改好。\n设计原则：优先使用预设(preset)和位置锚点(anchor)，不要随意给像素坐标；同一位置不要叠放多个组件，桌面保持一个主视觉加少量轻组件；配色优先与壁纸和已有组件一致，一次只做用户要求的改动；Dock 和图标收纳里是用户的桌面图标，不能隐藏，删除前必须征得用户确认。\n用户说待办、任务、完成某件事、删除某条任务或周总结时，使用 manage_todo_tasks 操作 todo-board 中的真实任务；修改、完成和删除前先 list 获取准确 taskId，禁止猜测。纯文字便签才用 text。实时股票、天气、新闻必须使用对应内置组件，绝不能用生成式组件编造静态数据。创建 stocks 时把用户指定的六位 A 股代码放进 stockSymbols；用户没说具体股票时只问一次名称或代码，不要先创建空卡片。只有不属于任务便笺的个性化进度、倒计时、组合静态信息卡才调用 create_generated_widget，高度通常省略让系统按内容计算。`)
   }
 
   if (route.usesDesktopScene) {

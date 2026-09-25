@@ -11,6 +11,7 @@ import {
   type WidgetLayer,
 } from '@shared/desktop-scene'
 import { buildDesktopSceneLayoutPlan, type DesktopSceneLayoutPlan } from '@shared/desktop-scene-layout'
+import { describeWidgetConfigSpec, pickWidgetSettings } from '@shared/widget-config-spec'
 import { store } from '../../../store'
 import {
   applyDesktopScenePlanForTool,
@@ -39,7 +40,7 @@ function summarizeCapability(capability: WidgetCapability) {
       config: preset.config ?? {},
     })),
     allowedOps: capability.allowedOps,
-    configSchema: capability.configSchema,
+    editableSettings: describeWidgetConfigSpec(capability.type),
   }
 }
 
@@ -60,7 +61,8 @@ function summarizeWidget(widget: WidgetInstance) {
     canAutoHide: capability?.canAutoHide ?? true,
     visualWeight: capability?.aesthetics.visualWeight ?? 'normal',
     material: capability?.aesthetics.material ?? 'card',
-    config: widget.config ?? {},
+    // Only documented settings: raw config can carry icon data URLs and note HTML.
+    settings: pickWidgetSettings(widget.type, widget.config),
   }
 }
 

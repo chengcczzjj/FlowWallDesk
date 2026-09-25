@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { WidgetInstance } from '@shared/types'
 import type { GeneratedWidgetBlock, GeneratedWidgetDefinition } from '@shared/generated-widget'
-import { isGeneratedWidgetDefinition } from '@shared/generated-widget'
+import { getReadableGeneratedAccent, isGeneratedWidgetDefinition } from '@shared/generated-widget'
 import { FrostedGlassBackground } from '../FrostedGlassBackground'
 
 const FALLBACK_DEFINITION: GeneratedWidgetDefinition = {
@@ -46,6 +46,7 @@ export function GeneratedWidget({ widget, entering = false }: { widget: WidgetIn
     ? widget.config.definition
     : FALLBACK_DEFINITION
   const hasLiveTime = definition.blocks.some((block) => block.type === 'clock' || block.type === 'countdown')
+  const textAccent = getReadableGeneratedAccent(definition.accent, definition.theme)
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -111,6 +112,7 @@ export function GeneratedWidget({ widget, entering = false }: { widget: WidgetIn
                 block={block}
                 now={now}
                 accent={definition.accent}
+                textAccent={textAccent}
                 dateFormatter={formatter}
                 onToggle={(itemId) => toggleListItem(index, itemId)}
               />
@@ -126,12 +128,14 @@ function GeneratedBlock({
   block,
   now,
   accent,
+  textAccent,
   dateFormatter,
   onToggle,
 }: {
   block: GeneratedWidgetBlock
   now: number
   accent: string
+  textAccent: string
   dateFormatter: Intl.DateTimeFormat
   onToggle: (itemId: string) => void
 }) {
@@ -144,7 +148,7 @@ function GeneratedBlock({
     return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'end', gap: 8 }}>
         <span style={{ fontSize: 11, opacity: .62 }}>{block.label}</span>
-        {block.trend && <span style={{ gridColumn: 1, fontSize: 10, color: accent }}>{block.trend}</span>}
+        {block.trend && <span style={{ gridColumn: 1, fontSize: 10, color: textAccent }}>{block.trend}</span>}
         <strong style={{ gridColumn: 2, gridRow: '1 / span 2', fontSize: 27, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{block.value}<small style={{ marginLeft: 4, fontSize: 11, opacity: .58 }}>{block.unit}</small></strong>
       </div>
     )
@@ -169,7 +173,7 @@ function GeneratedBlock({
     return <time style={{ fontSize: 28, fontWeight: 760, lineHeight: 1, letterSpacing: '.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</time>
   }
   if (block.type === 'countdown') {
-    return <div><span style={{ display: 'block', fontSize: 11, opacity: .6 }}>{block.label}</span><strong style={{ display: 'block', marginTop: 5, color: accent, fontSize: 24, fontVariantNumeric: 'tabular-nums' }}>{formatCountdown(block.targetAt, now, block.completedText)}</strong></div>
+    return <div><span style={{ display: 'block', fontSize: 11, opacity: .6 }}>{block.label}</span><strong style={{ display: 'block', marginTop: 5, color: textAccent, fontSize: 24, fontVariantNumeric: 'tabular-nums' }}>{formatCountdown(block.targetAt, now, block.completedText)}</strong></div>
   }
   return (
     <div>
