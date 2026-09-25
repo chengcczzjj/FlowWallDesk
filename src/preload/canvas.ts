@@ -15,7 +15,6 @@ import type {
   CanvasOcclusionState,
   NativeDockClickEvent,
   WallpaperFramePayload,
-  WallpaperFrameSource,
 } from '@shared/types'
 import type { CanvasHitRegion } from '@shared/canvas-hit-test'
 
@@ -108,18 +107,11 @@ const api = {
   openExplorer: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_EXPLORER),
   openRecycleBin: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_RECYCLE_BIN),
   showDesktop: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_SHOW_DESKTOP),
-  /** 监听壁纸抽帧（用于毛玻璃效果），每个壁纸窗口独立一路 */
+  /** 监听壁纸抽帧（用于毛玻璃效果），每台显示器独立一路 */
   onFrame: (cb: (frame: WallpaperFramePayload) => void): (() => void) => {
     const handler = (_: unknown, frame: WallpaperFramePayload) => cb(frame)
     ipcRenderer.on(IPC.WALLPAPER_FRAME, handler)
     return () => ipcRenderer.off(IPC.WALLPAPER_FRAME, handler)
-  },
-  /** 壁纸窗口在画布坐标中的区域，用于多显示器毛玻璃对齐 */
-  getFrameSources: (): Promise<WallpaperFrameSource[]> => ipcRenderer.invoke(IPC.WALLPAPER_FRAME_SOURCES_GET),
-  onFrameSources: (cb: (sources: WallpaperFrameSource[]) => void): (() => void) => {
-    const handler = (_: unknown, sources: WallpaperFrameSource[]) => cb(sources)
-    ipcRenderer.on(IPC.WALLPAPER_FRAME_SOURCES, handler)
-    return () => ipcRenderer.off(IPC.WALLPAPER_FRAME_SOURCES, handler)
   },
   setWallpaperFrameDemand: (enabled: boolean): void => {
     ipcRenderer.send(IPC.WALLPAPER_CAPTURE_DEMAND, enabled)

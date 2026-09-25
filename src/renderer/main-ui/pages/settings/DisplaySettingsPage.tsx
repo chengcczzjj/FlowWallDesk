@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Check, Monitor, RefreshCw, Tv2 } from 'lucide-react'
 import type { WallpaperDisplayMode, WallpaperDisplaySettings, WallpaperItem } from '@shared/types'
 import { DISPLAY_MODE_OPTIONS, formatDisplayResolution, layoutDisplayTopology } from '@shared/display-topology'
+import { getDisplayAssignment } from '@shared/wallpaper-display-layout'
 import './settings.css'
 
 type StatusTone = 'info' | 'success' | 'error'
@@ -208,7 +209,7 @@ export function DisplaySettingsPage() {
         )}
         <div className="settings-display-list">
           {displays.map((display) => {
-            const assignment = settings?.assignments[String(display.id)] ?? ''
+            const assignment = settings ? getDisplayAssignment(settings.assignments, display) ?? '' : ''
             const selected = selectedDisplayId === display.id
             return (
               <div className={`settings-display-card${selected ? ' selected' : ''}`} key={display.id}>
@@ -249,7 +250,7 @@ export function DisplaySettingsPage() {
         <div className="settings-card__icon"><Tv2 size={18} /></div>
         <div className="settings-card__body">
           <div className="settings-card__title">工作方式</div>
-          <div className="settings-card__desc">复制和单独设置模式会为每台显示器创建独立的桌面壁纸窗口，避免不同缩放比例导致跨屏拉伸；只有“跨屏延展”使用覆盖整个虚拟桌面的单一窗口。显示器拔插、分辨率和缩放变化会自动重建布局，离开可见区域的组件会移回最近的显示器。</div>
+          <div className="settings-card__desc">四种模式均使用显示器本地壁纸窗口；跨屏延展将同一虚拟画面逐屏裁切，避免单个大窗口跨越不同缩放比例。复制和延展视频共享播放基准，仅主屏输出声音。显示器拔插、分辨率和缩放变化会重新协调布局与组件归属。</div>
         </div>
       </div>
     </div>

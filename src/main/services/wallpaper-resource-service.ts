@@ -23,7 +23,7 @@ import {
   getWallpaperResourceManifestCachePath,
   toRemoteWallpaperId,
 } from '../runtime/userDataPaths'
-import { store } from '../store'
+import { beginWallpaperResourceMutation } from './wallpaper-usage'
 import { getMainWindow } from '../windows/mainWindow'
 import { extractZipSafely } from './safe-zip'
 
@@ -469,28 +469,37 @@ async function runInstall(entry: WallpaperResourceEntry): Promise<WallpaperResou
 
 export async function installWallpaperResource(resourceId: string): Promise<WallpaperResourceActionResult> {
   if (!isValidWallpaperResourceId(resourceId)) return { ok: false, error: '无效的壁纸资源 ID' }
-  if (store.get('wallpaper').current?.id === toRemoteWallpaperId(resourceId)) {
-    return { ok: false, error: '当前正在使用这张壁纸，请先切换后再更新资源' }
-  }
   const existing = activeInstalls.get(resourceId)
   if (existing) return existing
-  const catalog = await getWallpaperResourceCatalog(false)
-  const entry = catalog.items.find((item) => item.id === resourceId)
-  if (!entry) return { ok: false, error: '远程清单中不存在该壁纸' }
-  const task = runInstall(entry).finally(() => activeInstalls.delete(resourceId))
-  activeInstalls.set(resourceId, task)
-  return task
+  let release: (() => void) | undefined
+  try {
+    release = beginWallpaperResourceMutation(toRemoteWallpaperId(resourceId))
+    const task = (async () => {
+      const catalog = await getWallpaperResourceCatalog(false)
+      const entry = catalog.items.find((item) => item.id === resourceId)
+      if (!entry) return { ok: false, error: '远程清单中不存在该壁纸' }
+      return runInstall(entry)
+    })().finally(() => { activeInstalls.delete(resourceId); release?.() })
+    activeInstalls.set(resourceId, task)
+    return await task
+  } catch (error) {
+    release?.()
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export async function removeWallpaperResource(resourceId: string): Promise<WallpaperResourceActionResult> {
   if (!isValidWallpaperResourceId(resourceId)) return { ok: false, error: '无效的壁纸资源 ID' }
-  if (activeInstalls.has(resourceId)) return { ok: false, error: '该壁纸正在安装，暂时无法删除' }
-  if (store.get('wallpaper').current?.id === toRemoteWallpaperId(resourceId)) {
-    return { ok: false, error: '当前正在使用这张壁纸，请先切换到其他壁纸' }
+  let release: (() => void) | undefined
+  try {
+    release = beginWallpaperResourceMutation(toRemoteWallpaperId(resourceId))
+    await fs.rm(join(getRemoteWallpapersRoot(), resourceId), { recursive: true, force: true })
+    await fs.rm(getWallpaperOverrideDir(toRemoteWallpaperId(resourceId)), { recursive: true, force: true })
+    transientStates.delete(resourceId)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    release?.()
   }
-  const target = join(getRemoteWallpapersRoot(), resourceId)
-  await fs.rm(target, { recursive: true, force: true })
-  await fs.rm(getWallpaperOverrideDir(toRemoteWallpaperId(resourceId)), { recursive: true, force: true })
-  transientStates.delete(resourceId)
-  return { ok: true }
 }

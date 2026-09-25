@@ -19,7 +19,8 @@ import { isNativeCanvasSurfaceHit, shouldFallbackNativeDockClick } from '@shared
 import { secureWindowNavigation } from './navigationSecurity'
 import { store } from '../store'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
-import { getDesktopRenderBounds, getWallpaperDisplayMode } from './displayLayout'
+import { getDesktopRenderBounds, getDisplayDescriptors, getWallpaperDisplayMode } from './displayLayout'
+import { materializeWidgetsForCanvas } from '@shared/widget-display-layout'
 
 
 let koffi: any
@@ -370,9 +371,17 @@ function notifyCanvasPointerOccluded(occluded: boolean): void {
   win.webContents.send(IPC.CANVAS_POINTER_OCCLUDED, occluded)
 }
 
-/** Prefer the renderer's measured DOM footprint; fall back to persisted rects until it reports. */
-function getCanvasHitCandidates(): readonly CanvasHitCandidate[] {
-  return rendererHitRegions ?? store.get('widgets')
+/**
+ * Prefer the renderer's measured DOM footprint; until it reports, fall back to
+ * the persisted display-local widgets projected into canvas coordinates.
+ */
+function getCanvasHitCandidates(displayBounds: Electron.Rectangle): readonly CanvasHitCandidate[] {
+  return rendererHitRegions ?? materializeWidgetsForCanvas(
+    store.get('widgets'),
+    getDisplayDescriptors(),
+    displayBounds,
+    getWallpaperDisplayMode(),
+  )
 }
 
 interface NativeCursorSurface {
@@ -462,7 +471,7 @@ function inspectNativeCursorSurface(): NativeCursorSurface {
 function refreshCanvasCursorHitTest(): void {
   const displayBounds = getDesktopRenderBounds()
   const cursor = screen.getCursorScreenPoint()
-  const regionWidget = findInteractiveWidgetAtPoint(cursor, displayBounds, getCanvasHitCandidates())
+  const regionWidget = findInteractiveWidgetAtPoint(cursor, displayBounds, getCanvasHitCandidates(displayBounds))
   // Sample the native surface for every widget, not only Dock.  A fullscreen
   // transition can leave Chromium's renderer hover state looking healthy
   // while Windows still routes the point to the wallpaper/desktop surface.
@@ -973,9 +982,7 @@ function registerCanvasDisplayListener(): void {
     // Display topology can move the virtual desktop origin (e.g. a monitor
     // added on the left). Migrate persisted widget coordinates asynchronously
     // to avoid a static widgetIpc <-> canvasWindow import cycle.
-    void import('../ipc/widgetIpc')
-      .then(({ ensureWidgetCoordinateOrigin }) => ensureWidgetCoordinateOrigin({ fit: 'deferred' }))
-      .catch(() => undefined)
+    void import('../ipc/widgetIpc').then(({ ensureWidgetCoordinateOrigin }) => ensureWidgetCoordinateOrigin()).catch(() => undefined)
   }
   screen.on('display-metrics-changed', sync)
   screen.on('display-added', sync)

@@ -1,43 +1,41 @@
-import type { WallpaperFramePayload, WallpaperFrameSource } from '@shared/types'
+import type { WallpaperFramePayload } from '@shared/types'
 
-/**
- * Pre-blurred wallpaper frames for frosted-glass widgets, one stream per
- * native wallpaper window. Non-span multi-monitor modes run one wallpaper
- * window per display, so a single frame stretched across the whole canvas
- * showed the primary wallpaper (misaligned) behind widgets on every screen.
- */
-const currentFrames = new Map<string, string>()
-const frameListeners = new Map<string, Set<() => void>>()
-const pendingFrames = new Map<string, string>()
-const activeSourceFrames = new Map<string, string>()
+interface ProcessedWallpaperFrame extends WallpaperFramePayload {
+  sourceData: string
+}
+
+const currentFrames = new Map<string, ProcessedWallpaperFrame>()
+const listeners = new Set<() => void>()
+const pendingFrames = new Map<string, WallpaperFramePayload>()
 const lastProcessedSourceFrames = new Map<string, string>()
 let processingFrame = false
+let activeDisplayKey: string | null = null
+let activeSourceFrame: string | null = null
 let blurCanvas: HTMLCanvasElement | null = null
 let blurContext: CanvasRenderingContext2D | null = null
-
-let frameSources: WallpaperFrameSource[] = []
-const sourceListeners = new Set<() => void>()
 
 /** Minimum pixel blur baked into every frame before transparent-window composition. */
 export const BASE_WALLPAPER_FRAME_BLUR_PX = 12
 
-function notifyFrame(key: string): void {
-  const listeners = frameListeners.get(key)
-  if (!listeners) return
+function hasSameBounds(left: WallpaperFramePayload, right: WallpaperFramePayload): boolean {
+  return left.bounds.x === right.bounds.x &&
+    left.bounds.y === right.bounds.y &&
+    left.bounds.width === right.bounds.width &&
+    left.bounds.height === right.bounds.height
+}
+
+function publishFrame(payload: WallpaperFramePayload, data: string): void {
+  const current = currentFrames.get(payload.displayKey)
+  if (
+    current?.data === data &&
+    current.bounds.x === payload.bounds.x &&
+    current.bounds.y === payload.bounds.y &&
+    current.bounds.width === payload.bounds.width &&
+    current.bounds.height === payload.bounds.height
+  ) return
+
+  currentFrames.set(payload.displayKey, { ...payload, data, sourceData: payload.data })
   for (const listener of listeners) listener()
-}
-
-function publishFrame(key: string, frame: string): void {
-  // A frame can finish pre-blurring after its wallpaper window was removed.
-  if (frameSources.length > 0 && !frameSources.some((source) => source.key === key)) return
-  if (frame === currentFrames.get(key)) return
-  currentFrames.set(key, frame)
-  notifyFrame(key)
-}
-
-function getSourceWidth(key: string): number {
-  const source = frameSources.find((candidate) => candidate.key === key)
-  return Math.max(1, source?.bounds.width ?? (window.innerWidth || window.screen.width))
 }
 
 async function loadFrameBitmap(frame: string): Promise<ImageBitmap> {
@@ -51,9 +49,13 @@ async function processPendingFrames(): Promise<void> {
   processingFrame = true
   try {
     while (pendingFrames.size > 0) {
-      const [key, sourceFrame] = pendingFrames.entries().next().value as [string, string]
-      pendingFrames.delete(key)
-      activeSourceFrames.set(key, sourceFrame)
+      const next = pendingFrames.entries().next().value as [string, WallpaperFramePayload] | undefined
+      if (!next) break
+      const [displayKey, payload] = next
+      pendingFrames.delete(displayKey)
+      const sourceFrame = payload.data
+      activeDisplayKey = displayKey
+      activeSourceFrame = sourceFrame
       let bitmap: ImageBitmap | null = null
       let processedSuccessfully = false
       try {
@@ -65,27 +67,27 @@ async function processPendingFrames(): Promise<void> {
         const ctx = blurContext ?? canvas.getContext('2d')
         blurContext = ctx
         if (!ctx) {
-          publishFrame(key, sourceFrame)
+          publishFrame(payload, sourceFrame)
           processedSuccessfully = true
           continue
         }
 
-        // The frame covers one wallpaper window, so scale the blur against
-        // that window's width rather than the whole multi-monitor canvas.
-        const sourceBlurPx = Math.max(1.5, BASE_WALLPAPER_FRAME_BLUR_PX * bitmap.width / getSourceWidth(key))
+        const screenWidth = Math.max(1, payload.bounds.width)
+        const sourceBlurPx = Math.max(1.5, BASE_WALLPAPER_FRAME_BLUR_PX * bitmap.width / screenWidth)
         const bleed = Math.ceil(sourceBlurPx * 3)
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         ctx.filter = `blur(${sourceBlurPx}px) saturate(1.12)`
         ctx.drawImage(bitmap, -bleed, -bleed, canvas.width + bleed * 2, canvas.height + bleed * 2)
         ctx.filter = 'none'
-        publishFrame(key, canvas.toDataURL('image/jpeg', 0.68))
+        publishFrame(payload, canvas.toDataURL('image/jpeg', 0.68))
         processedSuccessfully = true
       } catch (error) {
         console.warn('[canvas] wallpaper frame pre-blur failed; using CSS fallback:', error)
-        publishFrame(key, sourceFrame)
+        publishFrame(payload, sourceFrame)
       } finally {
-        if (processedSuccessfully) lastProcessedSourceFrames.set(key, sourceFrame)
-        activeSourceFrames.delete(key)
+        if (processedSuccessfully) lastProcessedSourceFrames.set(displayKey, sourceFrame)
+        activeDisplayKey = null
+        activeSourceFrame = null
         bitmap?.close()
       }
     }
@@ -96,72 +98,49 @@ async function processPendingFrames(): Promise<void> {
 }
 
 export function setWallpaperFrame(payload: WallpaperFramePayload): void {
-  const key = payload?.key
-  const frame = payload?.data
-  if (typeof key !== 'string' || !key || typeof frame !== 'string' || !frame) return
-  const activeSourceFrame = activeSourceFrames.get(key)
-  const lastProcessedSourceFrame = lastProcessedSourceFrames.get(key)
+  if (!payload?.displayKey || !payload.data || payload.bounds.width <= 0 || payload.bounds.height <= 0) return
+  const frame = payload.data
+  const current = currentFrames.get(payload.displayKey)
+  if (current?.sourceData === frame) {
+    if (!hasSameBounds(current, payload)) publishFrame(payload, current.data)
+    return
+  }
+  const pending = pendingFrames.get(payload.displayKey)
+  const lastProcessedSourceFrame = lastProcessedSourceFrames.get(payload.displayKey)
   if (
-    frame === pendingFrames.get(key) ||
-    frame === activeSourceFrame ||
-    (!activeSourceFrame && frame === lastProcessedSourceFrame)
+    (frame === pending?.data && hasSameBounds(pending, payload)) ||
+    (payload.displayKey === activeDisplayKey && frame === activeSourceFrame) ||
+    (!processingFrame && frame === lastProcessedSourceFrame)
   ) return
-  pendingFrames.set(key, frame)
+  pendingFrames.set(payload.displayKey, payload)
   void processPendingFrames()
 }
 
-export function getWallpaperFrame(key: string): string | null {
-  return currentFrames.get(key) ?? null
+/** Return the monitor-local frame containing the absolute desktop point. */
+export function getWallpaperFrameAt(x: number, y: number): ProcessedWallpaperFrame | null {
+  const frames = [...currentFrames.values()]
+  const containing = frames.find((frame) => (
+    x >= frame.bounds.x &&
+    y >= frame.bounds.y &&
+    x < frame.bounds.x + frame.bounds.width &&
+    y < frame.bounds.y + frame.bounds.height
+  ))
+  if (containing) return containing
+  return frames.sort((left, right) => {
+    const leftX = left.bounds.x + left.bounds.width / 2 - x
+    const leftY = left.bounds.y + left.bounds.height / 2 - y
+    const rightX = right.bounds.x + right.bounds.width / 2 - x
+    const rightY = right.bounds.y + right.bounds.height / 2 - y
+    return leftX * leftX + leftY * leftY - (rightX * rightX + rightY * rightY)
+  })[0] ?? null
 }
 
-export function subscribeWallpaperFrame(key: string, listener: () => void): () => void {
-  let listeners = frameListeners.get(key)
-  if (!listeners) {
-    listeners = new Set()
-    frameListeners.set(key, listeners)
-  }
+/** Compatibility accessor for callers that do not need monitor selection. */
+export function getWallpaperFrame(): string | null {
+  return currentFrames.values().next().value?.data ?? null
+}
+
+export function subscribeWallpaperFrame(listener: () => void): () => void {
   listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-    if (listeners.size === 0 && frameListeners.get(key) === listeners) frameListeners.delete(key)
-  }
-}
-
-function isValidSource(source: unknown): source is WallpaperFrameSource {
-  if (!source || typeof source !== 'object') return false
-  const { key, bounds } = source as Partial<WallpaperFrameSource>
-  if (typeof key !== 'string' || !key || !bounds || typeof bounds !== 'object') return false
-  return [bounds.x, bounds.y, bounds.width, bounds.height].every((value) => typeof value === 'number' && Number.isFinite(value)) &&
-    bounds.width > 0 && bounds.height > 0
-}
-
-/** Replace the known wallpaper windows; frames of windows that no longer exist are dropped. */
-export function setWallpaperFrameSources(next: readonly WallpaperFrameSource[] | null | undefined): void {
-  const sources = Array.isArray(next) ? next.filter(isValidSource) : []
-  const keys = new Set(sources.map((source) => source.key))
-  const unchanged = sources.length === frameSources.length && sources.every((source, index) => {
-    const previous = frameSources[index]
-    return previous?.key === source.key &&
-      previous.bounds.x === source.bounds.x && previous.bounds.y === source.bounds.y &&
-      previous.bounds.width === source.bounds.width && previous.bounds.height === source.bounds.height
-  })
-  if (unchanged) return
-  frameSources = sources.map((source) => ({ key: source.key, bounds: { ...source.bounds } }))
-  const evicted = [...currentFrames.keys()].filter((key) => !keys.has(key))
-  for (const key of evicted) {
-    currentFrames.delete(key)
-    notifyFrame(key)
-  }
-  for (const key of [...pendingFrames.keys()]) if (!keys.has(key)) pendingFrames.delete(key)
-  for (const key of [...lastProcessedSourceFrames.keys()]) if (!keys.has(key)) lastProcessedSourceFrames.delete(key)
-  for (const listener of sourceListeners) listener()
-}
-
-export function getWallpaperFrameSources(): readonly WallpaperFrameSource[] {
-  return frameSources
-}
-
-export function subscribeWallpaperFrameSources(listener: () => void): () => void {
-  sourceListeners.add(listener)
-  return () => sourceListeners.delete(listener)
+  return () => listeners.delete(listener)
 }

@@ -13,6 +13,10 @@ export function getUpdateDiagnosticLogPath(): string {
   return join(app.getPath('userData'), 'logs', 'update-diagnostics.jsonl')
 }
 
+export function getDisplayDiagnosticLogPath(): string {
+  return join(app.getPath('userData'), 'logs', 'display-diagnostics.jsonl')
+}
+
 function logDiagnostic(logPath: string, consoleScope: string, event: string, details: Record<string, unknown>): void {
   const entry = {
     at: new Date().toISOString(),
@@ -50,4 +54,8 @@ export function logDockDiagnostic(event: string, details: Record<string, unknown
 
 export function logUpdateDiagnostic(event: string, details: Record<string, unknown> = {}): void {
   logDiagnostic(getUpdateDiagnosticLogPath(), 'update', event, details)
+}
+
+export function logDisplayDiagnostic(event: string, details: Record<string, unknown> = {}): void {
+  logDiagnostic(getDisplayDiagnosticLogPath(), 'display', event, details)
 }

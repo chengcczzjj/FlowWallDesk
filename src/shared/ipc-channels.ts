@@ -62,10 +62,6 @@ export const IPC = {
   WALLPAPER_READY: 'wallpaper:ready',
   // 壁纸抽帧（壁纸窗口 → 主进程 → 画布窗口）
   WALLPAPER_FRAME: 'wallpaper:frame',
-  // 主进程 → 画布：每个壁纸窗口在画布坐标中的区域（毛玻璃多显示器对齐）
-  WALLPAPER_FRAME_SOURCES: 'wallpaper:frame-sources',
-  // 画布 → 主进程：启动时拉取壁纸帧来源区域
-  WALLPAPER_FRAME_SOURCES_GET: 'wallpaper:frame-sources-get',
   // 画布根据当前组件声明是否需要实时壁纸帧
   WALLPAPER_CAPTURE_DEMAND: 'wallpaper:capture-demand',
 

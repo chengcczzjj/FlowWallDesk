@@ -5,7 +5,7 @@ import type { DesktopSceneLayoutPlan, PlannedSceneWidget } from '@shared/desktop
 import { renderWidget, hasFloatingToolbar, isFloatingType, isStretchFillType } from '../widgets'
 import { FloatingToolbar } from '../widgets/FloatingToolbar'
 import { DesktopInteractionEpochCtx, WidgetPosCtx } from './contexts'
-import { setWallpaperFrame, setWallpaperFrameSources } from './wallpaperFrameStore'
+import { setWallpaperFrame } from './wallpaperFrameStore'
 import { CanvasPointerGate } from '@shared/canvas-pointer-gate'
 import { isCanvasInteractiveWidgetType, type CanvasHitRegion } from '@shared/canvas-hit-test'
 import { getWidgetStackOrder, moveWidgetToFront } from '@shared/widget-order'
@@ -489,8 +489,6 @@ export function Canvas() {
     window.canvasBridge?.getWidgets().then(syncWidgets)
     const offSync = window.canvasBridge?.onSync(syncWidgets)
     const offFrame = window.canvasBridge?.onFrame(setWallpaperFrame)
-    window.canvasBridge?.getFrameSources?.().then(setWallpaperFrameSources).catch(() => undefined)
-    const offFrameSources = window.canvasBridge?.onFrameSources?.(setWallpaperFrameSources)
     const offPointerOccluded = window.canvasBridge?.onPointerOccluded?.(setPointerOccluded)
     const offScenePreview = window.canvasBridge?.onDesktopScenePreview((plan) => setScenePreview(plan))
     const offScenePreviewClear = window.canvasBridge?.onDesktopScenePreviewClear(() => setScenePreview(null))
@@ -527,7 +525,6 @@ export function Canvas() {
     return () => {
       offSync?.()
       offFrame?.()
-      offFrameSources?.()
       offPointerOccluded?.()
       offScenePreview?.()
       offScenePreviewClear?.()

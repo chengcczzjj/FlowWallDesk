@@ -1,3 +1,4 @@
+import { getSynchronizedVideoTime, needsVideoTimeCorrection } from '@shared/wallpaper-playback'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WallpaperItem, WallpaperDisplayLayout } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
@@ -30,45 +31,54 @@ function drawWallpaperFrame(
   source: CanvasImageSource,
   width: number,
   height: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  surfaceBounds: { x: number; y: number; width: number; height: number },
   objectFit: React.CSSProperties['objectFit'],
   transform: string
 ): void {
   const sourceSize = getSourceSize(source)
-  let drawWidth = width
-  let drawHeight = height
+  const outputScaleX = width / Math.max(1, viewportWidth)
+  const outputScaleY = height / Math.max(1, viewportHeight)
+  const surfaceX = surfaceBounds.x * outputScaleX
+  const surfaceY = surfaceBounds.y * outputScaleY
+  const surfaceWidth = surfaceBounds.width * outputScaleX
+  const surfaceHeight = surfaceBounds.height * outputScaleY
+  let drawWidth = surfaceWidth
+  let drawHeight = surfaceHeight
   let drawX = 0
   let drawY = 0
 
   if (objectFit === 'cover' || objectFit === 'contain' || objectFit === 'scale-down') {
     const scale = objectFit === 'cover'
-      ? Math.max(width / sourceSize.width, height / sourceSize.height)
-      : Math.min(width / sourceSize.width, height / sourceSize.height)
+      ? Math.max(surfaceWidth / sourceSize.width, surfaceHeight / sourceSize.height)
+      : Math.min(surfaceWidth / sourceSize.width, surfaceHeight / sourceSize.height)
     drawWidth = sourceSize.width * scale
     drawHeight = sourceSize.height * scale
-    drawX = (width - drawWidth) / 2
-    drawY = (height - drawHeight) / 2
+    drawX = (surfaceWidth - drawWidth) / 2
+    drawY = (surfaceHeight - drawHeight) / 2
   } else if (objectFit === 'none') {
-    drawWidth = sourceSize.width
-    drawHeight = sourceSize.height
-    drawX = (width - drawWidth) / 2
-    drawY = (height - drawHeight) / 2
+    drawWidth = sourceSize.width * outputScaleX
+    drawHeight = sourceSize.height * outputScaleY
+    drawX = (surfaceWidth - drawWidth) / 2
+    drawY = (surfaceHeight - drawHeight) / 2
   }
 
   ctx.clearRect(0, 0, width, height)
   ctx.save()
+  ctx.translate(surfaceX, surfaceY)
+  ctx.beginPath()
+  ctx.rect(0, 0, surfaceWidth, surfaceHeight)
+  ctx.clip()
   if (transform === 'scaleX(-1)') {
-    ctx.translate(width, 0)
+    ctx.translate(surfaceWidth, 0)
     ctx.scale(-1, 1)
   } else if (transform === 'scaleY(-1)') {
-    ctx.translate(0, height)
+    ctx.translate(0, surfaceHeight)
     ctx.scale(1, -1)
   }
   ctx.drawImage(source, drawX, drawY, drawWidth, drawHeight)
   ctx.restore()
-}
-
-function getWindowAspect(): number {
-  return Math.max(0.1, window.innerHeight / Math.max(1, window.innerWidth))
 }
 
 /** 壁纸窗口：根据 type 渲染 video / image / web(iframe)。 */
@@ -90,11 +100,12 @@ export function Wallpaper() {
   const [capturePaused, setCapturePaused] = useState(false)
   const activeItem = layout?.displays[0]?.item ?? item
 
-  // 实时设置状态
-  const [volume, setVolume] = useState(50)
-  const [speed, setSpeed] = useState(1.0)
-  const [scaling, setScaling] = useState('覆盖')
-  const [flip, setFlip] = useState('无')
+  // Settings belong to this surface, never the primary window's legacy snapshot.
+  const audioEnabled = layout?.playback?.audioEnabled !== false
+  const volume = activeItem?.settings?.volume ?? 50
+  const speed = activeItem?.settings?.speed ?? 1
+  const scaling = activeItem?.settings?.scaling ?? '覆盖'
+  const flip = activeItem?.settings?.flip ?? '无'
   const objectFit = resolveWallpaperObjectFit(layout?.mode, scaling)
   const transform = flipToTransform(flip)
 
@@ -121,7 +132,7 @@ export function Wallpaper() {
       if (!v || activeItem?.type !== 'video') return
       clearPlayRetry()
       v.volume = Math.max(0, Math.min(1, volume / 100))
-      v.muted = volume === 0 || !videoStarted || attempt > 0
+      v.muted = !audioEnabled || volume === 0 || !videoStarted || attempt > 0
       v.playbackRate = speed
       v.play()
         .then(() => {
@@ -131,7 +142,7 @@ export function Wallpaper() {
           }
           if (generation !== playRequestGenerationRef.current) return
           setVideoStarted(true)
-          if (volume > 0) v.muted = false
+          if (audioEnabled && volume > 0) v.muted = false
         })
         .catch((e: DOMException) => {
           if (generation !== playRequestGenerationRef.current || pausedRef.current) return
@@ -144,7 +155,7 @@ export function Wallpaper() {
           )
         })
     },
-    [activeItem?.type, clearPlayRetry, speed, videoStarted, volume]
+    [activeItem?.type, audioEnabled, clearPlayRetry, speed, videoStarted, volume]
   )
 
   // ---- 壁纸抽帧：给组件毛玻璃用 ----
@@ -153,8 +164,9 @@ export function Wallpaper() {
 
   useEffect(() => {
     const c = document.createElement('canvas')
+    const aspect = Math.max(0.1, window.innerHeight / Math.max(1, window.innerWidth))
     c.width = 768
-    c.height = Math.max(1, Math.round(c.width * getWindowAspect()))
+    c.height = Math.max(1, Math.round(c.width * aspect))
     captureCanvasRef.current = c
     return () => {
       playRequestGenerationRef.current += 1
@@ -164,6 +176,7 @@ export function Wallpaper() {
   }, [clearPlayRetry])
 
   useEffect(() => {
+    setErr(null)
     setMediaReady(false)
     setVideoStarted(false)
     readyReportedRef.current = null
@@ -206,15 +219,31 @@ export function Wallpaper() {
       source = imgRef.current
     }
     if (!source) return
-    // The window can be resized after mount (display topology or layout mode
-    // change); keep the frame's aspect equal to the window it represents.
-    const height = Math.max(1, Math.round(c.width * getWindowAspect()))
-    if (c.height !== height) c.height = height
     try {
-      drawWallpaperFrame(ctx, source, c.width, c.height, objectFit, transform)
+      const viewportWidth = Math.max(1, window.innerWidth)
+      const viewportHeight = Math.max(1, window.innerHeight)
+      const expectedHeight = Math.max(1, Math.round(c.width * viewportHeight / viewportWidth))
+      if (c.height !== expectedHeight) c.height = expectedHeight
+      const surfaceBounds = layout?.displays[0]?.localBounds ?? {
+        x: 0,
+        y: 0,
+        width: viewportWidth,
+        height: viewportHeight,
+      }
+      drawWallpaperFrame(
+        ctx,
+        source,
+        c.width,
+        c.height,
+        viewportWidth,
+        viewportHeight,
+        surfaceBounds,
+        objectFit,
+        transform,
+      )
       const data = c.toDataURL('image/jpeg', 0.62)
       captureErrorKeyRef.current = null
-      window.wallpaperBridge?.sendFrame?.(data, source instanceof HTMLVideoElement ? 'video' : 'image')
+      window.wallpaperBridge?.sendFrame?.(data)
     } catch (error) {
       const errorKey = `${activeItem?.id ?? 'unknown'}:${error instanceof Error ? error.name : 'capture-error'}`
       if (captureErrorKeyRef.current !== errorKey) {
@@ -222,7 +251,7 @@ export function Wallpaper() {
         console.warn('[wallpaper] renderer frame capture failed; main fallback will take over:', error)
       }
     }
-  }, [activeItem?.id, objectFit, transform])
+  }, [activeItem?.id, layout, objectFit, transform])
 
   // 根据壁纸类型启动/停止抽帧
   const startCapture = useCallback(() => {
@@ -292,105 +321,72 @@ export function Wallpaper() {
   }, [activeItem, captureDemanded, captureFrame, capturePaused, startCapture, stopCapture])
 
   useEffect(() => {
+    let alive = true
+    let itemRevision = 0
     const off = window.wallpaperBridge?.onLoad((it) => {
       console.log('[wallpaper] onLoad', it)
-      setErr(null)
-      setMediaReady(false)
-      setVideoStarted(false)
+      itemRevision += 1
       setItem(it)
-      // 加载壁纸自带的设置
-      if (it.settings) {
-        if (it.settings.volume !== undefined) setVolume(it.settings.volume)
-        if (it.settings.speed !== undefined) setSpeed(it.settings.speed)
-        if (it.settings.scaling !== undefined) setScaling(it.settings.scaling)
-        if (it.settings.flip !== undefined) setFlip(it.settings.flip)
-      }
     })
-    const offLayout = window.wallpaperBridge?.onDisplayLayout?.(setLayout)
-    const offLayoutChanged = window.wallpaperBridge?.onDisplayLayoutChanged?.(() => {
-      window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
-        if (next) setLayout(next)
-      })
+    let layoutRevision = 0
+    const pullLayout = (): void => {
+      const revision = ++layoutRevision
+      void window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
+        if (alive && revision === layoutRevision) setLayout(next)
+      }).catch((error) => { if (alive) console.warn('[wallpaper] layout request failed:', error) })
+    }
+    const offLayout = window.wallpaperBridge?.onDisplayLayout?.((next) => {
+      layoutRevision += 1
+      setLayout(next)
     })
-    // 主动拉取当前壁纸（防止启动时错过 LOAD 事件）
-    window.wallpaperBridge?.getDisplayLayout?.().then((next) => {
-      if (next) setLayout(next)
-    })
+    const offLayoutChanged = window.wallpaperBridge?.onDisplayLayoutChanged?.(pullLayout)
+    // A delayed initial pull must not overwrite a newer pushed layout.
+    pullLayout()
+    const currentRevision = itemRevision
     window.wallpaperBridge?.getCurrent?.().then((state) => {
-      if (state?.current) {
-        console.log('[wallpaper] initial pull', state.current)
-        setErr(null)
-        setMediaReady(false)
-        setVideoStarted(false)
+      if (alive && currentRevision === itemRevision && state?.current) {
+        // Readiness resets only when the effective surface changes, not when a
+        // legacy primary snapshot arrives after an image or iframe has loaded.
         setItem(state.current)
-        const s = state.current.settings
-        if (s) {
-          if (s.volume !== undefined) setVolume(s.volume)
-          if (s.speed !== undefined) setSpeed(s.speed)
-          if (s.scaling !== undefined) setScaling(s.scaling)
-          if (s.flip !== undefined) setFlip(s.flip)
-        }
       }
-    })
+    }).catch((error) => { if (alive) console.warn('[wallpaper] current request failed:', error) })
     return () => {
+      alive = false
       off?.()
       offLayout?.()
       offLayoutChanged?.()
     }
   }, [])
 
-  // Per-monitor assignments can have their own media settings and may change
-  // without changing wallpaper.current in another monitor window. Every layout
-  // broadcast delivers a fresh item object, so only reset when the item or its
-  // saved settings actually changed; otherwise live slider values snap back.
-  const activeSettingsKey = activeItem
-    ? `${activeItem.id}\u0000${activeItem.source}\u0000${JSON.stringify(activeItem.settings ?? {})}`
-    : ''
-  const activeSettingsRef = useRef(activeItem?.settings)
-  activeSettingsRef.current = activeItem?.settings
-  useEffect(() => {
-    if (!activeSettingsKey) return
-    const settings = activeSettingsRef.current
-    setVolume(settings?.volume ?? 50)
-    setSpeed(settings?.speed ?? 1)
-    setScaling(settings?.scaling ?? '覆盖')
-    setFlip(settings?.flip ?? '无')
-  }, [activeSettingsKey])
-
-  // 监听实时设置更新
-  useEffect(() => {
-    const off = window.wallpaperBridge?.onSettingUpdate?.((key: string, value: unknown) => {
-      switch (key) {
-        case 'volume':
-          setVolume(value as number)
-          break
-        case 'speed':
-          setSpeed(value as number)
-          break
-        case 'scaling':
-          setScaling(value as string)
-          break
-        case 'flip':
-          setFlip(value as string)
-          break
-      }
-    })
-    return off
-  }, [])
-
   // 应用 volume 和 speed 到 video 元素
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = Math.max(0, Math.min(1, volume / 100))
-      videoRef.current.muted = volume === 0 || !videoStarted
+      videoRef.current.muted = !audioEnabled || volume === 0 || !videoStarted
     }
-  }, [activeItem, videoStarted, volume])
+  }, [activeItem, audioEnabled, videoStarted, volume])
 
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.playbackRate = speed
     }
   }, [activeItem, speed])
+
+  useEffect(() => {
+    const epoch = layout?.playback?.epochMs
+    if (epoch === undefined || activeItem?.type !== 'video' || capturePaused || (layout?.mode !== 'duplicate' && layout?.mode !== 'span')) return
+    const video = videoRef.current
+    if (!video) return
+    const synchronize = (): void => {
+      const expected = getSynchronizedVideoTime(epoch, Date.now(), video.duration, speed)
+      if (expected !== undefined && video.readyState >= 1 && needsVideoTimeCorrection(video.currentTime, expected, video.duration)) video.currentTime = expected
+    }
+    synchronize()
+    video.addEventListener('loadedmetadata', synchronize)
+    video.addEventListener('playing', synchronize)
+    const timer = setInterval(synchronize, 1000)
+    return () => { clearInterval(timer); video.removeEventListener('loadedmetadata', synchronize); video.removeEventListener('playing', synchronize) }
+  }, [activeItem?.source, activeItem?.type, capturePaused, layout?.mode, layout?.playback?.epochMs, speed])
 
   if (!activeItem) {
     return <div style={{ width: '100%', height: '100%', background: 'transparent' }} />
@@ -427,26 +423,26 @@ export function Wallpaper() {
 
   const surfaces = layout?.displays?.length
     ? layout.displays
-    : [{ displayId: -1, bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item: activeItem }]
+    : [{ displayId: -1, displayKey: 'fallback', bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, localBounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, item: activeItem }]
 
   const renderSurface = (surface: (typeof surfaces)[number], index: number) => {
     const surfaceItem = surface.item ?? activeItem
     const surfaceSrc = toAssetUrl(surfaceItem.source) ?? ''
     const surfaceMediaStyle = { ...mediaStyle, display: 'block' as const }
     if (surfaceItem.type === 'video') {
-      return <video key={`${surface.displayId}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
+      return <video key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? videoRef : undefined} crossOrigin="anonymous" src={surfaceSrc} autoPlay muted={!audioEnabled || volume === 0 || !videoStarted || index > 0} loop playsInline preload="auto" onLoadedMetadata={(event) => { event.currentTarget.playbackRate = speed; event.currentTarget.volume = Math.max(0, Math.min(1, volume / 100)) }} onLoadedData={() => { if (index === 0) { markMediaReady(); captureFrame(); playVideo() } }} onCanPlay={() => { if (index === 0) { markMediaReady(); playVideo() } }} onPlaying={() => { if (index === 0) { markMediaReady(); setVideoStarted(true) } }} onError={() => { if (index === 0) { setErr(`video 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} />
     }
     if (surfaceItem.type === 'image') {
-      return <img key={`${surface.displayId}:${surfaceItem.source}`} ref={index === 0 ? imgRef : undefined} crossOrigin="anonymous" src={surfaceSrc} onLoad={() => { if (index === 0) { markMediaReady(); captureFrame() } }} onError={() => { if (index === 0) { setErr(`image 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} alt="" />
+      return <img key={`${surface.displayKey}:${surfaceItem.source}`} ref={index === 0 ? imgRef : undefined} crossOrigin="anonymous" src={surfaceSrc} onLoad={() => { if (index === 0) { markMediaReady(); captureFrame() } }} onError={() => { if (index === 0) { setErr(`image 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%' }} alt="" />
     }
     if (surfaceItem.type === 'web') {
-      return <iframe key={`${surface.displayId}:${surfaceItem.source}`} src={surfaceSrc} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
+      return <iframe key={`${surface.displayKey}:${surfaceItem.source}`} sandbox="allow-scripts allow-same-origin" src={surfaceItem.webUrl} onLoad={index === 0 ? markMediaReady : undefined} onError={() => { if (index === 0) { setErr(`iframe 加载失败 (${surfaceItem.source})`); markMediaReady() } }} style={{ ...surfaceMediaStyle, width: '100%', height: '100%', border: 0 }} title="壁纸" />
     }
     return null
   }
 
   return <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'transparent' }}>
-    {surfaces.map((surface, index) => <div key={`${surface.displayId}:${surface.localBounds.x}:${surface.localBounds.y}`} style={{ position: 'absolute', left: surface.localBounds.x, top: surface.localBounds.y, width: surface.localBounds.width, height: surface.localBounds.height, overflow: 'hidden' }}>{renderSurface(surface, index)}</div>)}
+    {surfaces.map((surface, index) => <div key={`${surface.displayKey}:${surface.localBounds.x}:${surface.localBounds.y}`} style={{ position: 'absolute', left: surface.localBounds.x, top: surface.localBounds.y, width: surface.localBounds.width, height: surface.localBounds.height, overflow: 'hidden' }}>{renderSurface(surface, index)}</div>)}
     {errorOverlay}
   </div>
 }

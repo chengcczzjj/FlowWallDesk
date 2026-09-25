@@ -1,13 +1,13 @@
 # FlowWallDesk UI Demo — 开发指南
 
-> 给大模型看的上下文文档。新开窗口时把此文件内容贴到第一条 prompt 即可。
+> 历史原型指南，约束范围仅为 `TempFile/demo/` 对应原型。开发智能体仍先读 [AGENTS.md](../../AGENTS.md)；此处的 WinUI 迁移记录不代表当前 Electron/React 工程路线。只在修改原型时按需读取，不必整篇注入新会话。
 
 ---
 
 ## 项目简介
 
 FlowWallDesk 是一个 Windows 桌面动态壁纸应用（从 Lively Wallpaper 重构而来）。
-为了加速 UI 迭代，我用 HTML/CSS/JS 做了一个完整的 UI 原型，改好后会迁移回 WinUI 3 XAML。
+这里保留 HTML/CSS/JS UI 原型及原 WinUI 3 XAML 对照。当前正式工程使用 Electron/React；旧 XAML 迁移计划仅作历史参考，实际方向见 [项目状态](../文档资料/project-status.md)。
 
 ## 文件结构
 
@@ -96,9 +96,9 @@ TempFile/demo/
 
 ## 开发规则
 
-1. **只改这三个文件**：`index.html`、`styles.css`、`app.js`
+1. **根原型 UI 通常只改三个文件**：`index.html`、`styles.css`、`app.js`；维护指南/日志或用户明确指定的其他原型文件时按任务范围修改，不将本条套到 `src/` 或 demo 的其他独立子项目。
 2. **不要动 baseline 文件**：`*.baseline.*` 是基线快照，用于迁移时 diff
-3. **每轮改完后**：在 `CHANGELOG.md` 末尾追加一条变更记录，格式如下：
+3. **有实质原型 UI 变化时**：在 `CHANGELOG.md` 末尾追加原型变更；仅维护文档不强制记原型日志，也不把同一明细复制进全局开发日志。格式如下：
    ```
    ## YYYY-MM-DD 第N轮
    - 【新增】描述（对应页面/组件）
@@ -111,10 +111,10 @@ TempFile/demo/
 5. **图标用 Unicode**：`<span class="icon">&#xE713;</span>`，不要用图片代替
 6. **不要引入外部框架**（React/Vue/Tailwind）— 保持原生 HTML/CSS/JS
 
-## 迁移到 WinUI 时的对照
+## 历史 WinUI 对照（非当前开发要求）
 
 `mapping.json` 记录了每个 HTML 元素对应的 XAML 文件路径。
-改完 demo 后，回到 WinUI 项目时：
+仅当用户明确要求处理原 WinUI 项目时参考：
 1. 看 `CHANGELOG.md` 知道改了什么
 2. 看 `mapping.json` 知道改哪个 XAML 文件
 3. diff `index.html` vs `index.baseline.html` 查漏补缺

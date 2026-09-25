@@ -20,6 +20,7 @@ import type {
   WallpaperResourceProgress,
 } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
+import { getDisplayAssignment } from '@shared/wallpaper-display-layout'
 import { WallpaperOwnerDialog } from '../components/WallpaperOwnerDialog'
 
 const ONLINE_TYPE_LABEL: Record<string, string> = {
@@ -85,8 +86,11 @@ export function OnlineWallpaperPage({
       ])
       setCatalog(nextCatalog)
       setLocalItems(nextLocal)
-      setCurrentId(typeof wallpaperTarget === 'number'
-        ? displaySettings.assignments[String(wallpaperTarget)] ?? current?.current?.id
+      const targetDisplay = typeof wallpaperTarget === 'number'
+        ? displaySettings.displays.find((display) => display.id === wallpaperTarget)
+        : undefined
+      setCurrentId(targetDisplay
+        ? getDisplayAssignment(displaySettings.assignments, targetDisplay) ?? current?.current?.id
         : current?.current?.id)
       setOwnerStatus(owner)
     } catch (error) {

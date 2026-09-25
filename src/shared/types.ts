@@ -8,6 +8,8 @@ export interface WallpaperItem {
   source: string
   /** 类型：video / image / web */
   type: 'video' | 'image' | 'web'
+  /** Runtime-only isolated URL for a web wallpaper package. */
+  webUrl?: string
   /** 预览图（可选）*/
   preview?: string
   /** 原始 FlowWallDeskInfo.json 的额外字段 */
@@ -43,17 +45,24 @@ export interface DisplayBounds {
 
 export interface DisplayDescriptor {
   id: number
+  /** Stable OS-backed key used for persisted wallpaper and widget assignment. */
+  key: string
   label: string
   /** Windows/Electron reported monitor model name when available. */
   name?: string
+  /** Win32 monitor device name, for example \\.\DISPLAY1. */
+  deviceName?: string
   primary: boolean
   bounds: DisplayBounds
+  /** Physical-pixel monitor rectangle used after attaching a WS_CHILD window. */
+  nativeBounds?: DisplayBounds
   workArea: DisplayBounds
   scaleFactor: number
 }
 
 export interface WallpaperDisplaySegment {
   displayId: number
+  displayKey: string
   bounds: DisplayBounds
   localBounds: DisplayBounds
   item: WallpaperItem
@@ -63,6 +72,14 @@ export interface WallpaperDisplayLayout {
   mode: WallpaperDisplayMode
   virtualBounds: DisplayBounds
   displays: WallpaperDisplaySegment[]
+  playback?: { epochMs: number; audioEnabled: boolean }
+}
+
+/** One monitor-local wallpaper snapshot used by transparent glass widgets. */
+export interface WallpaperFramePayload {
+  displayKey: string
+  bounds: DisplayBounds
+  data: string
 }
 
 export interface WallpaperDisplaySettings {
@@ -185,8 +202,10 @@ export interface WidgetInstance {
   config?: Record<string, unknown>
   /** Explicit sibling stacking order; larger values render above smaller ones. */
   stackOrder?: number
-  /** Optional Windows display id for future per-screen widget pinning. */
+  /** Current Electron display id; refreshed from displayKey after topology changes. */
   displayId?: number
+  /** Stable display binding. x/y are local to this display when present. */
+  displayKey?: string
 }
 
 export type TodoTaskCategory = 'work' | 'study' | 'life' | 'health' | 'other'
@@ -247,18 +266,6 @@ export interface TodoWidgetConfig {
 export interface CanvasOcclusionState {
   occluded: boolean
   cursor: { x: number; y: number }
-}
-
-/** One wallpaper window's frame, keyed by its native window target (`display:<id>` or `span`). */
-export interface WallpaperFramePayload {
-  key: string
-  data: string
-}
-
-/** Where a wallpaper window's frames sit inside the transparent canvas, in canvas client pixels. */
-export interface WallpaperFrameSource {
-  key: string
-  bounds: DisplayBounds
 }
 
 export interface NativeDockClickEvent {

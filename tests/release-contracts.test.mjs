@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.1.10')
+  assert.equal(packageJson.version, '1.1.12')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -165,12 +165,8 @@ test('frosted glass frame updates avoid React commits without changing the visua
   const glassSource = await readFile(new URL('../src/renderer/widgets/FrostedGlassBackground.tsx', import.meta.url), 'utf8')
 
   assert.doesNotMatch(glassSource, /useSyncExternalStore/)
-  // One imperatively updated layer per wallpaper window (multi-monitor alignment).
-  assert.match(glassSource, /subscribeWallpaperFrame\(frameKey, applyLatestFrame\)/)
+  assert.match(glassSource, /subscribeWallpaperFrame\(applyLatestFrame\)/)
   assert.match(glassSource, /image\.src = frame/)
-  assert.match(glassSource, /left=\{source\.bounds\.x - pos\.x\}/)
-  assert.doesNotMatch(glassSource, /window\.screenX/)
-  assert.match(frameStoreSource, /export function setWallpaperFrameSources/)
   assert.match(frameStoreSource, /frame === activeSourceFrame/)
   assert.match(frameStoreSource, /frame === lastProcessedSourceFrame/)
   assert.match(frameStoreSource, /canvas\.width !== bitmap\.width/)

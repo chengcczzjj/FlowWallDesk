@@ -14,7 +14,7 @@ import {
   estimateGeneratedWidgetHeight,
   getReadableGeneratedAccent,
 } from '../src/shared/generated-widget.ts'
-import { positionAtAnchor } from '../src/shared/widget-display-fit.ts'
+import { positionAtAnchor } from '../src/shared/widget-anchor.ts'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 
@@ -104,11 +104,12 @@ test('anchors place widgets inside the work area with a consistent margin', () =
 })
 
 test('agent widget tools: layout tool, validated edits and follow-up routing', async () => {
-  const [widgetTools, router, chatService, manifest] = await Promise.all([
+  const [widgetTools, router, chatService, manifest, widgetIpc] = await Promise.all([
     read('src/main/memory/tools/definitions/widgets.ts'),
     read('src/main/memory/tools/toolRouter.ts'),
     read('src/main/memory/chat/chatService.ts'),
     read('src/shared/tool-manifest.ts'),
+    read('src/main/ipc/widgetIpc.ts'),
   ])
   assert.match(manifest, /name: 'arrange_widget', category: 'widget'/)
   assert.match(manifest, /name: 'update_generated_widget', category: 'widget'/)
@@ -120,4 +121,7 @@ test('agent widget tools: layout tool, validated edits and follow-up routing', a
   assert.doesNotMatch(widgetTools, /config: widget\.config \?\? \{\}/)
   assert.match(router, /recentlyUsedCategory\(params\.recentToolNames, 'widget'\)/)
   assert.match(chatService, /decideToolRoute\(\{ text, workspace, recentToolNames \}\)/)
+  // Layout edits stay on the widget's own monitor, in the display-local space widgets are stored in.
+  assert.match(widgetIpc, /export function arrangeWidgetForTool[\s\S]*getWidgetDisplayContext\(target\)[\s\S]*positionAtAnchor\(params\.anchor, layoutSize, context\.workArea\)/)
+  assert.match(widgetIpc, /function placeWidgetOnDisplay[\s\S]*getWidgetsForDisplay\(list, context\.display\)/)
 })

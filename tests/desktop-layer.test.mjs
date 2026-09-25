@@ -9,33 +9,6 @@ import {
   sanitizeCanvasHitRegions,
   shouldIgnoreCanvasMouse,
 } from '../src/shared/canvas-hit-test.ts'
-import {
-  clampRectPartiallyIntoArea,
-  fitWidgetsIntoDisplays,
-  isRectReachable,
-  pickDisplayForRect,
-} from '../src/shared/widget-display-fit.ts'
-import {
-  getWallpaperFrame,
-  getWallpaperFrameSources,
-  setWallpaperFrameSources,
-  subscribeWallpaperFrameSources,
-} from '../src/renderer/canvas/wallpaperFrameStore.ts'
-
-// Secondary 1080p monitor to the left of a taller primary, offset downwards.
-// Canvas coordinates: union origin is (-1920, 0) in screen space.
-const displays = [
-  {
-    primary: true,
-    bounds: { x: 1920, y: 0, width: 2560, height: 1440 },
-    workArea: { x: 1920, y: 0, width: 2560, height: 1392 },
-  },
-  {
-    primary: false,
-    bounds: { x: 0, y: 180, width: 1920, height: 1080 },
-    workArea: { x: 0, y: 180, width: 1920, height: 1040 },
-  },
-]
 
 test('renderer hit regions are validated before they route native input', () => {
   const region = { id: 'note-1', type: 'todo-board', x: 10, y: 20, width: 220, height: 190, stackOrder: 3 }
@@ -69,60 +42,6 @@ test('widgets covered by another window never make the canvas capture the mouse'
   assert.equal(shouldIgnoreCanvasMouse({ ...base, cursorCovered: true, editing: true }), false)
 })
 
-test('widgets are assigned to the monitor under their centre, not the union rectangle', () => {
-  assert.equal(pickDisplayForRect({ x: 2000, y: 100, width: 200, height: 200 }, displays), displays[0])
-  assert.equal(pickDisplayForRect({ x: 1800, y: 400, width: 200, height: 200 }, displays), displays[1])
-  // Dead zone above the offset secondary monitor belongs to the nearest monitor.
-  assert.equal(pickDisplayForRect({ x: 200, y: 0, width: 100, height: 60 }, displays), displays[1])
-  assert.equal(isRectReachable({ x: 200, y: 0, width: 100, height: 60 }, displays), false)
-  assert.equal(isRectReachable({ x: 1900, y: 400, width: 200, height: 200 }, displays), true)
-})
-
-test('off-screen widgets are pulled back onto the nearest monitor work area', () => {
-  const widgets = [
-    { id: 'visible', x: 2100, y: 60, width: 320, height: 160 },
-    { id: 'dead-zone', x: 300, y: 0, width: 320, height: 120 },
-    { id: 'removed-monitor', x: 5200, y: 300, width: 320, height: 160 },
-  ]
-  const { widgets: fitted, movedIds } = fitWidgetsIntoDisplays(widgets, displays, { edgePadding: 24 })
-  assert.deepEqual(movedIds, ['dead-zone', 'removed-monitor'])
-  assert.deepEqual(fitted[0], widgets[0])
-  assert.deepEqual({ x: fitted[1].x, y: fitted[1].y }, { x: 300, y: 204 })
-  assert.deepEqual({ x: fitted[2].x, y: fitted[2].y }, { x: 4480 - 24 - 320, y: 300 })
-})
-
-test('free-form sticky notes may hang over a monitor edge but stay grabbable', () => {
-  const area = displays[0].bounds
-  assert.deepEqual(
-    clampRectPartiallyIntoArea({ x: 4470, y: -300, width: 220, height: 190 }, area, 42),
-    { x: 4480 - 42, y: -190 + 42 },
-  )
-  assert.deepEqual(clampRectPartiallyIntoArea({ x: 2000, y: 200, width: 220, height: 190 }, area, 42), { x: 2000, y: 200 })
-})
-
-test('wallpaper frame sources replace stale monitors and drop their frames', () => {
-  let notified = 0
-  const unsubscribe = subscribeWallpaperFrameSources(() => { notified += 1 })
-  setWallpaperFrameSources([
-    { key: 'display:1', bounds: { x: 1920, y: 0, width: 2560, height: 1440 } },
-    { key: 'display:2', bounds: { x: 0, y: 180, width: 1920, height: 1080 } },
-    { key: 'broken', bounds: { x: 0, y: 0, width: 0, height: 10 } },
-  ])
-  assert.deepEqual(getWallpaperFrameSources().map((source) => source.key), ['display:1', 'display:2'])
-  assert.equal(notified, 1)
-  // Identical updates do not notify listeners again.
-  setWallpaperFrameSources([
-    { key: 'display:1', bounds: { x: 1920, y: 0, width: 2560, height: 1440 } },
-    { key: 'display:2', bounds: { x: 0, y: 180, width: 1920, height: 1080 } },
-  ])
-  assert.equal(notified, 1)
-  setWallpaperFrameSources([{ key: 'span', bounds: { x: 0, y: 0, width: 4480, height: 1440 } }])
-  assert.deepEqual(getWallpaperFrameSources().map((source) => source.key), ['span'])
-  assert.equal(getWallpaperFrame('display:1'), null)
-  assert.equal(notified, 2)
-  unsubscribe()
-})
-
 test('display topology preview keeps every monitor at its real aspect ratio', async () => {
   const { layoutDisplayTopology, formatDisplayResolution, getDisplayModeOption } = await import('../src/shared/display-topology.ts')
   const single = layoutDisplayTopology([{ id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }], { width: 800, height: 220 }, 18)
@@ -145,7 +64,7 @@ test('display topology preview keeps every monitor at its real aspect ratio', as
   assert.equal(getDisplayModeOption('span').label, '跨屏延展')
 })
 
-test('desktop layer contracts: covered widgets, DOM hit regions, quiet z-order and per-window glass', async () => {
+test('desktop layer contracts: covered widgets, DOM hit regions and quiet z-order', async () => {
   const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
   const [canvasWindow, mainIndex, wallpaperIpc, widgetIpc, canvasRenderer, canvasCss] = await Promise.all([
     read('src/main/windows/canvasWindow.ts'),
@@ -157,7 +76,10 @@ test('desktop layer contracts: covered widgets, DOM hit regions, quiet z-order a
   ])
 
   // Native hit testing uses what the renderer painted, and ignores widgets another window covers.
-  assert.match(canvasWindow, /findInteractiveWidgetAtPoint\(cursor, displayBounds, getCanvasHitCandidates\(\)\)/)
+  assert.match(canvasWindow, /findInteractiveWidgetAtPoint\(cursor, displayBounds, getCanvasHitCandidates\(displayBounds\)\)/)
+  // Until the renderer reports, stored display-local widgets are projected into canvas space.
+  assert.match(canvasWindow, /return rendererHitRegions \?\? materializeWidgetsForCanvas\(/)
+  assert.match(widgetIpc, /IPC\.CANVAS_SET_HIT_REGIONS[\s\S]*sanitizeCanvasHitRegions\(regions\)[\s\S]*setCanvasHitRegions\(_e\.sender\.id, sanitized\)/)
   assert.match(canvasWindow, /cursorCovered: cursorSurfaceCovered/)
   assert.match(canvasWindow, /const covered = !rendererPointerActive && isCoveredCursorSurface\(widgetSurface\)/)
   assert.match(canvasWindow, /export function setCanvasMousePassthrough[\s\S]*isCoveredCursorSurface\(inspectNativeCursorSurface\(\)\)/)
@@ -174,19 +96,4 @@ test('desktop layer contracts: covered widgets, DOM hit regions, quiet z-order a
     wallpaperIpc.indexOf('IPC.WALLPAPER_SAVE_SETTINGS'),
   )
   assert.doesNotMatch(applyHandler, /refreshCanvasZOrder\(\)/)
-  // Live wallpaper setting changes are not immediately overwritten by a stale layout.
-  const updateSettingHandler = wallpaperIpc.slice(
-    wallpaperIpc.indexOf('IPC.WALLPAPER_UPDATE_SETTING,'),
-    wallpaperIpc.indexOf('IPC.WALLPAPER_PICK_FILE'),
-  )
-  assert.doesNotMatch(updateSettingHandler, /broadcastWallpaperDisplayLayout\(\)/)
-
-  // Glass frames are relayed per wallpaper window; static images are not re-captured forever.
-  assert.match(wallpaperIpc, /safeSendToWindow\(getCanvasWindow\(\), IPC\.WALLPAPER_FRAME, \{ key: target\.key, data \}\)/)
-  assert.match(wallpaperIpc, /if \(state\?\.mediaType === 'image'\) return false/)
-
-  // Widget configs are stored relative to the primary monitor; the Dock sits on the primary work area.
-  assert.match(widgetIpc, /coordinateSpace: WIDGET_CONFIG_COORDINATE_SPACE/)
-  assert.match(widgetIpc, /function getDockPlacement[\s\S]*getPrimaryWorkArea\(\)/)
-  assert.match(widgetIpc, /ensureWidgetCoordinateOrigin\(\{ fit: 'none', sync: false \}\)/)
 })

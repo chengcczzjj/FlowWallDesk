@@ -20,6 +20,7 @@ import {
   type NormalizedWidgetConfigPatch,
 } from '@shared/widget-config-spec'
 import { normalizeStockSymbols } from '@shared/stock-symbols'
+import { WIDGET_ANCHORS } from '@shared/widget-anchor'
 import {
   TODO_NOTE_COLORS,
   TODO_NOTE_PAPER_STYLES,
@@ -42,7 +43,6 @@ import {
   updateWidgetForTool,
 } from '../../../ipc/widgetIpc'
 
-const ANCHORS = ['top-left', 'top-center', 'top-right', 'center-left', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'] as const
 const PERSISTENT_WIDGET_TYPES = new Set(['desktop-icons-box', 'desktop-icons-horizontal', 'desktop-icons-adaptive', 'desktop-icons-dock'])
 
 /**
@@ -141,7 +141,7 @@ export const addWidgetTool = tool({
   inputSchema: z.object({
     type: z.enum(WIDGET_TYPES).describe('组件类型。待办清单/任务便笺用 todo-board；纯文本便签用 text；股票用 stocks；天气用 weather；日历用 calendar。'),
     preset: z.string().max(60).optional().describe('组件能力列表中的预设 id，例如 clock 的 minimal-light。'),
-    anchor: z.enum(ANCHORS).optional().describe('放在主显示器的哪个位置；省略时自动寻找整齐的空位。'),
+    anchor: z.enum(WIDGET_ANCHORS).optional().describe('放在主显示器的哪个位置；省略时自动寻找整齐的空位。'),
     config: z.record(z.string(), z.unknown()).optional().describe('额外设置，会覆盖预设。例如 text: { text, author }；weather: { style: "glass" }；news: { source, maxItems }。'),
     stockSymbols: z.array(z.object({
       code: z.string().regex(/^\d{6}$/).describe('六位 A 股或指数代码，例如 600519。'),
@@ -391,7 +391,7 @@ export const createGeneratedWidgetTool = tool({
     accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#ffb86b'),
     width: z.number().min(GENERATED_WIDGET_MIN_SIZE.width).max(GENERATED_WIDGET_MAX_SIZE.width).default(340).describe('卡片宽度，常用 300–420。'),
     height: z.number().min(GENERATED_WIDGET_MIN_SIZE.height).max(GENERATED_WIDGET_MAX_SIZE.height).optional().describe('通常省略，按内容自动计算高度，避免内容被裁切或留白过多。'),
-    anchor: z.enum(ANCHORS).optional().describe('放在主显示器的哪个位置；省略时自动寻找整齐的空位。'),
+    anchor: z.enum(WIDGET_ANCHORS).optional().describe('放在主显示器的哪个位置；省略时自动寻找整齐的空位。'),
     blocks: z.array(generatedBlockSchema).min(1).max(12).describe('从上到下显示的内容积木。清单设置 interactive=true 后可以直接在桌面勾选。'),
   }),
   execute: async ({ name, title, subtitle, theme, accent, width, height, anchor, blocks }) => {
@@ -460,9 +460,9 @@ export const arrangeWidgetTool = tool({
   inputSchema: z.object({
     id: z.string().optional().describe('组件 id，先用 list_widgets 获取。'),
     type: z.enum(WIDGET_TYPES).optional().describe('没有 id 且该类组件只有一个时可用类型定位。'),
-    anchor: z.enum(ANCHORS).optional().describe('移动到组件所在显示器的哪个位置。'),
-    x: z.number().min(-32_768).max(32_768).optional().describe('画布坐标 x；一般用 anchor 代替。'),
-    y: z.number().min(-32_768).max(32_768).optional().describe('画布坐标 y；一般用 anchor 代替。'),
+    anchor: z.enum(WIDGET_ANCHORS).optional().describe('移动到组件所在显示器的哪个位置。'),
+    x: z.number().min(-32_768).max(32_768).optional().describe('以组件所在显示器左上角为原点的 x（像素）；一般用 anchor 代替。'),
+    y: z.number().min(-32_768).max(32_768).optional().describe('以组件所在显示器左上角为原点的 y（像素）；一般用 anchor 代替。'),
     scale: z.number().min(0.5).max(3).optional().describe('相对当前大小的缩放倍数，例如 1.2 放大 20%。'),
     width: z.number().min(40).max(1400).optional().describe('目标宽度（仅便利贴、音频可视化、生成式组件等可自由缩放的组件）。'),
     height: z.number().min(40).max(1000).optional().describe('目标高度。'),
