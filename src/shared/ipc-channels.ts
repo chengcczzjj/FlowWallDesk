@@ -82,6 +82,8 @@ export const IPC = {
   WIDGET_SYNC: 'widget:sync',
   DESKTOP_SCENE_PREVIEW_SHOW: 'desktop-scene:preview-show',
   DESKTOP_SCENE_PREVIEW_CLEAR: 'desktop-scene:preview-clear',
+  // 主进程 → 画布：桌宠反应、白噪音播放等不落盘的组件指令
+  WIDGET_COMMAND: 'widget:command',
   // 画布 → 主进程：鼠标穿透切换
   CANVAS_SET_IGNORE_MOUSE: 'canvas:set-ignore-mouse',
   // 画布 → 主进程：指针手势生命周期，防止拖拽中途穿透
@@ -139,6 +141,23 @@ export const IPC = {
   CHAT_SAVE_PERSONA: 'chat:save-persona',
   CHAT_GET_PERSONA: 'chat:get-persona',
   CHAT_LIST_MEMORIES: 'chat:list-memories',
+  // 主进程 → 聊天界面：桌面动作需要用户点头（工具调用在此挂起等待）
+  CHAT_ACTION_CONFIRM_REQUEST: 'chat:action-confirm-request',
+  CHAT_ACTION_CONFIRM_RESOLVE: 'chat:action-confirm-resolve',
+  // 撤回某条桌面操作回执
+  CHAT_ACTION_UNDO: 'chat:action-undo',
+  // 用户显式选择的附件：登记一次性读取授权
+  CHAT_ATTACH_FILES: 'chat:attach-files',
+  CHAT_DESKTOP_SCENE_CLEAR_PREVIEW: 'chat:desktop-scene-clear-preview',
+  CHAT_GET_QUICK_CONVERSATION: 'chat:get-quick-conversation',
+
+  // 桌面快捷对话窗口 / 伴侣设置
+  QUICK_CHAT_TOGGLE: 'quick-chat:toggle',
+  QUICK_CHAT_HIDE: 'quick-chat:hide',
+  QUICK_CHAT_OPEN_MAIN: 'quick-chat:open-main',
+  QUICK_CHAT_SHOWN: 'quick-chat:shown',
+  COMPANION_GET_SETTINGS: 'companion:get-settings',
+  COMPANION_SET_SETTINGS: 'companion:set-settings',
 
   // AgentRun
   AGENT_RUN_LIST_BY_THREAD: 'agent-run:list-by-thread',

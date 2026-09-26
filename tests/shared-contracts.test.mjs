@@ -110,6 +110,7 @@ test('tool manifest is unique and owns generated-widget routing metadata', () =>
       tracksAgentRun: false,
       label: '生成桌面组件',
       compactLabel: '组件',
+      journal: true,
     },
   )
 })

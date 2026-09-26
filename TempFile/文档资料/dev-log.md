@@ -5,6 +5,27 @@
 
 历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
 
+## [2026-09-26] 伴侣智能体桌面控制迭代：常驻工具、确认挂起、回执撤回与快捷对话
+
+**变更摘要**: 按调研方案重做聊天智能体的桌面控制底座并补齐能力：桌面类工具每轮常驻，确认由界面挂起执行，桌面改动有回执和撤回；新增壁纸、应用、系统、白噪音、桌宠、提醒、桌面模式、附件工具，以及全局热键/桌宠唤出的快捷对话。设计见 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md)。
+
+**涉及模块**:
+- `src/main/memory/tools/toolRouter.ts` / `chat/toolExecution.ts` / `chat/chatService.ts` / `routing/contextPacker.ts`: 常驻工具与固定提示前缀；策略→确认→快照→执行→回执的托管执行；时间/记忆/桌面现状/最近操作放尾部；图片附件直接给看图模型。
+- `src/main/memory/desktop/*` / `tools/definitions/desktop-control.ts` / `ipc/wallpaperIpc.ts` / `ipc/widgetIpc.ts`: 桌面状态差异与撤回、确认策略与挂起、应用索引、系统控制、提醒调度、桌面模式、附件授权；壁纸/组件导出 `*ForTool` 复用原队列。
+- `src/renderer/quick-chat/` / `windows/quickChatWindow.ts` / `ipc/companionIpc.ts` / `preload/*`: 独立 quick-chat 窗口角色、全局热键、托盘入口；ChatPage 与快捷对话共用 Markdown、确认卡、回执、附件组件；桌宠与白噪音接收画布组件指令。
+- 修复：`open_url`/剪贴板/记忆工具 `success` 口径导致失败显示为已处理；删除 Dock 的确认改由界面执行；写操作后仍命中缓存的只读结果；天气工具描述乱码；审批卡把 critical 显示为中风险；场景模板无效桌宠状态。
+
+**验证结果**:
+- Linux 容器：`npm test` 类型检查、lint 通过，134 项测试 133 通过；失败项为基线即失败的 Windows 路径分隔符用例。新增 `tests/companion-agent.test.mjs` 17 项（含 87 句指令可达性评测）。
+- `npm run build:check` 成功；`ELECTRON_DISABLE_SANDBOX=1`（容器以 root 运行）下 Electron 冒烟四组通过，含新增 quick-chat 组。
+- 临时脚本 + 本地伪 OpenAI 兼容模型 + Playwright 驱动真实应用：快捷对话添加组件→回执→撤回、截屏确认卡→同意后原参数执行、下一轮摘要含已撤回、交接主界面后拒绝确认返回 declined，均通过；未提交该脚本。
+- 未用真实模型跑 `eval:companion`（容器无 API Key）；未在 Windows 实机验证热键、`SendInput`、应用唤起、通知与多屏落位。
+
+**经验关联**: L15（新增），L09。
+**提交意图**: `feat(agent): companion desktop control with confirmations, undo and quick chat`
+
+---
+
 ## [2026-09-26] 发布 1.1.13 并将开发收拢到 main
 
 **变更摘要**: 按用户授权把工作分支快进合并到 main（不改写历史），此后直接在 main 上开发；在 main 上手动运行 Windows 发布流程完成 1.1.13 远端发布。
@@ -229,24 +250,5 @@
 - `npm.cmd test` 通过全部 57 项测试；`npm.cmd run build:check` 成功。
 
 **Git Commit**: 已提交 — `fix(wallpaper): restore multi-monitor wallpaper modes`
-
----
-
-## [2026-08-30 20:15] 发布 1.1.9 便利贴即时置顶与画布性能优化版
-
-**变更摘要**: 将便利贴置顶触发提前到 `pointerdown` 捕获阶段，并以显式层级持久化和自适应原生命中轮询优化重叠交互与空闲性能。
-
-**涉及模块**:
-- `package.json` / `package-lock.json` / `doc/发布说明/1.1.9.md` / `tests/release-contracts.test.mjs`: 升级 1.1.9 版本元数据、发布说明和自动更新契约。
-- `src/renderer/canvas/Canvas.tsx`: 使用捕获阶段 + 同步提交确保按下即置顶。
-- `src/shared/widget-order.ts` / `src/shared/canvas-hit-test.ts` / `src/main/ipc/widgetIpc.ts` / `src/main/windows/canvasWindow.ts`: 显式层级、置顶 IPC、按视觉层级命中和自适应轮询。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 54 项测试；`npm.cmd run build:win` 成功生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`。
-- 安装包 `dist/lingyue-desk-1.1.9-setup.exe`：369,418,473 bytes，SHA-256 `E4F2D75682E3AE67935D0FAE5A91AC0AD78B0475D8961985E899D99C4110F92E`，electron-updater SHA-512 `QOh5kbqq5CNzz1E+a0ZiooG5Aat3NNGM1MVv2wjP8pNal3aY4MWYaK8mQRw7gQrZbkQc7TccTSaGgeZxpvkYFg==`。
-- 本机已停止旧进程并静默覆盖安装 1.1.9；EXE 版本、运行目录和卸载注册表入口更新，8 个组件、2 个全局图标组件、当前壁纸及组件层级数据保留，安装后进程正常运行。
-- GitHub Release：`https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.9`（安装包、blockmap、`latest.yml` 已上传并校验远端大小与 SHA-256）。
-
-**Git Commit**: `99f6a1a chore(release): publish LingyueDesk 1.1.9`
 
 ---

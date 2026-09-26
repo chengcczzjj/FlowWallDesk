@@ -17,6 +17,7 @@ import type {
   WallpaperFramePayload,
 } from '@shared/types'
 import type { CanvasHitRegion } from '@shared/canvas-hit-test'
+import type { WidgetCommandEnvelope } from '@shared/widget-command'
 
 const api = {
   onSync: (cb: (list: WidgetInstance[]) => void): (() => void) => {
@@ -43,6 +44,16 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on(IPC.CANVAS_POINTER_RESET, handler)
     return () => ipcRenderer.off(IPC.CANVAS_POINTER_RESET, handler)
+  },
+  /** Pet reactions, white-noise playback and other transient widget commands from the companion. */
+  onWidgetCommand: (cb: (command: WidgetCommandEnvelope) => void): (() => void) => {
+    const handler = (_: unknown, command: WidgetCommandEnvelope) => cb(command)
+    ipcRenderer.on(IPC.WIDGET_COMMAND, handler)
+    return () => ipcRenderer.off(IPC.WIDGET_COMMAND, handler)
+  },
+  /** Clicking the desktop pet opens the quick chat. */
+  toggleQuickChat: (): void => {
+    ipcRenderer.send(IPC.QUICK_CHAT_TOGGLE)
   },
   getWidgets: (): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_LIST),
   addWidget: (w: WidgetInstance): Promise<WidgetInstance[]> => ipcRenderer.invoke(IPC.WIDGET_ADD, w),

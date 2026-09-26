@@ -6,6 +6,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react'
 import { COLOR_THEMES } from '../shared/constants'
 import { toRendererPublicUrl } from '@shared/asset-url'
+import { useWidgetCommands } from '../shared/widgetCommandBus'
 
 const SOUNDS = [
   { id: 'rain', icon: <CloudRain size={16} />, label: 'Rain', url: toRendererPublicUrl('audio/Water.WAV') },
@@ -47,6 +48,17 @@ export function WhiteNoiseWidget({ config }: WhiteNoiseWidgetProps) {
   useEffect(() => {
     if (volumeProp !== undefined && volumeProp !== volumeLevel) setVolumeLevel(volumeProp)
   }, [volumeLevel, volumeProp])
+
+  // The companion can start or stop the sound ("放点雨声") without touching stored config.
+  useWidgetCommands('whitenoise', (command) => {
+    if (command.command === 'pause') {
+      setIsPlaying(false)
+      return
+    }
+    if (command.sound && SOUNDS.some((sound) => sound.id === command.sound)) setActiveSound(command.sound)
+    if (command.volumeLevel && command.volumeLevel >= 1 && command.volumeLevel <= 3) setVolumeLevel(command.volumeLevel)
+    setIsPlaying(true)
+  })
 
   useEffect(() => {
     if (!audioRef.current) {

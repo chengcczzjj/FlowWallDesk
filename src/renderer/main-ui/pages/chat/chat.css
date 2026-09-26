@@ -3021,3 +3021,20 @@
   background: rgba(0, 0, 0, 0.06);
   margin: 3px 6px;
 }
+
+/* ─── Companion desktop actions ─── */
+.chat-action-confirm {
+  margin-bottom: 8px;
+}
+.chat-input__attachments {
+  padding: 8px 12px 0;
+}
+.chat-msg__bubble--rich .ly-md p:last-child,
+.chat-msg__bubble--rich .ly-md ul:last-child,
+.chat-msg__bubble--rich .ly-md ol:last-child {
+  margin-bottom: 0;
+}
+.chat-msg--user .ly-attachments {
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}

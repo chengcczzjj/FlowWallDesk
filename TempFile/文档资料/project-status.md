@@ -1,6 +1,6 @@
 # 灵月桌面 项目进展
 
-> 源码与容器验证：2026-09-25；最近本机安装验证：2026-09-05（1.1.12）。
+> 源码与容器验证：2026-09-26；最近本机安装验证：2026-09-05（1.1.12）。
 > 1.1.13 已于 09-26 由 GitHub Actions（windows-latest）构建并发布到 GitHub Release，远端资产与更新源已复核；源码已收拢到 main。尚未在 Windows 实机安装验收。
 > 状态依据现有源码与开发记录，不使用无验收口径的完成百分比；“已实现”不等于所有设备场景均已实测。
 
@@ -63,11 +63,12 @@ AI 伴侣优先：有形象、有温度、陪伴式对话、桌宠和轻量桌�
 | --- | --- | --- |
 | 新闻/股票服务 | 新闻源 codelife/weibo、东方财富行情、API 能力注册与缓存兜底 | 这里记录代码接入，不保证当前服务在线 |
 | 天气/位置/系统信息工具 | AI weather、城市级定位/可选精准定位、get_system_info 已接入；天气小组件已复用主进程服务 | 监控小组件尚未接入真实采集；精准定位取决于授权与设备可用性 |
-| 模型与流式聊天 | OpenAI 兼容/Gemini/DeepSeek profile、模型列表和连接测试；DeepSeek 专用 thinking/tool-call 续聊 | 新模型兼容性要实际验证，不仅替换名称 |
-| 人设与过程 UI | Persona、默认伴侣基调、工具前短句、textOffset 交错时间线、耗时和失败反馈 | 回复仍偏任务型；口吻、情绪识别、等待状态和自然收束需增强 |
+| 模型与流式聊天 | OpenAI 兼容/Gemini/DeepSeek profile、模型列表和连接测试；DeepSeek 专用 thinking/tool-call 续聊；按模型名判断能否看图（设置页可改），系统提示固定前缀在前、时间/记忆/桌面现状在尾部 | 新模型兼容性要实际验证，不仅替换名称；工具选择正确率需用 `npm.cmd run eval:companion` 对实际模型测量 |
+| 人设与过程 UI | Persona、默认伴侣基调、工具前短句、textOffset 交错时间线、耗时和失败反馈；回复按 Markdown 子集渲染，桌面改动显示回执条与一键撤回，需要确认的动作显示确认卡；真实附件（原生选择器授权） | 回复仍偏任务型；口吻、情绪识别需增强；重启后旧回执的撤回会提示过期 |
 | 长期记忆 | SQLite 迁移、关键词/语义混合检索、上下文预算、结构化归档和敏感度边界已接入 | 尚无完整记忆场景 E2E；设计中的管理/检索目标不自动算已实现 |
-| 轻量电脑控制 | 剪贴板、打开链接、搜索、受控文件读写等工具 | 继续围绕打开/搜索/整理小范围/简单生成收敛，避免默认进入复杂工作流 |
-| 桌面组件控制 | 声明式生成；设置按 [组件设置规格](../../src/shared/widget-config-spec.ts) 校验并返回可选值；预设/锚点添加、`arrange_widget` 移动缩放隐藏置顶（组件所在显示器本地工作区）；删除常驻组件需确认；AI 跨便笺增删改、撕下/恢复和周总结 | 新增组件设置时须同步规格与测试；撤销仍依赖桌面场景快照 |
+| 轻量电脑控制 | 剪贴板、打开链接、搜索；壁纸切换/设置/多屏模式/在线安装；开始菜单/桌面/Dock 应用搜索与打开；显示桌面、系统设置页白名单、常用文件夹、音量与媒体键、截屏（可看图或 OCR）；白噪音；提醒（一次/重复/天气早报/久坐/安静时段）。桌面类工具每轮常驻，打开应用与截屏由界面确认，设计见 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md) | 容器内已验证托管执行、确认、撤回与截屏链路；`SendInput`、开始菜单索引、应用唤起、通知需 Windows 实机验收 |
+| 桌面组件控制 | 声明式生成；设置按 [组件设置规格](../../src/shared/widget-config-spec.ts) 校验并返回可选值；预设/锚点添加、`arrange_widget` 移动缩放隐藏置顶（组件所在显示器本地工作区）；删除 Dock/图标收纳由界面确认；AI 跨便笺增删改、撕下/恢复和周总结；AI 的桌面改动按组件差异记录并可逐条/按轮撤回；用户桌面模式保存与切换 | 新增组件设置时须同步规格与测试；删除图标类组件不可自动撤回（涉及真实文件） |
+| 桌面快捷对话与桌宠联动 | 全局热键（默认 Ctrl+Alt+Space，可改/关闭）、点击桌宠或托盘打开独立 quick-chat 窗口；独立会话可交给主界面继续；收起后回复由桌宠气泡说出；桌宠跟随思考/检索/整理/出错阶段 | 隔离生产渲染器已验证发送、确认、撤回；热键冲突、窗口层级与多屏落位待 Windows 实机验收 |
 | 高级工作区 Agent | Planner、审批作用域、checkpoint、artifact、自动化终态、验证结构已有实现 | 作为高级辅助保留；不要把审批等待/失败标为完成 |
 | 自检/自修复 | 明确应用本体只读、运行时数据可修的设计边界 | 诊断 UI 与受控修复流程待补，不宣称已具备完整自修复 |
 
@@ -84,8 +85,9 @@ AI 伴侣优先：有形象、有温度、陪伴式对话、桌宠和轻量桌�
 - [ ] 完成 Audio 实时输入、QuickTools 功能、SysMonitor 真实数据；天气公网异常与长期运行实测。
 - [ ] 优化 Canvas 高频同步存储/原生拓扑查询，以及静态壁纸 watchdog 的重复 capturePage；保持输入/毛玻璃效果等价。
 - [ ] 增强伴侣回复、情绪反馈、等待状态、Q 版桌宠与行为联动。
-- [ ] AI 组件可视化编辑、复制、一键撤销；图标单项移回/拖出恢复体验。
-- [ ] 运行时自检/自修复诊断 UI，轻量电脑控制与轻提醒/轻跟进式自动化。
+- [ ] AI 组件可视化编辑、复制（AI 改动的撤回已由回执提供）；图标单项移回/拖出恢复体验。
+- [ ] 运行时自检/自修复诊断 UI。
+- [ ] 伴侣桌面控制 Windows 实机验收：快捷对话热键与窗口层级、开始菜单应用唤起、音量/媒体键、截屏与系统通知、提醒到点和安静时段；用实际模型跑 `npm.cmd run eval:companion`，工具选择正确率目标 ≥ 90%。
 - [ ] 1.1.13 Windows 实机安装验收：开应用/切输入法时组件不闪烁、指针不跳变，便利贴一次即可输入/拖动；已装 1.1.12 能自动下载并重启更新到 1.1.13。配置 Windows 代码签名。
 - [ ] 桌面图标导入测试依赖 Windows 路径分隔符，在 Linux 上失败；如需跨平台 CI 应改为平台无关断言。
 
@@ -100,5 +102,6 @@ AI 伴侣优先：有形象、有温度、陪伴式对话、桌宠和轻量桌�
 | 图标/便笺 | [DesktopIcons.tsx](../../src/renderer/widgets/DesktopIcons/DesktopIcons.tsx)、[TodoBoard.tsx](../../src/renderer/widgets/TodoBoard/TodoBoard.tsx) |
 | 像素桌宠 | [PixelPetPage.tsx](../../src/renderer/main-ui/pages/pet/PixelPetPage.tsx)、[pixel-pet.ts](../../src/renderer/shared/pixel-pet.ts)、[PixelPetCanvas.tsx](../../src/renderer/shared/PixelPetCanvas.tsx) |
 | 聊天 UI/IPC | [ChatPage.tsx](../../src/renderer/main-ui/pages/chat/ChatPage.tsx)、[chatIpc.ts](../../src/main/ipc/chatIpc.ts) |
+| 伴侣桌面控制/快捷对话 | [toolExecution.ts](../../src/main/memory/chat/toolExecution.ts)、[desktop-control.ts](../../src/main/memory/tools/definitions/desktop-control.ts)、[QuickChat.tsx](../../src/renderer/quick-chat/QuickChat.tsx) |
 
 更多代码与测试入口按知识索引/经验检索，不在状态页重复维护全量文件清单。

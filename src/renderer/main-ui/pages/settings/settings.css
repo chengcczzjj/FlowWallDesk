@@ -812,3 +812,37 @@
   text-decoration: underline;
   margin-left: 8px;
 }
+
+/* ── Companion settings ── */
+.settings-card__action--row {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 360px;
+}
+.settings-input {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-caption);
+}
+.settings-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-input:disabled {
+  opacity: 0.5;
+}
+.settings-input--shortcut {
+  width: 190px;
+}
+.settings-input--time {
+  width: 92px;
+}
+.settings-card__sep {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-caption);
+}

@@ -476,6 +476,73 @@ export async function getWallpaperDisplaySettings(): Promise<WallpaperDisplaySet
   }
 }
 
+async function applyWallpaperItem(item: WallpaperItem, target: WallpaperApplyTarget): Promise<void> {
+  const state = store.get('wallpaper')
+  const settings = store.get('wallpaperDisplay')
+  const plan = planWallpaperApplication({ target, mode: settings.mode, assignments: settings.assignments,
+    displays: getDisplayDescriptors(), currentId: state.current?.id, itemId: item.id })
+  await commitWallpaperDisplay({ ...settings, mode: plan.mode, assignments: plan.assignments },
+    plan.currentId === item.id ? item : state.current ?? item)
+  // No z-order refresh here: it briefly lifts the canvas to always-on-top,
+  // which flashed every widget above the user's apps. New wallpaper windows
+  // re-sync the canvas when they attach (WALLPAPER_READY).
+  resetWallpaperFrameWatchdog()
+  if (wallpaperFrameDemanded) startMainCapture()
+}
+
+// ─── AI companion helpers: same queue, validation and usage locks as the UI ───
+
+export function listWallpapersForTool(): Promise<WallpaperItem[]> {
+  return listAllWallpapers()
+}
+
+export function getWallpaperStateForTool(): { current?: WallpaperItem; mode: WallpaperDisplayMode; assignments: Record<string, string> } {
+  const settings = store.get('wallpaperDisplay')
+  return {
+    current: store.get('wallpaper')?.current,
+    mode: normalizeWallpaperDisplayMode(settings?.mode),
+    assignments: { ...(settings?.assignments ?? {}) },
+  }
+}
+
+export async function applyWallpaperForTool(wallpaperId: string, target: WallpaperApplyTarget = 'current'): Promise<{ ok: boolean; item?: WallpaperItem; error?: string }> {
+  return withWallpaperChange(async () => {
+    const item = (await listAllWallpapers()).find((entry) => entry.id === wallpaperId)
+    if (!item) return { ok: false, error: 'wallpaper-not-found' }
+    await applyWallpaperItem(item, target)
+    return { ok: true, item: store.get('wallpaper')?.current?.id === item.id ? store.get('wallpaper').current : item }
+  })
+}
+
+/** Put back an earlier wallpaper + display layout (AI undo). */
+export async function restoreWallpaperLayoutForTool(layout: { wallpaperId: string | null; displayMode: WallpaperDisplayMode; assignments: Record<string, string> }): Promise<{ ok: boolean; error?: string }> {
+  return withWallpaperChange(async () => {
+    const catalog = await listAllWallpapers()
+    const item = layout.wallpaperId ? catalog.find((entry) => entry.id === layout.wallpaperId) : undefined
+    if (layout.wallpaperId && !item) return { ok: false, error: '原来的壁纸已经不在了，没法切回去。' }
+    const assignments = Object.fromEntries(Object.entries(layout.assignments).filter(([, id]) => catalog.some((entry) => entry.id === id)))
+    await commitWallpaperDisplay({ ...store.get('wallpaperDisplay'), mode: layout.displayMode, assignments, userConfigured: true }, item)
+    resetWallpaperFrameWatchdog()
+    if (wallpaperFrameDemanded) startMainCapture()
+    return { ok: true }
+  })
+}
+
+export async function updateWallpaperSettingsForTool(wallpaperId: string, settings: WallpaperSettings): Promise<{ ok: boolean; error?: string }> {
+  const patch = Object.fromEntries(Object.entries(settings).filter(([, value]) => value !== undefined)) as WallpaperSettings
+  const parsed = wallpaperSettingsSchema.safeParse(patch)
+  if (!parsed.success) return { ok: false, error: parsed.error.issues.map((issue) => issue.message).join('; ') }
+  await queueWallpaperSettings(wallpaperId, parsed.data)
+  return { ok: true }
+}
+
+export async function setWallpaperDisplayModeForTool(mode: WallpaperDisplayMode): Promise<WallpaperDisplaySettings> {
+  return withWallpaperChange(async () => {
+    await commitWallpaperDisplay({ ...store.get('wallpaperDisplay'), mode, schemaVersion: WALLPAPER_DISPLAY_SCHEMA_VERSION, userConfigured: true })
+    return getWallpaperDisplaySettings()
+  })
+}
+
 async function broadcastWallpaperDisplayLayout(snapshot?: WallpaperItem[]): Promise<void> {
   const catalog = snapshot ?? await listAllWallpapers()
   for (const win of getWallpaperWindows()) {
@@ -686,17 +753,7 @@ export function registerWallpaperIpc(): void {
     assertTrustedIpcSender(_e, ['main'])
     if (target !== 'current' && target !== 'all' && !Number.isInteger(target)) throw new Error('无效的壁纸显示目标')
     return withWallpaperChange(async () => {
-      const state = store.get('wallpaper')
-      const settings = store.get('wallpaperDisplay')
-      const plan = planWallpaperApplication({ target, mode: settings.mode, assignments: settings.assignments,
-        displays: getDisplayDescriptors(), currentId: state.current?.id, itemId: item.id })
-      await commitWallpaperDisplay({ ...settings, mode: plan.mode, assignments: plan.assignments },
-        plan.currentId === item.id ? item : state.current ?? item)
-      // No z-order refresh here: it briefly lifts the canvas to always-on-top,
-      // which flashed every widget above the user's apps. New wallpaper windows
-      // re-sync the canvas when they attach (WALLPAPER_READY).
-      resetWallpaperFrameWatchdog()
-      if (wallpaperFrameDemanded) startMainCapture()
+      await applyWallpaperItem(item, target)
       return true
     })
   })

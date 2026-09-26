@@ -134,3 +134,12 @@
 - CSP 与 iframe 沙箱保留包内脚本/样式/fetch，隔离父页面和 bridge，禁止子框架/对象/表单及顶层逃逸；网络 HTTPS 能力仍允许，不应把网页内容当可信应用代码。
 - 代码：[protocols.ts](../../src/main/protocols.ts)。测试：[wallpaper-security.test.mjs](../../tests/wallpaper-security.test.mjs)、[wallpaper-sandbox.cjs](../../tests/electron/wallpaper-sandbox.cjs)；后者在实际 Electron/Chromium 中验证隔离，不仅匹配 CSP 字符串。
 - 来源：2026-09-05 网页壁纸安全修复；第三方壁纸若依赖被禁能力应报告兼容性问题，不回退整目录授权或关闭沙箱。
+
+## L15 伴侣桌面控制：能力可见、确认和撤回都写在代码里
+
+- 适用：聊天智能体的工具暴露、桌面写操作、需要用户同意的动作、回执与撤回、系统提示结构。
+- 根因：按中文正则逐轮裁剪工具，换个说法模型就“看不到”该用的工具，只能口头答应；工具结果只回放文字，下一轮不知道刚改了什么；删除 Dock 的 `confirmed=true` 由模型自己填；旧工具返回 `success:false` 而判定只认 `ok:false`，失败被显示成“已处理”；同一轮里写操作之后仍命中缓存的只读结果；天气工具描述在提交时被编码成问号，模型读到的是乱码。
+- 当前做法：桌面类工具常驻并按清单顺序发送，重工具（文件/命令/编排草案/附件）仍按工作区、意图或附件门控；系统提示固定前缀在前，时间、记忆、【桌面现状】、【最近的桌面操作】在尾部。确认由策略在工具包装层挂起并由界面回答，模型参数不能绕过；后台运行没有确认通道即视为未同意。带 `journal` 的工具串行快照前后状态，按组件 id 差异撤回；删除图标类组件不可自动撤回。写操作清空本轮只读缓存；结果口径统一由 `tool-result.ts` 判断。
+- 边界：日志只在内存保存；撤回在壁纸被换过或组件属于另一张壁纸时拒绝，而不是覆盖用户之后的改动。`SendInput`、开始菜单索引和热键只能在 Windows 实机验收。
+- 代码：[toolRouter.ts](../../src/main/memory/tools/toolRouter.ts)、[toolExecution.ts](../../src/main/memory/chat/toolExecution.ts)、[actionPolicy.ts](../../src/main/memory/desktop/actionPolicy.ts)、[desktopState.ts](../../src/main/memory/desktop/desktopState.ts)、[agent-actions.ts](../../src/shared/agent-actions.ts)。测试：[companion-agent.test.mjs](../../tests/companion-agent.test.mjs)（含 87 句中文指令可达性评测）、[quick-chat.cjs](../../tests/electron/quick-chat.cjs)；真实模型正确率用 `npm.cmd run eval:companion` 测量。
+- 来源：2026-09-26 伴侣智能体桌面控制迭代；设计见 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md)。L09 的“工具调用不回放为消息”约束不变，改为注入确定性的操作摘要。

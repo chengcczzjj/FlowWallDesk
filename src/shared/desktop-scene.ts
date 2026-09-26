@@ -657,7 +657,7 @@ export const DESKTOP_SCENE_TEMPLATES: DesktopSceneTemplate[] = [
       { type: 'whitenoise', preset: 'rain-low', anchor: 'bottom-right', requiresConfirm: true },
     ],
     hiddenWidgetLayers: ['information'],
-    petState: 'arranging',
+    petState: 'organizing',
   },
   {
     id: 'music-ambient',
@@ -675,7 +675,7 @@ export const DESKTOP_SCENE_TEMPLATES: DesktopSceneTemplate[] = [
       { type: 'clock', preset: 'minimal-light', anchor: 'top-left' },
     ],
     hiddenWidgetLayers: ['information'],
-    petState: 'happy',
+    petState: 'joy',
   },
 ]
 

@@ -658,6 +658,8 @@ export type ModelProvider = 'openai-compatible' | 'google' | 'deepseek'
 export interface ModelCapabilities {
   toolCalling?: 'auto' | 'native' | 'disabled'
   reasoning?: boolean
+  /** Accepts image input. Unset means detect from the model name. */
+  vision?: boolean
   maxContextTokens?: number
   maxOutputTokens?: number
 }

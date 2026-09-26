@@ -15,6 +15,9 @@ import { registerWidgetIpc, restoreWidgets } from './ipc/widgetIpc'
 import { registerDesktopIconIpc } from './ipc/desktopIconIpc'
 import { registerDataIpc } from './ipc/dataIpc'
 import { registerChatIpc } from './ipc/chatIpc'
+import { registerCompanionIpc } from './ipc/companionIpc'
+import { ReminderService } from './memory/desktop/reminderService'
+import { applyQuickChatShortcut } from './services/quick-chat-shortcut'
 import { allowAssetRoot, registerAssetProtocol, registerAssetSchemePrivileged } from './protocols'
 import { getRemoteWallpapersRoot, getUserWallpapersRoot } from './runtime/userDataPaths'
 import { initMemorySystem } from './memory'
@@ -122,6 +125,7 @@ app.whenReady().then(async () => {
   registerDesktopIconIpc()
   registerDataIpc()
   registerChatIpc()
+  registerCompanionIpc()
 
   // Older releases stored monitor-relative coordinates and could leave a
   // virtual-desktop window straddling two displays.  Normalize before any
@@ -146,6 +150,8 @@ app.whenReady().then(async () => {
   // 恢复上次状态
   await restoreWallpaper()
   await restoreWidgets()
+  ReminderService.start()
+  applyQuickChatShortcut()
   if (is.dev && process.env.LINGYUE_DOCK_SELF_TEST) {
     const rounds = Math.max(1, Math.min(10, Number(process.env.LINGYUE_DOCK_SELF_TEST_ROUNDS) || 3))
     const initialDelayMs = Math.max(500, Math.min(60_000, Number(process.env.LINGYUE_DOCK_SELF_TEST_DELAY_MS) || 2_500))

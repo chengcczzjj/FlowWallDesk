@@ -10,7 +10,7 @@ import { checkForAppUpdates, downloadAppUpdate, getAppUpdateStatus, installDownl
 import { toggleWindowsDesktop } from '../windows/windowsDesktop'
 import { logDockDiagnostic } from '../runtime/diagnosticLog'
 
-function showMainWindow(target?: MainWindowNavTarget): void {
+export function showMainWindow(target?: MainWindowNavTarget): void {
   const win = getMainWindow() ?? createMainWindow(target)
   if (win.isMinimized()) win.restore()
   win.show()
