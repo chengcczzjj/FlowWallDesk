@@ -5,6 +5,23 @@
 
 历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
 
+## [2026-09-26] 发布 1.1.13 并将开发收拢到 main
+
+**变更摘要**: 按用户授权把工作分支快进合并到 main（不改写历史），此后直接在 main 上开发；在 main 上手动运行 Windows 发布流程完成 1.1.13 远端发布。
+
+**涉及模块**:
+- Git：`main` 由 `f72d418`（1.1.10）快进到 `217a400`。远端删除分支被会话 git 代理拒绝（403），`codex/release-1.0.3`、`codex/release-1.0.5`、`claude/youthful-planck-k0lx2c` 已完全包含在 main 中，待用户删除；`codex/dock-foreground-input-guard` 仍有 2 个 main 没有的 1.1.12 文档提交，本地合并被会话权限检查拦截，未合入、未删除。
+- 发布：Actions 运行 36214604620 在 `217a400` 上构建，发布时创建 tag `v1.1.13`。
+
+**验证结果**:
+- Windows 运行器：`npm test` 117/117 通过，Electron 冒烟三组通过，NSIS 构建成功，核验脚本确认 latest.yml 与安装包、app.asar 版本和入口一致；草稿资产大小核对后发布，公开 latest.yml 与构建一致，releases/latest 指向 v1.1.13。
+- 会话内独立复核：Release 非草稿/预发布，tag 指向 `217a400`，三项资产齐全；完整下载安装包 369,452,270 bytes，SHA-512 与 latest.yml 一致，SHA-256 `B1897B098E055356432582D8C0F852B97379CB5A14AF84EC9181DF39B969C3A5`，blockmap 386,722 bytes。
+- 未在 Windows 实机安装，也未实测客户端从 1.1.12 自动升级。
+
+**提交意图**: `docs(release): record 1.1.13 remote delivery`
+
+---
+
 ## [2026-09-25] 聊天伙伴组件控制、自动更新可靠性与 1.1.13 发布流程
 
 **变更摘要**: 审查聊天 Agent 对桌面组件的控制链路，补齐布局与生成卡片编辑能力并校验所有设置；修复自动更新“有时不灵”；合并已发布的 1.1.12，升版 1.1.13 并新增 Windows Actions 发布流程，让其他电脑可通过自动更新获取。
@@ -231,21 +248,5 @@
 - GitHub Release：`https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.9`（安装包、blockmap、`latest.yml` 已上传并校验远端大小与 SHA-256）。
 
 **Git Commit**: `99f6a1a chore(release): publish LingyueDesk 1.1.9`
-
----
-
-## [2026-08-30] 优化便利贴桌面交互宿主的层级与空闲性能
-
-**变更摘要**: 在保留单 Canvas 透明窗口架构的前提下，将组件视觉顺序从数组位置升级为显式 `stackOrder`，并为便利贴增加独立置顶 IPC；Canvas 原生命中轮询改为手势/命中区域高频、空闲低频调度，降低常驻唤醒。
-
-**涉及模块**:
-- `src/shared/types.ts` / `src/shared/widget-order.ts` / `src/shared/canvas-hit-test.ts`: 增加组件层级字段、旧数据顺序迁移、按显式层级命中和便利贴置顶纯函数。
-- `src/main/ipc/widgetIpc.ts` / `src/shared/ipc-channels.ts` / `src/preload/canvas.ts`: 增加 `WIDGET_BRING_TO_FRONT`，防止位置或配置更新覆盖较新的层级操作。
-- `src/renderer/canvas/Canvas.tsx` / `src/main/windows/canvasWindow.ts`: 使用 CSS `z-index` 渲染显式层级，便利贴点击置顶；原生命中检测空闲从 25ms 降至 80ms，交互期间保持 25ms，并以 React.memo 保留未变化组件。
-- `tests/shared-contracts.test.mjs` / `tests/todo-widget.test.mjs` / `tests/release-contracts.test.mjs`: 增加层级顺序、置顶 IPC、显式命中和自适应轮询契约。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 54 项测试；`npm.cmd run build:check` 成功。
-- 未拆分为多个 Electron 窗口，未改变全屏恢复、锁屏 Canvas 重建或 ToDesk 前台保护链路。
 
 ---
