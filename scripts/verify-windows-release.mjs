@@ -65,6 +65,7 @@ for (const required of [
   '/out/renderer/main-ui/index.html',
   '/out/renderer/wallpaper/index.html',
   '/out/renderer/canvas/index.html',
+  '/out/renderer/quick-chat/index.html',
 ]) {
   check(packaged.has(required), `app.asar is missing ${required}`)
 }

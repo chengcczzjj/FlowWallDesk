@@ -10,7 +10,7 @@ test('stable release metadata and updater publishing stay wired together', async
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const builderConfig = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
 
-  assert.equal(packageJson.version, '1.1.13')
+  assert.equal(packageJson.version, '1.1.14')
   assert.ok(packageJson.dependencies['electron-updater'])
   assert.match(packageJson.scripts['build:win'], /electron-builder --win/)
   assert.match(packageJson.scripts['build:win'], /signExecutable=false/)
@@ -221,4 +221,6 @@ test('Windows release workflow verifies assets before publishing and never overw
   assert.match(verifier, /manifest\.sha512 === sha512/)
   assert.match(verifier, /entry\?\.size === installerStat\.size/)
   assert.match(verifier, /packagedJson\.version === version/)
+  // Every window the app opens must be inside the package, including the quick chat.
+  for (const entry of ['main-ui', 'wallpaper', 'canvas', 'quick-chat']) assert.match(verifier, new RegExp(`'/out/renderer/${entry}/index\\.html'`))
 })
