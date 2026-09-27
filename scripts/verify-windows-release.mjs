@@ -83,7 +83,7 @@ const summary = [
   `- electron-updater SHA-512：${sha512}`,
   `- blockmap：${installerName}.blockmap（${blockmapStat.size.toLocaleString('en-US')} bytes）`,
   `- latest.yml：版本 ${version}，文件名、大小与 SHA-512 均与安装包一致`,
-  `- app.asar：版本 ${packagedJson.version}，包含主进程、preload 及主界面/壁纸/画布三个渲染入口`,
+  `- app.asar：版本 ${packagedJson.version}，包含主进程、preload 及主界面/壁纸/画布/快捷对话四个渲染入口`,
   '',
 ].join('\n')
 const summaryIndex = process.argv.indexOf('--summary')

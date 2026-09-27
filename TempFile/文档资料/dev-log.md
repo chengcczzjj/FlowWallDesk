@@ -5,6 +5,25 @@
 
 历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
 
+## [2026-09-27] 发布 1.1.14：伙伴桌面操作、快捷对话、FlowWall 在线壁纸库
+
+**变更摘要**: 按用户“打包发布新版本”的要求，将 1.1.13 之后两轮开发（伴侣桌面控制与快捷对话、FlowWall 在线壁纸库与交互/组件升级）作为 1.1.14 发布；未合入 main，Release 由任务分支提交构建。
+
+**涉及模块**:
+- 版本与说明：`package.json` / `package-lock.json` 升至 1.1.14，新增 [1.1.14 发布说明](../../doc/发布说明/1.1.14.md)；`scripts/verify-windows-release.mjs` 要求安装包含快捷对话入口（首个带该窗口的版本），摘要文案同步为四个渲染入口。
+- 发布：在 `claude/blissful-ritchie-iemaxr` 上手动运行 Windows 发布流程（Actions 运行 36294078856），构建 `90ff7f6` 并在发布时创建 tag `v1.1.14`。
+
+**验证结果**:
+- 容器内：`npm test` 152 项 151 通过（Linux 路径基线用例），`npm run build:check` 成功。
+- Windows 运行器：`npm test` 152/152 通过，Electron 冒烟五组通过，NSIS 构建成功，核验脚本确认 latest.yml、安装包、app.asar 版本与四个入口一致；草稿资产大小核对后发布，公开 latest.yml 与构建一致，releases/latest 指向 v1.1.14。
+- 会话内独立复核：Release 非草稿/预发布，tag 指向 `90ff7f6`，三项资产齐全；完整下载安装包 369,500,151 bytes，SHA-512 与 latest.yml 一致，SHA-256 `C8FC76691A16667524938FCD403A224DB4CE708D48E7E89657AA99CBA284F0A7`；blockmap 388,469 bytes、latest.yml 的 SHA-256 与 GitHub 资产摘要一致。
+- 自动生成的 Release 构建校验摘要仍写“三个渲染入口”（发布时脚本文案未更新，检查本身已含快捷对话），本次已修正文案供下次使用。
+- 未在 Windows 实机安装，也未实测客户端从 1.1.13 自动升级。
+
+**提交意图**: `docs(release): record 1.1.14 remote delivery`
+
+---
+
 ## [2026-09-27] FlowWall 在线壁纸库接入与伴侣交互、桌面组件升级
 
 **变更摘要**: 新增“FlowWall 发现”内嵌在线壁纸库：接管站点自己的下载，按内容校验后导入「我的壁纸」并可一键设为壁纸，另有 `lingyue://` 协议；对上一轮伴侣功能做交互复查升级（确认卡键盘与倒计时、回执状态与全部撤回、快捷对话输入/粘贴/拖入、热键录制与授权收回）；快捷工具、系统监控接入真实功能，白噪音定时关闭，桌宠悬停/点击回应/未读红点。设计见 [FlowWall 在线壁纸库接入设计](../../doc/FlowWall在线壁纸库接入设计.md) 与 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md) §8。
@@ -233,24 +252,5 @@
 - 当前开发机只有一台 `2560x1440` 显示器，不能把自动测试冒充公司混合 DPI 双屏验收；后续实机异常可直接依据 `display-diagnostics.jsonl` 中的 expected/actual 边界定位。
 
 **Git Commit**: 本次任务提交 — `fix(display): complete stable multi-monitor layout`
-
----
-
-## [2026-08-30 21:23] 发布 1.1.10 多显示器壁纸布局恢复版
-
-**变更摘要**: 将多显示器模式链路修复升版为 1.1.10，生成自动更新资产、完成本机覆盖安装并发布 GitHub Release。
-
-**涉及模块**:
-- `package.json` / `package-lock.json` / `tests/release-contracts.test.mjs`: 升级 1.1.10 版本元数据与发布契约。
-- `doc/发布说明/1.1.10.md` / `TempFile/文档资料/project-status.md`: 记录多显示器修复、验证结果、安装包校验和正式分发状态。
-- `dist/`: 生成 Windows x64 NSIS 安装包、blockmap 和 `latest.yml`；构建产物不进入 Git。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 57 项测试；`npm.cmd run build:win` 成功。
-- 安装包 369,422,468 bytes，SHA-256 `2295587461FB99F36CD6E789ACE5A267EBC13B7591B393B9A5ED3BF059C60230`；blockmap 与 `latest.yml` 均完成哈希校验。
-- 本机 EXE、`app.asar` 和卸载注册表均更新为 1.1.10；当前壁纸、8 个桌面组件和 2 个全局图标组件完整保留，安装后进程正常运行。
-- GitHub Release：`https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.10`（安装包、blockmap、`latest.yml` 已上传并校验远端大小与 SHA-256）。
-
-**Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.10`
 
 ---
