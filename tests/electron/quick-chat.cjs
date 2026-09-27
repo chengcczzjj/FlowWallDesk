@@ -1,12 +1,13 @@
 /* global require */
 /* eslint-disable @typescript-eslint/no-require-imports -- Isolated Electron acceptance entry. */
 // Production quick-chat renderer + sandboxed preload with a scripted main process:
-// history rendering, sending, a suspended action confirmed on the card, and undo from a receipt.
+// history rendering, sending, a suspended action confirmed on the card, undo from a receipt,
+// receipts that expired with a restart, recalling the last message and dropping a file.
 const { app, BrowserWindow, ipcMain } = require('electron')
 const process = require('node:process')
 const { join } = require('node:path')
 const assert = require('node:assert/strict')
-const { console, setTimeout, clearTimeout } = globalThis
+const { console, setTimeout, clearTimeout, Buffer } = globalThis
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 let win
 const watchdog = setTimeout(() => { console.error('QUICK_CHAT_TIMEOUT'); app.exit(1) }, 45000)
@@ -14,7 +15,13 @@ app.on('window-all-closed', () => {})
 
 async function waitFor(code, label) {
   for (let i = 0; i < 160; i++) {
-    if (await win.webContents.executeJavaScript(code)) return
+    let value
+    try {
+      value = await win.webContents.executeJavaScript(code)
+    } catch (error) {
+      throw new Error(`${label}: ${error.message}`)
+    }
+    if (value) return
     await sleep(50)
   }
   throw new Error('Timed out: ' + label)
@@ -51,6 +58,7 @@ async function run() {
   const sent = []
   const resolved = []
   const undone = []
+  const dropped = []
   const history = [
     { id: 'e1', conversationId: 'c1', eventType: 'user_message', content: { text: '把天气放到右上角' }, createdAt: 1 },
     { id: 'e2', conversationId: 'c1', eventType: 'tool_result', content: { toolName: 'arrange_widget', output: { ok: true, receipt: { id: 'j-old', summary: '调整天气', undoable: true } } }, createdAt: 2 },
@@ -58,6 +66,12 @@ async function run() {
   ]
   ipcMain.handle(IPC.CHAT_GET_QUICK_CONVERSATION, () => ({ conversationId: 'c1', history }))
   ipcMain.handle(IPC.CHAT_ACTION_UNDO, (_event, id) => { undone.push(id); return { ok: true, summary: '调整天气' } })
+  // The history receipt belongs to a previous app session: its journal entry is gone.
+  ipcMain.handle(IPC.CHAT_ACTION_STATUS, (_event, ids) => Object.fromEntries(ids.map((id) => [id, id === 'j-old' ? 'expired' : 'active'])))
+  ipcMain.handle(IPC.CHAT_ATTACH_DATA, (_event, files, conversationId) => {
+    dropped.push({ conversationId, files: files.map((file) => ({ name: file.name, size: file.bytes.byteLength, isBytes: file.bytes instanceof Uint8Array })) })
+    return { attachments: files.map((file, index) => ({ id: `att-${index}`, name: file.name, kind: 'text', size: file.bytes.byteLength })), rejected: [] }
+  })
   ipcMain.handle(IPC.CHAT_ACTION_CONFIRM_RESOLVE, (_event, confirmId, decision) => {
     resolved.push([confirmId, decision])
     const { streamId } = sent.at(-1)
@@ -93,6 +107,10 @@ async function run() {
 
   await waitFor(`document.querySelectorAll('.qc__msg li').length === 2`, 'markdown history')
   await waitFor(`[...document.querySelectorAll('.ly-receipt')].some((node) => node.textContent.includes('调整天气'))`, 'history receipt')
+  await waitFor(`(() => {
+    const receipt = [...document.querySelectorAll('.ly-receipt')].find((node) => node.textContent.includes('调整天气'))
+    return receipt.classList.contains('ly-receipt--expired') && !receipt.querySelector('.ly-receipt__undo')
+  })()`, 'expired history receipt offers no undo')
 
   await win.webContents.executeJavaScript(`document.querySelector('.qc__input-row textarea').focus()`)
   win.webContents.insertText('打开记事本，再放个便签')
@@ -117,7 +135,24 @@ async function run() {
   await waitFor(`[...document.querySelectorAll('.ly-receipt--undone')].some((node) => node.textContent.includes('已撤回：新增桌面文字'))`, 'undone receipt')
   assert.deepEqual(undone, ['j-new'])
 
-  console.log('QUICK_CHAT_SMOKE_PASS ' + JSON.stringify({ bridges, sent: sent.length, resolved: resolved[0][1], undone }))
+  // ↑ in an empty box brings back the last thing the user said.
+  await win.webContents.executeJavaScript(`document.querySelector('.qc__input-row textarea').focus()`)
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Up' })
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Up' })
+  await waitFor(`document.querySelector('.qc__input-row textarea').value === '打开记事本，再放个便签'`, 'recalled last message')
+
+  // A file dropped on the window reaches the main process as bytes and becomes a chip.
+  await win.webContents.executeJavaScript(`(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(['买牛奶\\n交电费'], 'todo.txt', { type: 'text/plain' }))
+    const target = document.querySelector('.qc')
+    target.dispatchEvent(new DragEvent('dragenter', { dataTransfer: data, bubbles: true, cancelable: true }))
+    target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }))
+  })()`)
+  await waitFor(`[...document.querySelectorAll('.qc__composer .ly-attachment')].some((node) => node.textContent.includes('todo.txt'))`, 'dropped file chip')
+  assert.deepEqual(dropped, [{ conversationId: 'c1', files: [{ name: 'todo.txt', size: Buffer.byteLength('买牛奶\n交电费'), isBytes: true }] }])
+
+  console.log('QUICK_CHAT_SMOKE_PASS ' + JSON.stringify({ bridges, sent: sent.length, resolved: resolved[0][1], undone, dropped: dropped[0].files[0].name }))
 }
 
 run().then(() => {

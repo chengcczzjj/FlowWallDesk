@@ -38,10 +38,15 @@ export type WidgetCommand =
   | { target: 'pet'; command: 'express'; state?: PetExpressionState; message?: string; durationMs: number }
   /** Follows the chat agent: thinking, searching, organizing... null returns to the configured state. */
   | { target: 'pet'; command: 'phase'; state: PetExpressionState | null }
-  | { target: 'whitenoise'; command: 'play'; sound?: WhiteNoiseSound; volumeLevel?: number }
+  /** minutes: stop by itself after this long (fades out); 0 clears an earlier timer. */
+  | { target: 'whitenoise'; command: 'play'; sound?: WhiteNoiseSound; volumeLevel?: number; minutes?: number }
   | { target: 'whitenoise'; command: 'pause' }
 
 export type WidgetCommandEnvelope = WidgetCommand & { issuedAt: number }
+
+/** Sleep-timer presets offered in the white-noise menu (minutes). */
+export const WHITE_NOISE_TIMER_PRESETS = [15, 30, 60, 90] as const
+export const WHITE_NOISE_MAX_TIMER_MINUTES = 240
 
 /** Map a chat tool to the pet state that reads as "working on it". */
 export function petStateForTool(toolName: string): PetExpressionState {

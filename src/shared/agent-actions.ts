@@ -33,6 +33,9 @@ export type ActionUndoSpec =
     }
   | { kind: 'reminder-cancel'; reminderId: string }
 
+/** active: can be undone · undone · final: never undoable · expired: gone after an app restart. */
+export type ActionReceiptStatus = 'active' | 'undone' | 'final' | 'expired'
+
 export interface ActionJournalEntry {
   id: string
   createdAt: number

@@ -25,6 +25,17 @@ export function addActionGrant(key: string): void {
   store.set('agentActionGrants', [key, ...grants].slice(0, MAX_GRANTS))
 }
 
+export function listActionGrants(): string[] {
+  return readGrants()
+}
+
+/** Settings: take back an "以后都直接做" answer ('*' clears all). */
+export function revokeActionGrant(key: string): string[] {
+  const next = key === '*' ? [] : readGrants().filter((grant) => grant !== key)
+  store.set('agentActionGrants', next)
+  return next
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }

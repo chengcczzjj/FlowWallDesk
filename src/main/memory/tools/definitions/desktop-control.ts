@@ -9,7 +9,7 @@ import { basename } from 'path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import type { WallpaperItem } from '@shared/types'
-import { PET_EXPRESSION_STATES, WHITE_NOISE_SOUNDS, WHITE_NOISE_SOUND_LABELS } from '@shared/widget-command'
+import { PET_EXPRESSION_STATES, WHITE_NOISE_MAX_TIMER_MINUTES, WHITE_NOISE_SOUNDS, WHITE_NOISE_SOUND_LABELS } from '@shared/widget-command'
 import { KNOWN_FOLDER_IDS, SETTINGS_PAGE_IDS } from '@shared/system-control'
 import {
   REMINDER_KINDS,
@@ -30,6 +30,7 @@ import {
 } from '../../../ipc/wallpaperIpc'
 import { addWidgetForTool, listWidgetsForTool, updateWidgetConfigForTool } from '../../../ipc/widgetIpc'
 import { getWallpaperResourceCatalog, installWallpaperResource } from '../../../services/wallpaper-resource-service'
+import { showMainWindow } from '../../../ipc/appIpc'
 import { applyDesktopMode, deleteDesktopMode, listDesktopModes, saveDesktopMode } from '../../desktop/desktopModes'
 import { expressPet, hasDesktopPet, sendWidgetCommand } from '../../desktop/petBridge'
 import { AppIndex } from '../../desktop/appIndex'
@@ -50,7 +51,8 @@ import type { WorkspaceToolContext } from './workspace-files'
 
 const MAX_ATTACHMENT_TEXT = 60_000
 
-function wallpaperSourceLabel(id: string): string {
+function wallpaperSourceLabel(id: string, meta?: Record<string, unknown>): string {
+  if (meta?.Source === 'flowwall') return 'FlowWall'
   if (id.startsWith('remote')) return '在线'
   if (id.startsWith('user')) return '我的'
   if (id.startsWith('local:')) return '本地文件'
@@ -88,7 +90,7 @@ function summarizeWallpaper(item: WallpaperItem, currentId?: string) {
     id: item.id,
     name: item.name,
     type: item.type,
-    source: wallpaperSourceLabel(item.id),
+    source: wallpaperSourceLabel(item.id, item.meta),
     ...(item.id === currentId ? { current: true } : {}),
   }
 }
@@ -96,10 +98,10 @@ function summarizeWallpaper(item: WallpaperItem, currentId?: string) {
 const WALLPAPER_SWITCH_NOTE = '组件是跟着壁纸保存的：换壁纸后桌面会显示这张壁纸自己的组件布局。'
 
 export const wallpaperTool = tool({
-  description: '查看、搜索和切换动态壁纸，调整壁纸音量/播放速度/缩放方式，切换多显示器壁纸模式，或从在线壁纸库搜索并安装。用户说“换个壁纸/换张安静点的/随便换一张/壁纸声音小一点/在线找个下雨的壁纸”时使用。切换可以被撤回。',
+  description: '查看、搜索和切换动态壁纸，调整壁纸音量/播放速度/缩放方式，切换多显示器壁纸模式，或从在线壁纸库搜索并安装；flowwall 会在主界面打开 FlowWall 在线壁纸站，用户在页面里点下载后自动加入“我的壁纸”。用户说“换个壁纸/换张安静点的/随便换一张/壁纸声音小一点/在线找个下雨的壁纸/去 FlowWall 逛逛”时使用。切换可以被撤回。',
   inputSchema: z.object({
-    action: z.enum(['list', 'current', 'apply', 'random', 'settings', 'display_mode', 'online_search', 'online_install'])
-      .describe('list 搜索本地壁纸；current 当前壁纸；apply 切换到指定壁纸；random 随机换一张；settings 调当前壁纸的音量/速度等；display_mode 多显示器模式；online_search 搜在线壁纸库；online_install 下载在线壁纸（默认装好后直接用）。'),
+    action: z.enum(['list', 'current', 'apply', 'random', 'settings', 'display_mode', 'online_search', 'online_install', 'flowwall'])
+      .describe('list 搜索本地壁纸；current 当前壁纸；apply 切换到指定壁纸；random 随机换一张；settings 调当前壁纸的音量/速度等；display_mode 多显示器模式；online_search 搜灵月官方在线壁纸库；online_install 下载官方在线壁纸（默认装好后直接用）；flowwall 在主界面打开 FlowWall 在线壁纸站让用户挑选下载。'),
     query: z.string().trim().max(80).optional().describe('按名称、描述或标签找壁纸，如“樱花”“雨”。apply/random 时可代替 wallpaperId。'),
     wallpaperId: z.string().trim().max(512).optional().describe('list 返回的壁纸 id。'),
     type: z.enum(['video', 'image', 'web']).optional().describe('只看某种壁纸：video 动态视频、image 静态图片、web 网页。'),
@@ -116,6 +118,10 @@ export const wallpaperTool = tool({
     const state = getWallpaperStateForTool()
     const currentId = state.current?.id
     switch (input.action) {
+      case 'flowwall': {
+        showMainWindow({ activity: 'library', subPage: 'flowwall' })
+        return { ok: true, opened: 'FlowWall 在线壁纸站', note: '用户在页面里点下载后，壁纸会自动加入“我的壁纸”，下载完成可以直接应用。' }
+      }
       case 'current':
         return {
           ok: true,
@@ -233,13 +239,14 @@ function delay(ms: number): Promise<void> {
 }
 
 export const ambientSoundTool = tool({
-  description: '播放或暂停桌面白噪音（雨声、海浪、咖啡馆、壁炉等），可调音量档位。用户说“放点雨声”“来点白噪音”“把白噪音关了”时使用。桌面上没有白噪音组件时会自动放一个。',
+  description: '播放或暂停桌面白噪音（雨声、海浪、咖啡馆、壁炉等），可调音量档位，可定时关闭。用户说“放点雨声”“来点白噪音”“放 30 分钟雨声助眠”“把白噪音关了”时使用。桌面上没有白噪音组件时会自动放一个。',
   inputSchema: z.object({
     action: z.enum(['play', 'pause']),
     sound: z.enum(WHITE_NOISE_SOUNDS).optional().describe(`声音：${WHITE_NOISE_SOUNDS.map((id) => `${id}=${WHITE_NOISE_SOUND_LABELS[id]}`).join('，')}`),
     volumeLevel: z.number().int().min(1).max(3).optional().describe('音量档位 1 小、2 中、3 大。'),
+    minutes: z.number().int().min(0).max(WHITE_NOISE_MAX_TIMER_MINUTES).optional().describe('多少分钟后渐弱并自动停止（助眠/专注计时）；0 表示取消定时。用户没提时间就不要填。'),
   }),
-  execute: async ({ action, sound, volumeLevel }) => {
+  execute: async ({ action, sound, volumeLevel, minutes }) => {
     let widget = listWidgetsForTool().find((item) => item.type === 'whitenoise')
     let addedWidget = false
     if (!widget) {
@@ -265,13 +272,14 @@ export const ambientSoundTool = tool({
       updateWidgetConfigForTool({ id: widget.id, config: { volume: volumeLevel } })
     }
     const sent = sendWidgetCommand(action === 'play'
-      ? { target: 'whitenoise', command: 'play', sound, volumeLevel }
+      ? { target: 'whitenoise', command: 'play', sound, volumeLevel, minutes }
       : { target: 'whitenoise', command: 'pause' })
     if (!sent) return { ok: false, error: 'canvas-unavailable', userMessage: '桌面组件层暂时没响应。' }
     return {
       ok: true,
       action,
       ...(sound ? { sound: WHITE_NOISE_SOUND_LABELS[sound] } : {}),
+      ...(action === 'play' && minutes ? { stopsInMinutes: minutes } : {}),
       addedWidget,
     }
   },

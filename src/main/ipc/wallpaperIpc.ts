@@ -114,6 +114,7 @@ function mapType(type: unknown, fileName?: string): WallpaperItem['type'] {
 }
 
 interface FlowWallDeskInfo {
+  [key: string]: unknown
   Title?: string
   Desc?: string
   Author?: string
@@ -853,108 +854,127 @@ export function registerWallpaperIpc(): void {
       meta: { name: string; desc: string; author: string; contact: string }
     ): Promise<{ ok: boolean; item?: WallpaperItem; error?: string }> => {
       assertTrustedIpcSender(_e, ['main'])
-      let createdFolder: string | undefined
-      try {
-        const ext = extname(filePath).toLowerCase()
-        const isZip = ext === '.zip'
-        const isHtml = ext === '.html' || ext === '.htm'
-        if (!VIDEO_EXT.has(ext) && !IMAGE_EXT.has(ext) && !isHtml && !isZip) throw new Error('不支持的壁纸文件格式')
-        const type: WallpaperItem['type'] = VIDEO_EXT.has(ext)
-          ? 'video'
-          : isHtml || isZip
-            ? 'web'
-            : 'image'
-
-        // 用壁纸名字做用户数据目录下的文件夹名
-        const displayName = meta.name.trim() || basename(filePath, ext)
-        const safeName = sanitizeUserDataSegment(displayName, 'wallpaper')
-        const root = getUserWallpapersRoot()
-        let folderName = safeName
-        let folder = join(root, folderName)
-
-        // 避免重名
-        let counter = 1
-        while (true) {
-          try {
-            await fs.access(folder)
-            folderName = `${safeName}_${counter++}`
-            folder = join(root, folderName)
-          } catch {
-            break
-          }
-        }
-
-        await fs.mkdir(folder, { recursive: true })
-        createdFolder = folder
-
-        let mainFileName: string
-
-        if (isZip) {
-          // ZIP 解压到目标文件夹
-          await extractZip(filePath, folder)
-          // 在解压后的文件中查找 index.html 或第一个 .html
-          const entry = await findHtmlEntry(folder)
-          if (!entry) throw new Error('ZIP 中没有找到 HTML 入口，请提供包含 index.html 的壁纸包。')
-          mainFileName = entry
-        } else {
-          // 视频/图片：单文件复制
-          mainFileName = basename(filePath)
-          const destFile = join(folder, mainFileName)
-          await fs.copyFile(filePath, destFile)
-        }
-
-        // 创建 FlowWallDeskInfo.json
-        const typeNum = type === 'web' ? 1 : type === 'video' ? 7 : 11
-        const info: FlowWallDeskInfo = {
-          Title: displayName,
-          Desc: meta.desc || '',
-          Author: meta.author || '',
-          Contact: meta.contact || '',
-          Type: typeNum,
-          FileName: mainFileName,
-          Tags: [type],
-          Id: folderName,
-        }
-
-        // 如果是图片类型，源文件本身就是预览
-        if (type === 'image') {
-          info.Thumbnail = mainFileName
-          info.Preview = mainFileName
-        }
-
-        await fs.writeFile(
-          join(folder, 'FlowWallDeskInfo.json'),
-          JSON.stringify(info, null, 2),
-          'utf-8'
-        )
-
-        const destSource = join(folder, mainFileName)
-
-        // 如果是视频，生成 GIF 预览
-        let preview: string | undefined
-        if (type === 'video') {
-          preview = await generateVideoPreviewGif(destSource, folder)
-        } else if (type === 'image') {
-          preview = destSource
-        }
-
-        const item: WallpaperItem = {
-          id: toUserWallpaperId(folderName),
-          name: displayName,
-          source: destSource,
-          type,
-          preview,
-          meta: info as unknown as Record<string, unknown>,
-        }
-
-        return { ok: true, item }
-      } catch (err) {
-        if (createdFolder) await fs.rm(createdFolder, { recursive: true, force: true }).catch(() => undefined)
-        console.error('[wallpaper] 导入失败:', err)
-        return { ok: false, error: String(err) }
-      }
+      // Source metadata such as "flowwall" is only set by the main process, never by the renderer.
+      return importWallpaperFile(filePath, { name: meta.name, desc: meta.desc, author: meta.author, contact: meta.contact })
     }
   )
+}
+
+export interface WallpaperImportMeta {
+  name: string
+  desc: string
+  author: string
+  contact: string
+  /** Extra FlowWallDeskInfo fields, e.g. where an online download came from. */
+  extra?: Record<string, unknown>
+}
+
+/**
+ * Copy a video / image / HTML / ZIP into the user wallpaper library with its
+ * FlowWallDeskInfo.json. Shared by manual import and online-library downloads.
+ */
+export async function importWallpaperFile(filePath: string, meta: WallpaperImportMeta): Promise<{ ok: boolean; item?: WallpaperItem; error?: string }> {
+  let createdFolder: string | undefined
+  try {
+    const ext = extname(filePath).toLowerCase()
+    const isZip = ext === '.zip'
+    const isHtml = ext === '.html' || ext === '.htm'
+    if (!VIDEO_EXT.has(ext) && !IMAGE_EXT.has(ext) && !isHtml && !isZip) throw new Error('不支持的壁纸文件格式')
+    const type: WallpaperItem['type'] = VIDEO_EXT.has(ext)
+      ? 'video'
+      : isHtml || isZip
+        ? 'web'
+        : 'image'
+
+    // 用壁纸名字做用户数据目录下的文件夹名
+    const displayName = meta.name.trim() || basename(filePath, ext)
+    const safeName = sanitizeUserDataSegment(displayName, 'wallpaper')
+    const root = getUserWallpapersRoot()
+    let folderName = safeName
+    let folder = join(root, folderName)
+
+    // 避免重名
+    let counter = 1
+    while (true) {
+      try {
+        await fs.access(folder)
+        folderName = `${safeName}_${counter++}`
+        folder = join(root, folderName)
+      } catch {
+        break
+      }
+    }
+
+    await fs.mkdir(folder, { recursive: true })
+    createdFolder = folder
+
+    let mainFileName: string
+
+    if (isZip) {
+      // ZIP 解压到目标文件夹
+      await extractZip(filePath, folder)
+      // 在解压后的文件中查找 index.html 或第一个 .html
+      const entry = await findHtmlEntry(folder)
+      if (!entry) throw new Error('ZIP 中没有找到 HTML 入口，请提供包含 index.html 的壁纸包。')
+      mainFileName = entry
+    } else {
+      // 视频/图片：单文件复制
+      mainFileName = basename(filePath)
+      const destFile = join(folder, mainFileName)
+      await fs.copyFile(filePath, destFile)
+    }
+
+    // 创建 FlowWallDeskInfo.json
+    const typeNum = type === 'web' ? 1 : type === 'video' ? 7 : 11
+    const info: FlowWallDeskInfo = {
+      ...(meta.extra ?? {}),
+      Title: displayName,
+      Desc: meta.desc || '',
+      Author: meta.author || '',
+      Contact: meta.contact || '',
+      Type: typeNum,
+      FileName: mainFileName,
+      Tags: [type],
+      Id: folderName,
+    }
+
+    // 如果是图片类型，源文件本身就是预览
+    if (type === 'image') {
+      info.Thumbnail = mainFileName
+      info.Preview = mainFileName
+    }
+
+    await fs.writeFile(
+      join(folder, 'FlowWallDeskInfo.json'),
+      JSON.stringify(info, null, 2),
+      'utf-8'
+    )
+
+    const destSource = join(folder, mainFileName)
+
+    // 如果是视频，生成 GIF 预览
+    let preview: string | undefined
+    if (type === 'video') {
+      preview = await generateVideoPreviewGif(destSource, folder)
+    } else if (type === 'image') {
+      preview = destSource
+    }
+
+    const item: WallpaperItem = {
+      id: toUserWallpaperId(folderName),
+      name: displayName,
+      source: destSource,
+      type,
+      preview,
+      meta: info as unknown as Record<string, unknown>,
+    }
+
+    return { ok: true, item }
+  } catch (err) {
+    if (createdFolder) await fs.rm(createdFolder, { recursive: true, force: true }).catch(() => undefined)
+    console.error('[wallpaper] 导入失败:', err)
+    return { ok: false, error: String(err) }
+  }
 }
 
 /**

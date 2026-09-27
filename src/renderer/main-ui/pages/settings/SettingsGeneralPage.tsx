@@ -18,10 +18,18 @@ import {
   RotateCcw,
   Keyboard,
   MoonStar,
+  ShieldCheck,
 } from 'lucide-react'
 import type { AppUpdateStatus, ModelProfile, ModelProvider } from '@shared/types'
 import { DEEPSEEK_API_BASE_URL, DEEPSEEK_LATEST_MODEL } from '@shared/model-defaults'
-import { DEFAULT_QUICK_CHAT_SHORTCUT, type CompanionSettings } from '@shared/companion-settings'
+import {
+  DEFAULT_QUICK_CHAT_SHORTCUT,
+  acceleratorFromKeyEvent,
+  describeActionGrant,
+  shortcutKeyLabels,
+  type CompanionSettings,
+  type CompanionSettingsSnapshot,
+} from '@shared/companion-settings'
 import './settings.css'
 
 const PROVIDER_LABELS: Record<ModelProvider, string> = {
@@ -55,22 +63,24 @@ function getIncompleteProfileReason(profile: ModelProfile): string {
   return ''
 }
 
-/** Show "CommandOrControl+Alt+Space" the way a Windows user reads it. */
-function formatShortcut(accelerator: string): string {
-  return accelerator.replace(/CommandOrControl|CmdOrCtrl/g, 'Ctrl').replace(/\+/g, ' + ')
+function ShortcutKeys({ accelerator }: { accelerator: string }) {
+  return (
+    <span className="shortcut-keys">
+      {shortcutKeyLabels(accelerator).map((label, index) => <kbd key={`${label}-${index}`}>{label}</kbd>)}
+    </span>
+  )
 }
 
 function CompanionSettingsGroup() {
-  const [settings, setSettings] = useState<(CompanionSettings & { shortcutActive: boolean }) | null>(null)
-  const [shortcutDraft, setShortcutDraft] = useState('')
+  const [settings, setSettings] = useState<CompanionSettingsSnapshot | null>(null)
+  const [recording, setRecording] = useState(false)
   const [message, setMessage] = useState('')
+  const recorderRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     let alive = true
     void window.lingyue.app.getCompanionSettings().then((next) => {
-      if (!alive) return
-      setSettings(next)
-      setShortcutDraft(next.quickChatShortcut)
+      if (alive) setSettings(next)
     })
     return () => { alive = false }
   }, [])
@@ -79,13 +89,43 @@ function CompanionSettingsGroup() {
     try {
       const next = await window.lingyue.app.setCompanionSettings(patch)
       setSettings(next)
-      setShortcutDraft(next.quickChatShortcut)
       setMessage(patch.quickChatShortcut !== undefined
-        ? next.quickChatShortcut && !next.shortcutActive ? '这个热键被别的程序占用了，换一个试试。' : '已保存'
+        ? next.quickChatShortcut && !next.shortcutActive ? '这个组合键被别的程序占用了，换一个试试。' : next.quickChatShortcut ? '热键已更新' : '已关闭热键'
         : '已保存')
     } catch (error) {
       setMessage(formatIpcError(error, '保存失败'))
     }
+  }
+
+  const revokeGrant = async (key: string) => {
+    try {
+      setSettings(await window.lingyue.app.revokeActionGrant(key))
+    } catch (error) {
+      setMessage(formatIpcError(error, '收回失败'))
+    }
+  }
+
+  const startRecording = () => {
+    setMessage('')
+    setRecording(true)
+    recorderRef.current?.focus()
+  }
+
+  const onRecorderKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!recording) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      setRecording(false)
+      return
+    }
+    const accelerator = acceleratorFromKeyEvent(event)
+    if (!accelerator) {
+      if (!['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) setMessage('需要同时按住 Ctrl、Alt 或 Win 中的至少一个。')
+      return
+    }
+    setRecording(false)
+    void save({ quickChatShortcut: accelerator })
   }
 
   if (!settings) return null
@@ -99,20 +139,32 @@ function CompanionSettingsGroup() {
         <div className="settings-card__body">
           <div className="settings-card__title">快捷对话热键</div>
           <div className="settings-card__desc">
-            在任何地方按下即可唤出桌面小对话框；点桌面上的桌宠或托盘菜单也能打开。留空表示关闭热键。
-            {settings.quickChatShortcut && ` 当前：${formatShortcut(settings.quickChatShortcut)}${settings.shortcutActive ? '' : '（未生效）'}`}
+            在任何地方按下即可唤出桌面小对话框；点桌面上的桌宠或托盘菜单也能打开。点一下按键框，再直接按下想用的组合键即可更换。
+            {settings.quickChatShortcut && !settings.shortcutActive && ' 当前热键未生效（可能被别的程序占用）。'}
           </div>
           {message && <div className="settings-card__desc settings-card__desc--status">{message}</div>}
         </div>
         <div className="settings-card__action settings-card__action--row">
-          <input
-            className="settings-input settings-input--shortcut"
-            value={shortcutDraft}
-            onChange={(event) => setShortcutDraft(event.target.value)}
-            placeholder={DEFAULT_QUICK_CHAT_SHORTCUT}
-            aria-label="快捷对话热键"
-          />
-          <button className="settings-btn settings-btn--sm" onClick={() => void save({ quickChatShortcut: shortcutDraft.trim() })}>保存</button>
+          <button
+            ref={recorderRef}
+            type="button"
+            className={`shortcut-recorder ${recording ? 'shortcut-recorder--recording' : ''}`}
+            onClick={startRecording}
+            onKeyDown={onRecorderKeyDown}
+            onBlur={() => setRecording(false)}
+            aria-label="录制快捷对话热键"
+            title="点一下，然后直接按下想用的组合键"
+          >
+            {recording
+              ? <span className="shortcut-recorder__hint">按下组合键… Esc 取消</span>
+              : settings.quickChatShortcut ? <ShortcutKeys accelerator={settings.quickChatShortcut} /> : <span className="shortcut-recorder__hint">未设置</span>}
+          </button>
+          {settings.quickChatShortcut !== DEFAULT_QUICK_CHAT_SHORTCUT && (
+            <button className="settings-btn settings-btn--sm" onClick={() => void save({ quickChatShortcut: DEFAULT_QUICK_CHAT_SHORTCUT })}>恢复默认</button>
+          )}
+          {settings.quickChatShortcut && (
+            <button className="settings-btn settings-btn--sm" onClick={() => void save({ quickChatShortcut: '' })}>关闭</button>
+          )}
           <button className="settings-btn settings-btn--sm" onClick={() => window.lingyue.app.toggleQuickChat()}>打开</button>
         </div>
       </div>
@@ -153,6 +205,33 @@ function CompanionSettingsGroup() {
             </div>
           </label>
         </div>
+      </div>
+
+      <div className="settings-card settings-card--stack">
+        <div className="settings-card__icon"><ShieldCheck size={18} /></div>
+        <div className="settings-card__body">
+          <div className="settings-card__title">不再询问的操作</div>
+          <div className="settings-card__desc">
+            {settings.actionGrants.length === 0
+              ? '打开应用、截屏前她都会先问你。在确认卡上选“以后都直接做”后，会出现在这里，可以随时收回。'
+              : '这些操作她会直接做，不再弹确认卡。收回后下次会重新问你。'}
+          </div>
+          {settings.actionGrants.length > 0 && (
+            <div className="grant-chips">
+              {settings.actionGrants.map((key) => (
+                <span key={key} className="grant-chip">
+                  {describeActionGrant(key)}
+                  <button type="button" onClick={() => void revokeGrant(key)} aria-label={`收回：${describeActionGrant(key)}`} title="收回">×</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {settings.actionGrants.length > 1 && (
+          <div className="settings-card__action">
+            <button className="settings-btn settings-btn--sm" onClick={() => void revokeGrant('*')}>全部收回</button>
+          </div>
+        )}
       </div>
     </div>
   )

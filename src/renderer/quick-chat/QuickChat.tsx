@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUp, Loader2, Maximize2, Paperclip, RotateCcw, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, Loader2, Maximize2, Paperclip, RotateCcw, Sparkles, Square, Upload, X } from 'lucide-react'
 import type { ActionConfirmDecision, ActionConfirmRequest } from '@shared/agent-actions'
 import type { ChatAttachment } from '@shared/chat-attachments'
 import type { ChatMessage } from '@shared/types'
@@ -9,6 +9,7 @@ import { MarkdownText } from '@renderer/shared/chat/MarkdownText'
 import { ActionConfirmCard } from '@renderer/shared/chat/ActionConfirmCard'
 import { ActionReceipts } from '@renderer/shared/chat/ActionReceipts'
 import { AttachmentChips } from '@renderer/shared/chat/AttachmentChips'
+import { useAttachmentDrop } from '@renderer/shared/chat/attachmentDrop'
 
 interface QuickMessage {
   id: string
@@ -181,17 +182,50 @@ export function QuickChat() {
   }, [conversationId, focusInput])
 
   const undo = useCallback((id: string) => window.quickChat.chat.undoAction(id), [])
+  const loadActionStatus = useCallback((ids: string[]) => window.quickChat.chat.getActionStatus(ids), [])
+
+  const addAttachments = useCallback((added: ChatAttachment[]) => {
+    setAttachments((prev) => [...prev, ...added].slice(0, 8))
+    focusInput()
+  }, [focusInput])
+  const drop = useAttachmentDrop({
+    attachData: (files) => window.quickChat.chat.attachData(files, conversationId),
+    onAttached: addAttachments,
+    onRejected: setError,
+    disabled: streaming,
+  })
+
+  // Grow with the text up to about five lines, then scroll.
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight + 2, 110)}px`
+  }, [input])
+
+  const lastUserText = [...messages].reverse().find((message) => message.role === 'user')?.text ?? ''
 
   const runningTool = [...tools].reverse().find((tool) => tool.status === 'running')
   const empty = messages.length === 0 && !streaming
 
   return (
     <div
-      className="qc"
+      className={`qc ${drop.dragging ? 'qc--dragging' : ''}`}
+      {...drop.dropProps}
       onKeyDown={(event) => {
         if (event.key === 'Escape') window.quickChat.window.hide()
+        else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n' && !streaming) {
+          event.preventDefault()
+          void loadConversation(true)
+        }
       }}
     >
+      {drop.dragging && (
+        <div className="qc__drop" aria-hidden="true">
+          <Upload size={22} />
+          <span>松开添加图片或文件</span>
+        </div>
+      )}
       <header className="qc__header">
         <div className="qc__brand">
           <Sparkles size={15} />
@@ -199,7 +233,7 @@ export function QuickChat() {
           <small>{streaming ? (runningTool ? `${toolLabel(runningTool.toolName)}中…` : '正在想…') : '桌面快聊'}</small>
         </div>
         <div className="qc__header-actions">
-          <button type="button" title="新话题" onClick={() => void loadConversation(true)} disabled={streaming}><RotateCcw size={14} /></button>
+          <button type="button" title="新话题（Ctrl+N）" onClick={() => void loadConversation(true)} disabled={streaming}><RotateCcw size={14} /></button>
           <button type="button" title="在主界面继续" onClick={() => window.quickChat.window.openMain(conversationId ?? undefined)}><Maximize2 size={14} /></button>
           <button type="button" title="收起（Esc）" onClick={() => window.quickChat.window.hide()}><X size={15} /></button>
         </div>
@@ -214,6 +248,7 @@ export function QuickChat() {
                 <button key={suggestion} type="button" onClick={() => send(suggestion)}>{suggestion}</button>
               ))}
             </div>
+            <div className="qc__empty-hint">Ctrl+V 粘贴截图让我看 · 拖入文件 · ↑ 找回上一句</div>
           </div>
         )}
         {messages.map((message) => (
@@ -224,7 +259,7 @@ export function QuickChat() {
                 {message.role === 'assistant' ? <MarkdownText text={message.text} /> : message.text}
               </div>
             )}
-            {message.receipts && message.receipts.length > 0 && <ActionReceipts receipts={message.receipts} onUndo={undo} />}
+            {message.receipts && message.receipts.length > 0 && <ActionReceipts receipts={message.receipts} onUndo={undo} onLoadStatus={loadActionStatus} />}
           </div>
         ))}
         {streaming && (
@@ -270,12 +305,18 @@ export function QuickChat() {
             ref={inputRef}
             value={input}
             rows={1}
-            placeholder="说点什么… Enter 发送"
+            placeholder="说点什么… Enter 发送，Shift+Enter 换行"
             onChange={(event) => setInput(event.target.value)}
+            onPaste={drop.onPaste}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 send()
+              } else if (event.key === 'ArrowUp' && !input && lastUserText) {
+                // Like a terminal: bring back the last thing said, to fix or resend it.
+                event.preventDefault()
+                setInput(lastUserText)
               }
             }}
           />

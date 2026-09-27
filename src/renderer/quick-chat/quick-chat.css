@@ -183,3 +183,25 @@ html, body, #app {
 @media (prefers-reduced-motion: reduce) {
   .qc__dots i, .ly-spin { animation: none; }
 }
+
+/* Paste / drop attachments */
+.qc { position: relative; }
+.qc--dragging { border-color: var(--accent); }
+.qc__drop {
+  position: absolute;
+  inset: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed rgba(91, 91, 214, 0.45);
+  border-radius: 14px;
+  background: rgba(245, 245, 255, 0.92);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.qc__empty-hint { margin-top: 12px; font-size: 11px; color: var(--qc-muted); opacity: 0.8; }

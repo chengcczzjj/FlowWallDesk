@@ -12,9 +12,11 @@ import {
   type PixelPetStateKey,
 } from '@renderer/shared/pixel-pet'
 import { useWidgetCommands } from '../shared/widgetCommandBus'
+import './pet.css'
 
 const CLICK_SLOP_PX = 5
 const CLICK_MAX_MS = 500
+const CLICK_REACTION_MS = 900
 
 export function PetWidget({ config, editing = false }: { config?: Record<string, unknown>; editing?: boolean }) {
   const { pet, settings } = readPixelPetWidgetConfig(config)
@@ -22,21 +24,34 @@ export function PetWidget({ config, editing = false }: { config?: Record<string,
   // What the companion is doing right now (thinking, searching...), and short reactions on top of it.
   const [phaseState, setPhaseState] = useState<PixelPetStateKey | null>(null)
   const [reaction, setReaction] = useState<{ state?: PixelPetStateKey; message?: string } | null>(null)
+  // A reply spoken while the chat was closed leaves a dot until the pet is clicked.
+  const [unread, setUnread] = useState(false)
   const reactionTimer = useRef<number | null>(null)
+
+  const react = (next: { state?: PixelPetStateKey; message?: string }, durationMs: number) => {
+    if (reactionTimer.current) window.clearTimeout(reactionTimer.current)
+    setReaction(next)
+    reactionTimer.current = window.setTimeout(() => {
+      setReaction(null)
+      reactionTimer.current = null
+      if (next.message) setUnread(true)
+    }, durationMs)
+  }
 
   useWidgetCommands('pet', (command) => {
     if (command.command === 'phase') {
       setPhaseState(command.state && command.state in PIXEL_PET_STATES ? command.state : null)
       return
     }
-    if (reactionTimer.current) window.clearTimeout(reactionTimer.current)
     const state = command.state && command.state in PIXEL_PET_STATES ? command.state : undefined
-    setReaction({ state, message: command.message })
-    reactionTimer.current = window.setTimeout(() => {
-      setReaction(null)
-      reactionTimer.current = null
-    }, command.durationMs)
+    react({ state, message: command.message }, command.durationMs)
   })
+
+  const onClick = () => {
+    setUnread(false)
+    if (!reaction?.message) react({ state: 'joy' }, CLICK_REACTION_MS)
+    window.canvasBridge?.toggleQuickChat?.()
+  }
 
   useEffect(() => () => {
     if (reactionTimer.current) window.clearTimeout(reactionTimer.current)
@@ -48,6 +63,7 @@ export function PetWidget({ config, editing = false }: { config?: Record<string,
 
   return (
     <div
+      className={`pet-widget ${editing ? '' : 'pet-widget--clickable'}`}
       style={{
         width: '100%',
         height: '100%',
@@ -57,7 +73,7 @@ export function PetWidget({ config, editing = false }: { config?: Record<string,
         overflow: 'hidden',
         cursor: editing ? undefined : 'pointer',
       }}
-      title={editing ? undefined : '点我说话'}
+      title={editing ? undefined : unread ? '有新回复，点我看看' : '点我说话'}
       onPointerDown={(event) => {
         if (editing || event.button !== 0) return
         const start = { x: event.clientX, y: event.clientY, at: Date.now() }
@@ -65,7 +81,7 @@ export function PetWidget({ config, editing = false }: { config?: Record<string,
         // is watched on the window: only a short, still press opens the chat.
         window.addEventListener('pointerup', (up) => {
           const moved = Math.hypot(up.clientX - start.x, up.clientY - start.y)
-          if (moved <= CLICK_SLOP_PX && Date.now() - start.at <= CLICK_MAX_MS) window.canvasBridge?.toggleQuickChat?.()
+          if (moved <= CLICK_SLOP_PX && Date.now() - start.at <= CLICK_MAX_MS) onClick()
         }, { once: true, capture: true })
       }}
     >
@@ -79,8 +95,11 @@ export function PetWidget({ config, editing = false }: { config?: Record<string,
           backgroundSize: '16px 16px',
         }}
       />
+      {unread && !message && <div className="pet-widget__unread" aria-label="有新回复" />}
+      {!editing && !message && <div className="pet-widget__hint">点我聊天</div>}
       {message && (
         <div
+          className="pet-widget__bubble"
           style={{
             position: 'absolute',
             zIndex: 2,

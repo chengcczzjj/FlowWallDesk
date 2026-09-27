@@ -5,6 +5,27 @@
 
 历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
 
+## [2026-09-27] FlowWall 在线壁纸库接入与伴侣交互、桌面组件升级
+
+**变更摘要**: 新增“FlowWall 发现”内嵌在线壁纸库：接管站点自己的下载，按内容校验后导入「我的壁纸」并可一键设为壁纸，另有 `lingyue://` 协议；对上一轮伴侣功能做交互复查升级（确认卡键盘与倒计时、回执状态与全部撤回、快捷对话输入/粘贴/拖入、热键录制与授权收回）；快捷工具、系统监控接入真实功能，白噪音定时关闭，桌宠悬停/点击回应/未读红点。设计见 [FlowWall 在线壁纸库接入设计](../../doc/FlowWall在线壁纸库接入设计.md) 与 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md) §8。
+
+**涉及模块**:
+- `src/shared/flowwall.ts` / `media-signature.ts` / `main/services/flowwall-library.ts` / `ipc/flowwallIpc.ts` / `main/index.ts` / `electron-builder.yml` / `renderer/main-ui/pages/FlowWallPage.tsx`: 隔离分区视图、导航分类、下载状态机、判重与内容校验、协议注册（仅安装版）。
+- `src/renderer/shared/chat/*` / `quick-chat/QuickChat.tsx` / `pages/chat/ChatPage.tsx` / `ipc/chatIpc.ts` / `desktop/attachmentStore.ts` / `actionJournal.ts` / `actionPolicy.ts` / `ipc/companionIpc.ts` / `settings/SettingsGeneralPage.tsx`: 交互升级；粘贴/拖入只传字节。
+- `src/renderer/widgets/{Pet,WhiteNoise,QuickTools,SysMonitor}` / `main/services/system-stats.ts` / `ipc/appIpc.ts` / `shared/canvas-hit-test.ts`: 组件升级；桌宠与快捷工具移出被动名单。
+- 修复：小文件先于判重完成导致同一壁纸导入两份；桌宠点击在 Windows 会穿透到桌面（被动名单遗漏，见 L16）。
+
+**验证结果**:
+- `npm test`：类型检查、lint 通过；152 项测试 151 通过，失败项仍为基线提交上同样失败的 Windows 路径用例（已在基线工作树复现）。新增 `flowwall.test.mjs` 12 项（判重竞态用例在旧逻辑下失败）、`companion-ux.test.mjs` 6 项。
+- `npm run build:check` 成功；`ELECTRON_DISABLE_SANDBOX=1` 下冒烟五组通过，含新增 flowwall 组与扩充的 quick-chat 组。
+- 临时 Playwright 脚本驱动真实应用：FlowWall 页（本地替身站点）下载→导入→设为壁纸、重复、伪装文件拒绝、对话框遮挡与面板让位；伴侣快捷对话添加/撤回/截屏确认/提醒；组件实测 CPU/内存、便签新增、白噪音定时环、桌宠红点；设置页热键录制与授权收回，均通过并人工检查截图；脚本未提交。
+- 未验证：容器网络拦截 `www.flowwall.ai`，真实站点下载按钮与登录未测；Windows 实机的点击穿透、`ms-screenclip:`、视图 DPI 贴合、协议注册未测。
+
+**经验关联**: L16、L17（新增），L15（补充），L10。
+**提交意图**: `feat(wallpaper): FlowWall online library, companion UX and widget upgrades`
+
+---
+
 ## [2026-09-26] 伴侣智能体桌面控制迭代：常驻工具、确认挂起、回执撤回与快捷对话
 
 **变更摘要**: 按调研方案重做聊天智能体的桌面控制底座并补齐能力：桌面类工具每轮常驻，确认由界面挂起执行，桌面改动有回执和撤回；新增壁纸、应用、系统、白噪音、桌宠、提醒、桌面模式、附件工具，以及全局热键/桌宠唤出的快捷对话。设计见 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md)。
@@ -231,24 +252,5 @@
 - GitHub Release：`https://github.com/chengcczzjj/FlowWallDesk/releases/tag/v1.1.10`（安装包、blockmap、`latest.yml` 已上传并校验远端大小与 SHA-256）。
 
 **Git Commit**: 已提交 — `chore(release): publish LingyueDesk 1.1.10`
-
----
-
-## [2026-08-30 20:57] 恢复多显示器壁纸布局并修复模式覆盖
-
-**变更摘要**: 恢复仅主屏、复制、按屏独立和跨屏延展四种真实运行模式，修复壁纸应用后布局被强制改回按屏模式的问题。
-
-**涉及模块**:
-- `src/main/windows/displayLayout.ts` / `src/main/ipc/wallpaperIpc.ts` / `src/shared/wallpaper-display-layout.ts`: 让持久化模式重新驱动原生窗口数量、renderer 布局与 IPC 返回值，并保证“应用到当前布局”不覆盖复制/延展模式。
-- `src/renderer/main-ui/App.tsx` / `src/renderer/main-ui/pages/LibraryPage.tsx` / `src/renderer/main-ui/pages/settings/DisplaySettingsPage.tsx`: 恢复显示器设置页，在壁纸库常驻展示布局选择；仅按屏模式向单台显示器应用壁纸。
-- `tests/wallpaper-display.test.mjs`: 覆盖模式持久化、单屏独立分配、跨屏窗口联合矩形、强制铺满和应用壁纸后保留布局。
-
-**遇到的问题**:
-- 1.1.6 为消除两个设置入口的冲突，把模式读取、模式写入和 renderer 布局全部硬编码成 `per-display`，同时库页面任何应用操作都使用显示器 id → 跨屏/复制配置必然失效，模式选择看似保存但窗口层从未采用；现统一为一个持久化模式状态，并按模式解析应用目标。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 57 项测试；`npm.cmd run build:check` 成功。
-
-**Git Commit**: 已提交 — `fix(wallpaper): restore multi-monitor wallpaper modes`
 
 ---

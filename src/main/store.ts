@@ -3,6 +3,7 @@ import type { WallpaperState, WidgetInstance, ModelProfile, WallpaperDisplayMode
 import type { DesktopSceneSnapshot } from '@shared/desktop-scene'
 import type { Reminder } from '@shared/reminders'
 import type { CompanionSettings, DesktopMode } from '@shared/companion-settings'
+import type { FlowWallDownload } from '@shared/flowwall'
 
 interface ModelSettings {
   profiles: ModelProfile[]
@@ -58,6 +59,8 @@ interface Schema {
   agentActionGrants?: string[]
   /** 桌面快捷对话使用的会话 */
   quickChatConversationId?: string
+  /** FlowWall 在线壁纸站的下载记录（去重与历史） */
+  flowwallDownloads?: FlowWallDownload[]
 }
 
 const defaults: Schema = {

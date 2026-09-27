@@ -143,3 +143,22 @@
 - 边界：日志只在内存保存；撤回在壁纸被换过或组件属于另一张壁纸时拒绝，而不是覆盖用户之后的改动。`SendInput`、开始菜单索引和热键只能在 Windows 实机验收。
 - 代码：[toolRouter.ts](../../src/main/memory/tools/toolRouter.ts)、[toolExecution.ts](../../src/main/memory/chat/toolExecution.ts)、[actionPolicy.ts](../../src/main/memory/desktop/actionPolicy.ts)、[desktopState.ts](../../src/main/memory/desktop/desktopState.ts)、[agent-actions.ts](../../src/shared/agent-actions.ts)。测试：[companion-agent.test.mjs](../../tests/companion-agent.test.mjs)（含 87 句中文指令可达性评测）、[quick-chat.cjs](../../tests/electron/quick-chat.cjs)；真实模型正确率用 `npm.cmd run eval:companion` 测量。
 - 来源：2026-09-26 伴侣智能体桌面控制迭代；设计见 [伴侣智能体桌面控制设计](../../doc/伴侣智能体桌面控制设计.md)。L09 的“工具调用不回放为消息”约束不变，改为注入确定性的操作摘要。
+- 补充（2026-09-27）：粘贴/拖入的附件只以字节交给主进程另存副本（图片校验文件头），渲染层不传、也拿不到路径；按路径授权只来自原生选择器。回执状态以操作日志为准（`ActionJournal.status`），重启后显示过期而不是给出必然失败的撤回按钮。测试：[companion-ux.test.mjs](../../tests/companion-ux.test.mjs)。
+
+## L16 可点击的桌面组件不能留在“被动组件”名单
+
+- 适用：给画布组件新增点击、按钮或悬停交互（桌宠、快捷工具等），或调整 `PASSIVE_WIDGET_TYPES`。
+- 根因：被动名单决定 Windows 下光标经过组件时画布是否取消鼠标穿透。名单内的组件在实机上点击会直接落到桌面/后方窗口；Linux 容器和 Playwright 不走原生命中，点击照常生效，所以测试全绿也发现不了。
+- 当前约束：只有纯展示组件（时钟、天气、新闻、日历、系统监控等）留在名单；有点击动作的组件必须移出，并在 [shared-contracts.test.mjs](../../tests/shared-contracts.test.mjs) 断言。交互组件在非编辑态不走长按拖动（交互优先），移动用编辑模式。
+- 代码：[canvas-hit-test.ts](../../src/shared/canvas-hit-test.ts)、[Canvas.tsx](../../src/renderer/canvas/Canvas.tsx)（`data-widget-interactive`）、[canvasWindow.ts](../../src/main/windows/canvasWindow.ts)。
+- 验证：Windows 实机点击桌宠/快捷工具并确认未触发桌面；与 L04/L05 的遮挡与前台归属判断一起观察，不以提升窗口层级代替。
+- 来源：2026-08-24 快捷工具与桌宠因当时只是占位被列为被动；2026-09-26 桌宠加入“点我聊天”时遗漏，09-27 快捷工具接入真实动作时发现并修正。
+
+## L17 内嵌第三方站点与下载：隔离分区、按内容信任、等判重答案
+
+- 适用：FlowWall 等在线壁纸站点的内嵌浏览、捕获站点下载、`lingyue://` 协议请求。
+- 根因：站点页面与下载内容都不受应用控制；需登录/会员时下载链接可能返回 HTML 登录页却仍叫 `.mp4`；CDN 签名让同一文件每次 URL 不同；小文件往往在异步判重（读壁纸库）返回前就已下载完成，只在“仍在下载”时取消会漏掉重复，库里出现两份。
+- 当前约束：独立持久分区、sandbox、无 preload/Node，权限默认拒绝，`file:`/`javascript:` 导航拦截，站外链接交给系统浏览器；只接管壁纸类型下载，按文件头签名信任并按真实类型改名；判重键为去掉查询串的来源地址且壁纸仍在库中，下载完成后等待判重结果再导入；协议导入一律弹窗确认并写明域名。不绕过站点登录/付费，不抓私有接口。
+- 代码：[flowwall.ts](../../src/shared/flowwall.ts)、[media-signature.ts](../../src/shared/media-signature.ts)、[flowwall-library.ts](../../src/main/services/flowwall-library.ts)。测试：[flowwall.test.mjs](../../tests/flowwall.test.mjs)（含判重竞态回归，旧逻辑下失败）、[flowwall.cjs](../../tests/electron/flowwall.cjs)。
+- 验证：真实站点的下载形态（直链/blob/需登录）与 Windows DPI 下的视图贴合仍待实测；开发构建可用 `LINGYUE_FLOWWALL_HOME` 指向本地替身站点。
+- 来源：2026-09-27 FlowWall 在线壁纸库接入；设计见 [FlowWall 在线壁纸库接入设计](../../doc/FlowWall在线壁纸库接入设计.md)。与 L10 一致：UI 门禁不是授权，下载文件不是可信内容。

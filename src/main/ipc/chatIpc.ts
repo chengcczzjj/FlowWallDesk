@@ -3,6 +3,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs'
 import { ipcMain, dialog, clipboard, shell } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
+import { MAX_ATTACHMENT_BYTES } from '@shared/chat-attachments'
 import { IPC } from '@shared/ipc-channels'
 import { DEFAULT_CHAT_PERSONA } from '@shared/persona'
 import { ChatService } from '../memory/chat/chatService'
@@ -36,6 +37,10 @@ const activeStreams = new Map<string, AbortController>()
 const grantedProjectRoots = new Set<string>()
 
 const idSchema = z.string().min(1).max(128)
+const attachDataSchema = z.array(z.object({
+  name: z.string().min(1).max(260),
+  bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength <= MAX_ATTACHMENT_BYTES, '文件太大'),
+})).min(1).max(8)
 const nullableIdSchema = idSchema.nullable()
 const conversationModeSchema = z.enum(['daily', 'work', 'private', 'tool'])
 const modelProfileSchema = z.object({
@@ -322,6 +327,10 @@ export function registerChatIpc(): void {
     return { ok: result.ok, error: result.error, summary: result.entry?.summary }
   })
 
+  handleChatSurface(IPC.CHAT_ACTION_STATUS, (_e, ids: unknown) => {
+    return ActionJournal.status(z.array(z.string().min(1).max(20)).max(60).parse(ids))
+  })
+
   // The user picks attachments in a native dialog, so every granted path is one they chose.
   handleChatSurface(IPC.CHAT_ATTACH_FILES, async (event, conversationId?: string | null) => {
     const owner = event.sender.id === getQuickChatWindow()?.webContents.id ? getQuickChatWindow() : null
@@ -336,6 +345,15 @@ export function registerChatIpc(): void {
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
     if (result.canceled || result.filePaths.length === 0) return { attachments: [], rejected: [] }
     return AttachmentStore.register(result.filePaths, conversationId ? idSchema.parse(conversationId) : null)
+  })
+
+  // Paste / drag-and-drop: the renderer sends file contents it was handed, never a path.
+  handleChatSurface(IPC.CHAT_ATTACH_DATA, async (_event, files: unknown, conversationId?: string | null) => {
+    const parsed = attachDataSchema.parse(files)
+    return AttachmentStore.registerData(
+      parsed.map((file) => ({ name: file.name, bytes: file.bytes })),
+      conversationId ? idSchema.parse(conversationId) : null,
+    )
   })
 
   handleChatSurface(IPC.CHAT_DESKTOP_SCENE_CLEAR_PREVIEW, () => {

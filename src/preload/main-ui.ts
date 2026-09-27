@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { CompanionSettings } from '@shared/companion-settings'
+import type { CompanionSettings, CompanionSettingsSnapshot } from '@shared/companion-settings'
+import type { FlowWallDownload, FlowWallViewState } from '@shared/flowwall'
 import { createChatStreamApi } from './chat-stream'
 import type { WallpaperApplyTarget, WallpaperItem, WallpaperSettings, WallpaperResourceCatalog, WallpaperResourceProgress, WallpaperResourceActionResult, WallpaperOwnerStatus, WallpaperOwnerConfigInput, WallpaperPublishInput, WallpaperPublishProgress, WallpaperPublishResult, WallpaperDisplayMode, WallpaperDisplaySettings, WidgetInstance, NewsItem, StockItem, StockSymbol, WeatherSnapshot, ApiEndpointMeta, ChatConversation, ChatMemory, ModelProfile, ConversationMode, ChatProject, AgentRun, AgentApproval, AgentApprovalDecision, AgentArtifact, AgentFileChange, AgentFileChangeReviewState, AgentAutomation, AgentAutomationResult, AgentAutomationScheduleType, AgentAutomationStatus, WorkspacePermissionProfile, AppUpdateStatus, LaunchAtLoginStatus } from '@shared/types'
 
@@ -28,10 +29,12 @@ const api = {
       ipcRenderer.invoke(IPC.APP_VALIDATE_PRECISE_LOCATION),
     openLocationSettings: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_LOCATION_SETTINGS),
     quit: (): void => ipcRenderer.send(IPC.APP_QUIT),
-    getCompanionSettings: (): Promise<CompanionSettings & { shortcutActive: boolean }> =>
+    getCompanionSettings: (): Promise<CompanionSettingsSnapshot> =>
       ipcRenderer.invoke(IPC.COMPANION_GET_SETTINGS),
-    setCompanionSettings: (patch: Partial<CompanionSettings>): Promise<CompanionSettings & { shortcutActive: boolean }> =>
+    setCompanionSettings: (patch: Partial<CompanionSettings>): Promise<CompanionSettingsSnapshot> =>
       ipcRenderer.invoke(IPC.COMPANION_SET_SETTINGS, patch),
+    revokeActionGrant: (key: string): Promise<CompanionSettingsSnapshot> =>
+      ipcRenderer.invoke(IPC.COMPANION_REVOKE_ACTION_GRANT, key),
     toggleQuickChat: (): void => ipcRenderer.send(IPC.QUICK_CHAT_TOGGLE),
     onNavigate: (cb: (target: { activity: string; subPage?: string; conversationId?: string }) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, target: { activity: string; subPage?: string; conversationId?: string }) => cb(target)
@@ -114,6 +117,29 @@ const api = {
       const handler = (_event: Electron.IpcRendererEvent, progress: WallpaperPublishProgress) => cb(progress)
       ipcRenderer.on(IPC.WALLPAPER_OWNER_PUBLISH_PROGRESS, handler)
       return () => ipcRenderer.off(IPC.WALLPAPER_OWNER_PUBLISH_PROGRESS, handler)
+    },
+  },
+  /** FlowWall 在线壁纸站：嵌入视图由主进程叠放在页面占位区域上。 */
+  flowwall: {
+    attach: (bounds: { x: number; y: number; width: number; height: number }): Promise<FlowWallViewState> =>
+      ipcRenderer.invoke(IPC.FLOWWALL_ATTACH, bounds),
+    detach: (): void => ipcRenderer.send(IPC.FLOWWALL_DETACH),
+    navigate: (action: 'back' | 'forward' | 'reload' | 'home' | 'stop' | { url: string }): Promise<FlowWallViewState> =>
+      ipcRenderer.invoke(IPC.FLOWWALL_NAVIGATE, action),
+    openExternal: (): Promise<boolean> => ipcRenderer.invoke(IPC.FLOWWALL_OPEN_EXTERNAL),
+    getState: (): Promise<{ view: FlowWallViewState; downloads: FlowWallDownload[] }> =>
+      ipcRenderer.invoke(IPC.FLOWWALL_GET_STATE),
+    cancelDownload: (id: string): Promise<boolean> => ipcRenderer.invoke(IPC.FLOWWALL_CANCEL_DOWNLOAD, id),
+    clearDownloads: (): Promise<FlowWallDownload[]> => ipcRenderer.invoke(IPC.FLOWWALL_CLEAR_DOWNLOADS),
+    onViewState: (cb: (state: FlowWallViewState) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: FlowWallViewState) => cb(state)
+      ipcRenderer.on(IPC.FLOWWALL_VIEW_STATE, handler)
+      return () => ipcRenderer.off(IPC.FLOWWALL_VIEW_STATE, handler)
+    },
+    onDownloadChanged: (cb: (download: FlowWallDownload) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, download: FlowWallDownload) => cb(download)
+      ipcRenderer.on(IPC.FLOWWALL_DOWNLOAD_CHANGED, handler)
+      return () => ipcRenderer.off(IPC.FLOWWALL_DOWNLOAD_CHANGED, handler)
     },
   },
   widget: {

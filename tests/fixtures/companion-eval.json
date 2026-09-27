@@ -295,7 +295,7 @@
   "tool": "app_control",
   "args": {
    "action": [
-    "search"
+    "online_search"
    ]
   }
  },
@@ -772,5 +772,26 @@
   "id": "c087",
   "utterance": "打开 bilibili 网站",
   "tool": "open_url"
+ },
+ {
+  "id": "c088",
+  "utterance": "去 FlowWall 逛逛有什么新壁纸",
+  "tool": "wallpaper",
+  "args": {
+   "action": [
+    "flowwall"
+   ]
+  }
+ },
+ {
+  "id": "c089",
+  "utterance": "打开在线壁纸发现页",
+  "tool": "wallpaper",
+  "args": {
+   "action": [
+    "flowwall",
+    "online_search"
+   ]
+  }
  }
 ]

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import type { ActionJournalEntry, ActionUndoSpec } from '@shared/agent-actions'
+import type { ActionJournalEntry, ActionReceiptStatus, ActionUndoSpec } from '@shared/agent-actions'
 import { applyDesktopUndo } from './desktopState'
 import { ReminderService } from './reminderService'
 
@@ -38,6 +38,19 @@ export const ActionJournal = {
 
   get(id: string): ActionJournalEntry | undefined {
     return entries.find((entry) => entry.id === id)
+  },
+
+  /**
+   * Current state of receipts shown in a chat surface. Entries live in memory,
+   * so after a restart old receipts read as expired instead of offering an undo that cannot work.
+   */
+  status(ids: string[]): Record<string, ActionReceiptStatus> {
+    const result: Record<string, ActionReceiptStatus> = {}
+    for (const id of ids) {
+      const entry = this.get(id)
+      result[id] = !entry ? 'expired' : entry.undoneAt ? 'undone' : entry.undoable ? 'active' : 'final'
+    }
+    return result
   },
 
   /** Most recent entries of one conversation, newest first. */

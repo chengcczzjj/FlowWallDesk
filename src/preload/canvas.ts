@@ -18,6 +18,7 @@ import type {
 } from '@shared/types'
 import type { CanvasHitRegion } from '@shared/canvas-hit-test'
 import type { WidgetCommandEnvelope } from '@shared/widget-command'
+import type { SystemStats } from '@shared/system-stats'
 
 const api = {
   onSync: (cb: (list: WidgetInstance[]) => void): (() => void) => {
@@ -118,6 +119,9 @@ const api = {
   openExplorer: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_EXPLORER),
   openRecycleBin: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_OPEN_RECYCLE_BIN),
   showDesktop: (): Promise<boolean> => ipcRenderer.invoke(IPC.APP_SHOW_DESKTOP),
+  /** Quick tools: open the Windows snipping overlay (or save a capture elsewhere). */
+  startScreenSnip: (): Promise<{ ok: boolean; mode: 'snip' | 'saved'; error?: string }> => ipcRenderer.invoke(IPC.APP_SCREEN_SNIP),
+  getSystemStats: (): Promise<SystemStats> => ipcRenderer.invoke(IPC.SYSTEM_STATS),
   /** 监听壁纸抽帧（用于毛玻璃效果），每台显示器独立一路 */
   onFrame: (cb: (frame: WallpaperFramePayload) => void): (() => void) => {
     const handler = (_: unknown, frame: WallpaperFramePayload) => cb(frame)

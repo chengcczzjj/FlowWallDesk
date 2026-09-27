@@ -41,11 +41,12 @@ import {
 import type { AgentApproval, AgentApprovalDecision, AgentArtifact, AgentAutomation, AgentAutomationResult, AgentFileChange, AgentRun, ChatConversation, ChatMemory, ChatProject, WorkspacePermissionProfile } from '@shared/types'
 import { TOOL_MANIFEST, getToolManifest } from '@shared/tool-manifest'
 import { isDeclinedToolOutput, isFailedToolOutput, readActionReceipt, type ActionReceipt } from '@shared/tool-result'
-import type { ActionConfirmDecision, ActionConfirmRequest } from '@shared/agent-actions'
+import type { ActionConfirmDecision, ActionConfirmRequest, ActionReceiptStatus } from '@shared/agent-actions'
 import type { ChatAttachment } from '@shared/chat-attachments'
 import { MarkdownText } from '@renderer/shared/chat/MarkdownText'
 import { ActionConfirmCard } from '@renderer/shared/chat/ActionConfirmCard'
 import { ActionReceipts } from '@renderer/shared/chat/ActionReceipts'
+import { useAttachmentDrop } from '@renderer/shared/chat/attachmentDrop'
 import { AttachmentChips } from '@renderer/shared/chat/AttachmentChips'
 import { PixelPetCanvas } from '@renderer/shared/PixelPetCanvas'
 import {
@@ -100,6 +101,7 @@ interface ChatPageActions {
   prefillInput: (text: string) => void
   clearScenePreview: () => void
   undoAction: (journalId: string) => Promise<{ ok: boolean; error?: string }>
+  loadActionStatus: (journalIds: string[]) => Promise<Record<string, ActionReceiptStatus>>
 }
 
 const ChatPageActionsCtx = createContext<ChatPageActions | null>(null)
@@ -1404,6 +1406,7 @@ export function ChatPage() {
       void window.lingyue.chat.clearDesktopScenePreview()
     },
     undoAction: (journalId: string) => window.lingyue.chat.undoAction(journalId),
+    loadActionStatus: (journalIds: string[]) => window.lingyue.chat.getActionStatus(journalIds),
   }), [startChatStream])
 
   const handleStop = useCallback(async () => {
@@ -1506,6 +1509,16 @@ export function ChatPage() {
     }
     textareaRef.current?.focus()
   }, [])
+
+  const handleDroppedAttachments = useCallback((added: ChatAttachment[]) => {
+    setPendingAttachments((prev) => [...prev, ...added].slice(0, 8))
+    textareaRef.current?.focus()
+  }, [])
+  const attachmentDrop = useAttachmentDrop({
+    attachData: (files) => window.lingyue.chat.attachData(files, activeConvIdRef.current),
+    onAttached: handleDroppedAttachments,
+    onRejected: setError,
+  })
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setPendingAttachments((prev) => prev.filter((item) => item.id !== id))
@@ -2066,7 +2079,17 @@ export function ChatPage() {
       {subView === 'persona' ? (
         <PersonaPage />
       ) : (
-        <main className="chat-main">
+        <main
+          className={`chat-main ${attachmentDrop.dragging ? 'chat-main--dragging' : ''}`}
+          {...attachmentDrop.dropProps}
+          onPaste={attachmentDrop.onPaste}
+        >
+          {attachmentDrop.dragging && (
+            <div className="chat-drop-overlay" aria-hidden="true">
+              <Paperclip size={24} />
+              <span>松开即可添加到对话（图片、PDF、文档、表格）</span>
+            </div>
+          )}
           <header className="chat-pet-statusbar">
             <div className="chat-pet-statusbar__left">
               <span className="chat-pet-statusbar__signal"><Sparkles size={14} /></span>
@@ -2698,7 +2721,7 @@ function MessageBubble({
           <AttachmentChips attachments={message.attachments} />
         )}
         {!isUser && receipts.length > 0 && actions && (
-          <ActionReceipts receipts={receipts} onUndo={actions.undoAction} />
+          <ActionReceipts receipts={receipts} onUndo={actions.undoAction} onLoadStatus={actions.loadActionStatus} />
         )}
         {isUser && message.text && (
           <div className="chat-msg__bubble">

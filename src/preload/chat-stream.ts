@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc-channels'
-import type { ActionConfirmDecision, ActionConfirmRequest } from '@shared/agent-actions'
+import type { ActionConfirmDecision, ActionConfirmRequest, ActionReceiptStatus } from '@shared/agent-actions'
 import type { ChatAttachment } from '@shared/chat-attachments'
 import type { AgentRunEvent, ChatMessage, ConversationMode } from '@shared/types'
 
@@ -43,9 +43,15 @@ export function createChatStreamApi() {
       ipcRenderer.invoke(IPC.CHAT_ACTION_CONFIRM_RESOLVE, confirmId, decision),
     undoAction: (journalId: string): Promise<{ ok: boolean; error?: string; summary?: string }> =>
       ipcRenderer.invoke(IPC.CHAT_ACTION_UNDO, journalId),
+    /** Whether receipts shown in this window can still be undone. */
+    getActionStatus: (journalIds: string[]): Promise<Record<string, ActionReceiptStatus>> =>
+      ipcRenderer.invoke(IPC.CHAT_ACTION_STATUS, journalIds),
     /** Opens a native file picker; only files the user picks become readable. */
     attachFiles: (conversationId?: string | null): Promise<{ attachments: ChatAttachment[]; rejected: { name: string; reason: string }[] }> =>
       ipcRenderer.invoke(IPC.CHAT_ATTACH_FILES, conversationId ?? null),
+    /** Pasted screenshots / dropped files: contents only, the path never leaves the renderer. */
+    attachData: (files: { name: string; bytes: Uint8Array }[], conversationId?: string | null): Promise<{ attachments: ChatAttachment[]; rejected: { name: string; reason: string }[] }> =>
+      ipcRenderer.invoke(IPC.CHAT_ATTACH_DATA, files, conversationId ?? null),
     getHistory: (conversationId: string, limit?: number): Promise<ChatMessage[]> =>
       ipcRenderer.invoke(IPC.CHAT_GET_HISTORY, conversationId, limit),
   }
