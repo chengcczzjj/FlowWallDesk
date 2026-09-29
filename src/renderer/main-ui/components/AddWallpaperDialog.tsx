@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WallpaperItem } from '@shared/types'
 import { toAssetUrl } from '@shared/asset-url'
-import { FolderOpen, Upload, X, Loader2 } from 'lucide-react'
+import { ChevronRight, FolderOpen, Upload, X, Loader2 } from 'lucide-react'
 
 const VIDEO_EXT = new Set(['.mp4', '.webm', '.mkv', '.mov', '.avi'])
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
@@ -272,7 +272,7 @@ export function AddWallpaperDialog(props: {
                 <div className="add-card__title">浏览文件</div>
                 <div className="add-card__desc">从磁盘选择壁纸文件</div>
               </div>
-              <span style={{ color: 'var(--text-tertiary)', fontSize: 18 }}>›</span>
+              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} aria-hidden="true" />
             </div>
           )}
 

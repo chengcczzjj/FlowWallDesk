@@ -11,13 +11,13 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { WallpaperApplyTarget, WallpaperDisplaySettings } from '@shared/types'
 import { LibraryPage } from './pages/LibraryPage'
 import { WallpaperDisplayControls } from './components/WallpaperDisplayControls'
-import { OnlineWallpaperPage } from './pages/OnlineWallpaperPage'
-import { FlowWallPage } from './pages/FlowWallPage'
+import { WallpaperStorePage } from './pages/WallpaperStorePage'
+import { useSlidingIndicator } from './components/ui/useSlidingIndicator'
 import { EmptyPage } from './pages/EmptyPage'
 import { WidgetsPage } from './pages/WidgetsPage'
 import { PixelPetPage } from './pages/pet/PixelPetPage'
@@ -40,6 +40,7 @@ import {
 } from '@renderer/shared/pixel-pet'
 import appIcon from './assets/app-icon.png'
 import './styles.css'
+import './wallpaper-ui.css'
 
 type ActivityKey = 'memory' | 'library' | 'widgets' | 'pet' | 'settings'
 
@@ -50,7 +51,6 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
     pages: [
       { id: 'library', label: '本地壁纸' },
       { id: 'store', label: '壁纸库' },
-      { id: 'flowwall', label: 'FlowWall 发现' },
       { id: 'maker', label: '壁纸制作' },
     ],
   },
@@ -78,6 +78,15 @@ const NAV_TABS: Record<ActivityKey, { label: string; pages?: { id: string; label
       { id: 'settings-system', label: '系统' },
     ],
   },
+}
+
+/** 旧版单独的「FlowWall 发现」标签已并入壁纸库（发现页就是在线壁纸库）。 */
+const LEGACY_SUB_PAGES: Record<string, string> = { flowwall: 'store' }
+
+function resolveSubPage(activity: ActivityKey, candidate: string | null | undefined): string {
+  const pages = NAV_TABS[activity].pages ?? []
+  const requested = candidate ? LEGACY_SUB_PAGES[candidate] ?? candidate : candidate
+  return pages.some((page) => page.id === requested) ? String(requested) : pages[0]?.id || ''
 }
 
 /** 判断 URL 是否携带 restore 参数（窗口重建时恢复上次页面） */
@@ -118,10 +127,6 @@ function isActivityKey(value: string | null | undefined): value is ActivityKey {
 }
 
 function loadSavedNav(): { activity: ActivityKey; subPage: string } {
-  const resolveSubPage = (activity: ActivityKey, candidate: string | null | undefined): string => {
-    const pages = NAV_TABS[activity].pages ?? []
-    return pages.some((page) => page.id === candidate) ? String(candidate) : pages[0]?.id || ''
-  }
   const activityParam = initialParams.get('activity')
   if (isActivityKey(activityParam)) {
     return {
@@ -187,11 +192,8 @@ export function App() {
   useEffect(() => {
     return window.lingyue.app.onNavigate((target) => {
       if (!isActivityKey(target.activity)) return
-      const pages = NAV_TABS[target.activity].pages ?? []
-      const requested = target.subPage
-      const nextSubPage = pages.some((page) => page.id === requested) ? String(requested) : pages[0]?.id || ''
       setActivity(target.activity)
-      setSubPage(nextSubPage)
+      setSubPage(resolveSubPage(target.activity, target.subPage))
     })
   }, [])
 
@@ -239,7 +241,7 @@ export function App() {
         <img className="title-bar__icon" src={appIcon} alt="" />
         <span className="title-bar__text">灵月 · LingyueDesk</span>
         <div className="title-bar__spacer" />
-        {activity === 'library' && (
+        {activity === 'library' && subPage === 'library' && (
           <div style={{ position: 'relative', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <Search
               size={14}
@@ -309,17 +311,7 @@ export function App() {
           ) : (
           <>
           <nav className="top-nav">
-            <div className="top-nav__items">
-              {tabs?.map((t) => (
-                <button
-                  key={t.id}
-                  className={`nav-item ${subPage === t.id ? 'active' : ''}`}
-                  onClick={() => setSubPage(t.id)}
-                >
-                  <span>{t.label}</span>
-                </button>
-              ))}
-            </div>
+            <TopNavTabs tabs={tabs ?? []} active={subPage} onSelect={setSubPage} />
             {activity === 'library' && (
               <div className="nav-footer">
                 {(subPage === 'library' || subPage === 'store') && (
@@ -330,14 +322,15 @@ export function App() {
                     onSettingsChange={setDisplaySettings}
                   />
                 )}
-                <button className="nav-btn" title="添加壁纸" onClick={() => openAddDialog()}>
-                  <Plus size={16} />
+                <button type="button" className="ly-icon-btn ly-icon-btn--outline" title="添加壁纸" aria-label="添加壁纸" onClick={() => openAddDialog()}>
+                  <Plus size={17} />
                 </button>
               </div>
             )}
           </nav>
 
           <div className="page-content">
+            <div className="page-stage" key={`${activity}:${subPage}`}>
             {activity === 'library' && subPage === 'library' && (
               <LibraryPage
                 search={search}
@@ -347,19 +340,13 @@ export function App() {
                 onDisplaySelect={setWallpaperTarget}
                 onDisplaySettingsChange={setDisplaySettings}
                 onDropFile={openAddDialog}
+                onAddRequest={() => openAddDialog()}
               />
             )}
             {activity === 'library' && subPage === 'store' && (
-              <OnlineWallpaperPage
-                search={search}
-                refreshKey={refreshKey}
+              <WallpaperStorePage
                 wallpaperTarget={effectiveWallpaperTarget}
                 displaySettings={displaySettings}
-              />
-            )}
-            {activity === 'library' && subPage === 'flowwall' && (
-              <FlowWallPage
-                wallpaperTarget={effectiveWallpaperTarget}
                 onShowLibrary={() => {
                   setSubPage('library')
                   setRefreshKey((key) => key + 1)
@@ -386,6 +373,7 @@ export function App() {
                 subtitle="即将推出"
               />
             )}
+            </div>
           </div>
           </>
           )}
@@ -400,6 +388,40 @@ export function App() {
           setDroppedWallpaperFile(null)
         }}
         onImported={() => setRefreshKey((k) => k + 1)}
+      />
+    </div>
+  )
+}
+
+function TopNavTabs({ tabs, active, onSelect }: {
+  tabs: { id: string; label: string }[]
+  active: string
+  onSelect: (id: string) => void
+}) {
+  const itemsRef = useRef<HTMLDivElement>(null)
+  const indicator = useSlidingIndicator(itemsRef, `${active}:${tabs.map((tab) => tab.id).join(',')}`)
+  return (
+    <div className="top-nav__items" ref={itemsRef} role="tablist">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={active === tab.id}
+          className={`nav-item ${active === tab.id ? 'active' : ''}`}
+          data-indicator-active={active === tab.id ? 'true' : undefined}
+          onClick={() => onSelect(tab.id)}
+        >
+          <span data-label={tab.label}>{tab.label}</span>
+        </button>
+      ))}
+      <span
+        className="top-nav__indicator"
+        data-ready={indicator.ready}
+        aria-hidden="true"
+        style={indicator.box
+          ? { '--indicator-x': `${indicator.box.x}px`, '--indicator-w': `${indicator.box.width}px` } as CSSProperties
+          : { opacity: 0 }}
       />
     </div>
   )

@@ -168,7 +168,7 @@ test('main and renderer callers do not bypass the persisted display mode', async
     readFile(new URL('../src/main/ipc/wallpaperIpc.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main-ui/App.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/renderer/main-ui/pages/LibraryPage.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/renderer/main-ui/pages/OnlineWallpaperPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/renderer/main-ui/components/OfficialWallpaperPanel.tsx', import.meta.url), 'utf8'),
   ])
 
   assert.match(displayLayoutSource, /normalizeWallpaperDisplayMode\(store\.get\('wallpaperDisplay'\)\?\.mode\)/)

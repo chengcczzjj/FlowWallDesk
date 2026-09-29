@@ -39,6 +39,16 @@
 
   --transition-fast: 0.15s ease;
   --transition-normal: 0.25s ease;
+
+  /* Motion: one vocabulary for every transition in the app. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 240ms;
+  --dur-4: 320ms;
+  --dur-5: 420ms;
 }
 
 *,
@@ -447,10 +457,13 @@ textarea,
 }
 
 .top-nav__items {
+  position: relative;
   display: flex;
   align-items: center;
+  align-self: stretch;
   gap: 2px;
   flex: 1;
+  min-width: 0;
 }
 
 .nav-item {
@@ -492,16 +505,40 @@ textarea,
   color: #202733;
   box-shadow: 0 0 0 3px var(--pet-ui-focus);
 }
-.nav-item.active::after {
-  content: '';
+/* Reserve the bold width so switching tabs never nudges its neighbours. */
+.nav-item > span[data-label] {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+.nav-item > span[data-label]::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* One indicator glides between tabs instead of each tab drawing its own. */
+.top-nav__indicator {
   position: absolute;
+  left: 0;
   bottom: -1px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 16px;
+  width: 20px;
   height: 3px;
+  border-radius: 3px 3px 0 0;
   background: var(--accent);
-  border-radius: 2px;
+  pointer-events: none;
+  transform: translateX(calc(var(--indicator-x, 0px) + var(--indicator-w, 20px) / 2 - 10px));
+  transition:
+    transform var(--dur-5) var(--ease-emphasized),
+    background-color var(--dur-3) var(--ease-standard),
+    opacity var(--dur-2) var(--ease-standard);
+}
+.top-nav__indicator[data-ready='false'] {
+  transition: none;
 }
 
 .nav-footer {
@@ -543,144 +580,17 @@ textarea,
   overflow-x: hidden;
 }
 
-/* ===== Library Grid ===== */
-.library-page {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  position: relative;
-  overflow: hidden;
-}
-
-.library-content {
-  flex: 1;
-  overflow-y: auto;
-  position: relative;
-  z-index: 130;
-  transition: margin-right 0.4s cubic-bezier(0.1, 0.9, 0.2, 1);
-}
-
-/* The picker uses Chromium's top layer, so the sidebar cannot cover it. */
-.wallpaper-display-controls {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-right: 6px;
-}
-.wallpaper-display-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  background: transparent;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-.wallpaper-display-control:hover {
-  color: var(--text-primary);
-  background: var(--bg-card-hover);
-  border-color: var(--border-control);
-}
-.wallpaper-display-control:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-bg);
-}
-.wallpaper-display-picker,
-.wallpaper-display-picker::picker(select) {
-  appearance: base-select;
-}
-.wallpaper-display-picker {
-  min-width: 100px;
-  padding: 0;
-  gap: 10px;
-  border: 0;
-  outline: 0;
-  color: inherit;
-  background: transparent;
-  font: inherit;
-  font-size: var(--font-size-caption);
-  white-space: nowrap;
-}
-.wallpaper-display-picker--target {
-  min-width: 76px;
-}
-.wallpaper-display-picker:disabled {
-  opacity: .5;
-}
-.wallpaper-display-picker::picker-icon {
-  color: var(--text-secondary);
-  font-size: 10px;
-  transition: rotate var(--transition-fast);
-}
-.wallpaper-display-picker:open::picker-icon {
-  rotate: 180deg;
-}
-.wallpaper-display-picker::picker(select) {
-  min-width: 180px;
-  max-width: min(320px, calc(100vw - 24px));
-  max-height: min(320px, calc(100vh - 120px));
-  margin: 8px 0 0;
-  padding: 5px;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-lg);
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, .96);
-  backdrop-filter: blur(24px);
-  box-shadow: var(--shadow-flyout);
-  font-family: var(--font-family);
-  font-size: var(--font-size-caption);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.wallpaper-display-picker option {
-  min-height: 34px;
-  padding: 8px 12px;
-  gap: 10px;
-  border-radius: var(--radius-md);
-  font-weight: 400;
-  cursor: pointer !important;
-}
-.wallpaper-display-picker option:checked {
-  color: var(--accent);
-  background: var(--accent-bg);
-  font-weight: 600;
-}
-.wallpaper-display-picker option:hover,
-.wallpaper-display-picker option:focus-visible {
-  color: var(--accent);
-  background: var(--accent-light);
-  outline: none;
-}
-.wallpaper-display-picker option::checkmark {
-  color: var(--accent);
-}
-.wallpaper-display-error {
+/* Every page fades in on the same curve; no transform, so fixed overlays and
+   the embedded FlowWall view keep measuring real coordinates. */
+.page-stage {
   position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: max-content;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 10px 12px;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-md);
-  background: var(--bg-solid);
-  box-shadow: var(--shadow-flyout);
-  font-size: var(--font-size-caption);
+  inset: 0;
+  animation: page-stage-in var(--dur-3) var(--ease-standard);
 }
-.wallpaper-display-error button {
-  flex-shrink: 0;
-  padding: 4px;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
+@keyframes page-stage-in {
+  from { opacity: 0; }
 }
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -691,326 +601,6 @@ textarea,
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.library-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, 200px);
-  gap: 16px;
-  padding: 16px;
-  justify-content: center;
-}
-
-@keyframes listCascading {
-  0% {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.wallpaper-card {
-  width: 200px;
-  height: 200px;
-  border-radius: var(--radius-card);
-  overflow: hidden;
-  position: relative;
-  cursor: pointer;
-  transition:
-    transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1),
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-top: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.04);
-  animation: listCascading 0.4s ease both;
-  will-change: transform, opacity;
-}
-.wallpaper-card:hover {
-  transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.05);
-  border-color: rgba(255, 255, 255, 0.95);
-  z-index: 2;
-}
-.wallpaper-card.selected {
-  box-shadow: 0 0 0 2px var(--bg-solid), 0 0 0 4px var(--accent);
-}
-.wallpaper-card.applied::before {
-  content: '已应用';
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 3;
-  padding: 2px 8px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 11px;
-  border-radius: 999px;
-}
-
-.wallpaper-card__image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.wallpaper-card__placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-tertiary);
-  font-size: 13px;
-  background: linear-gradient(145deg, #eef2f7, #d9e2ec);
-}
-
-.wallpaper-card__gradient {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 48px;
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.75) 0%,
-    rgba(0, 0, 0, 0.15) 65%,
-    rgba(0, 0, 0, 0) 100%
-  );
-  pointer-events: none;
-}
-
-.wallpaper-card__title {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 48px;
-  line-height: 48px;
-  padding: 0 12px;
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-}
-
-.wallpaper-card__type {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-  font-size: 11px;
-  letter-spacing: 0.5px;
-  backdrop-filter: blur(8px);
-}
-
-/* ===== Sidebar ===== */
-.wallpaper-sidebar {
-  width: 320px;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(40px) saturate(150%);
-  -webkit-backdrop-filter: blur(40px) saturate(150%);
-  border-left: 1px solid rgba(255, 255, 255, 0.5);
-  display: flex;
-  flex-direction: column;
-  position: absolute;
-  right: 0;
-  top: 0;
-  z-index: 120;
-  transform: translateX(100%);
-  transition: transform 0.4s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.4s ease;
-  opacity: 0;
-  pointer-events: none;
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
-}
-.wallpaper-sidebar.open {
-  transform: translateX(0);
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.sidebar__header {
-  padding: 20px 24px 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-
-.sidebar__cover {
-  width: 200px;
-  height: 200px;
-  border-radius: var(--radius-lg);
-  object-fit: cover;
-  box-shadow: var(--shadow-flyout);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  background: #ddd;
-}
-
-.sidebar__cover-placeholder {
-  width: 200px;
-  height: 200px;
-  border-radius: var(--radius-lg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(145deg, #eef2f7, #d9e2ec);
-  color: var(--text-tertiary);
-  box-shadow: var(--shadow-flyout);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-}
-
-.sidebar__title-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.sidebar__title {
-  font-size: var(--font-size-title);
-  font-weight: 600;
-  max-width: 200px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sidebar__type-tag {
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--accent-light);
-  color: var(--accent);
-  font-size: var(--font-size-caption);
-  white-space: nowrap;
-}
-
-.sidebar__content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 16px 20px;
-  scrollbar-width: thin;
-}
-
-/* Compact groups inside the wallpaper sidebar. Scoped: this file loads after
-   settings.css, and the unscoped copy shifted every settings page header 4px
-   off the card edge and shrank group spacing. */
-.wallpaper-sidebar .settings-group {
-  margin-bottom: 16px;
-}
-.wallpaper-sidebar .settings-group__header {
-  position: relative;
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  color: var(--accent);
-  margin: 12px 4px;
-  padding-left: 14px;
-}
-.wallpaper-sidebar .settings-group__header::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 4px;
-  height: 14px;
-  border-radius: 4px;
-  background: var(--accent);
-  box-shadow: 0 0 8px rgba(0, 95, 184, 0.4);
-}
-
-.sidebar-property {
-  display: flex;
-  background: var(--bg-card);
-  border: 1px solid var(--border-card);
-  border-top: 1px solid var(--border-card-highlight);
-  border-radius: var(--radius-card);
-  padding: 12px;
-  gap: 12px;
-  margin-bottom: 6px;
-  align-items: center;
-  box-shadow: var(--shadow-card);
-}
-
-.sidebar-property__title {
-  font-size: 13px;
-  color: var(--text-primary);
-  margin-bottom: 6px;
-}
-.sidebar-property__body {
-  flex: 1;
-  min-width: 0;
-}
-.sidebar-property__control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.combo-box {
-  width: 100%;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-control);
-  background: rgba(255, 255, 255, 0.85);
-  font-size: 13px;
-  outline: none;
-}
-
-.slider-container {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-.slider {
-  flex: 1;
-  appearance: none;
-  height: 4px;
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 2px;
-  outline: none;
-}
-.slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--accent);
-  cursor: pointer;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
-}
-.slider__value {
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  color: var(--text-secondary);
-  min-width: 40px;
-  text-align: right;
-}
-
-.sidebar__footer {
-  display: flex;
-  gap: 12px;
-  padding: 16px 20px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.5);
-  flex-shrink: 0;
 }
 
 .btn {
@@ -1039,12 +629,6 @@ textarea,
 .btn--primary:hover {
   background: var(--accent-hover);
 }
-.sidebar__footer .sidebar-delete-btn {
-  flex: 0 0 36px;
-  padding: 0;
-  color: #a34434;
-}
-
 /* ===== Empty / placeholder ===== */
 .empty-page {
   height: 100%;
@@ -1263,27 +847,6 @@ textarea,
 .app-shell--pet-theme .process-tool__status {
   background: var(--pet-ui-accent-soft);
   color: var(--pet-ui-accent);
-}
-
-/* ===== Library blurred background ===== */
-.library-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  overflow: hidden;
-}
-.library-bg.show {
-  opacity: 0.35;
-}
-.library-bg img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  filter: blur(60px) saturate(140%);
-  transform: scale(1.2);
 }
 
 /* ===== Dialog Overlay ===== */
@@ -1573,305 +1136,6 @@ textarea,
   animation: spin 0.8s linear infinite;
 }
 
-/* ===== Library Drop Zone Overlay ===== */
-.library-dropzone {
-  display: none;
-  position: absolute;
-  inset: 0;
-  background: var(--bg-acrylic);
-  backdrop-filter: blur(10px);
-  /* The scrolling library column is z-index 130; the drop hint must cover it. */
-  z-index: 170;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 16px;
-}
-.library-dropzone.active {
-  display: flex;
-}
-.library-dropzone__border {
-  border: 2px dashed var(--text-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 60px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-.library-dropzone__text {
-  font-size: 20px;
-  color: var(--text-secondary);
-}
-
-/* ===== Online wallpaper library ===== */
-.online-wallpaper-page {
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  padding: 18px 20px 28px;
-  color: var(--text-primary);
-  background:
-    radial-gradient(circle at 12% 6%, rgba(255, 203, 129, 0.26), transparent 27%),
-    radial-gradient(circle at 88% 18%, rgba(64, 166, 146, 0.2), transparent 31%),
-    linear-gradient(145deg, rgba(252, 249, 242, 0.78), rgba(230, 241, 239, 0.56));
-}
-
-.online-library-hero {
-  min-height: 118px;
-  padding: 22px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  border-radius: 18px;
-  color: #17332d;
-  background:
-    linear-gradient(112deg, rgba(255, 255, 255, 0.93), rgba(238, 249, 245, 0.8)),
-    repeating-linear-gradient(90deg, rgba(19, 85, 72, 0.035) 0 1px, transparent 1px 20px);
-  box-shadow: 0 18px 50px rgba(45, 83, 74, 0.1), inset 0 1px 0 #fff;
-}
-
-.online-library-hero__eyebrow {
-  margin-bottom: 6px;
-  color: #17745f;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-}
-
-.online-library-hero h1 {
-  margin: 0;
-  font-size: 27px;
-  line-height: 1.1;
-  letter-spacing: -0.04em;
-}
-
-.online-library-hero p {
-  margin: 8px 0 0;
-  color: #63756f;
-  font-size: 13px;
-}
-
-.online-library-hero__actions,
-.owner-inline-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.online-library-hero__actions .btn,
-.owner-inline-actions .btn {
-  flex: unset;
-  padding: 0 14px;
-  white-space: nowrap;
-}
-
-.owner-entry-btn {
-  color: #0d6d59;
-  border-color: rgba(13, 109, 89, 0.22);
-  background: rgba(222, 248, 239, 0.9);
-}
-
-.online-library-status {
-  min-height: 36px;
-  margin: 10px 4px 4px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: #68766f;
-  font-size: 11px;
-}
-
-.online-library-status span + span::before {
-  content: '·';
-  margin-right: 9px;
-  color: #a6b0ac;
-}
-
-.online-library-status__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #9ca8a3;
-  box-shadow: 0 0 0 4px rgba(156, 168, 163, 0.12);
-}
-
-.online-library-status__dot--network { background: #1b9b72; box-shadow: 0 0 0 4px rgba(27, 155, 114, 0.13); }
-.online-library-status__dot--cache { background: #d7922d; box-shadow: 0 0 0 4px rgba(215, 146, 45, 0.13); }
-
-.online-library-warning {
-  margin: 8px 4px 12px;
-  padding: 9px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid rgba(179, 101, 40, 0.2);
-  border-radius: 10px;
-  color: #87501f;
-  background: rgba(255, 240, 214, 0.78);
-  font-size: 12px;
-}
-
-.online-library-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
-  gap: 15px;
-  padding: 10px 2px;
-}
-
-.online-wallpaper-card {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 9px 30px rgba(44, 69, 64, 0.09);
-  animation: listCascading 0.4s ease both;
-  transition: transform 220ms ease, box-shadow 220ms ease;
-}
-
-.online-wallpaper-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 15px 36px rgba(44, 69, 64, 0.14);
-}
-
-.online-wallpaper-card__media {
-  position: relative;
-  height: 154px;
-  overflow: hidden;
-  background: #dfe8e4;
-}
-
-.online-wallpaper-card__media img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  transition: transform 500ms cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-
-.online-wallpaper-card:hover .online-wallpaper-card__media img { transform: scale(1.035); }
-
-.online-wallpaper-card__type,
-.online-wallpaper-card__applied {
-  position: absolute;
-  top: 9px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(18, 32, 29, 0.65);
-  backdrop-filter: blur(8px);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.online-wallpaper-card__type { right: 9px; }
-.online-wallpaper-card__applied {
-  left: 9px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(15, 128, 95, 0.84);
-}
-
-.online-wallpaper-card__progress {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.35);
-}
-
-.online-wallpaper-card__progress > div {
-  height: 100%;
-  background: #1b9b72;
-  transition: width 180ms linear;
-}
-
-.online-wallpaper-card__body { padding: 13px 14px 14px; }
-
-.online-wallpaper-card__title-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.online-wallpaper-card__title-row h2 {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: #1c312c;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.online-wallpaper-card__title-row > span {
-  flex-shrink: 0;
-  color: #82908b;
-  font-size: 10px;
-}
-
-.online-wallpaper-card__body > p {
-  height: 34px;
-  margin: 7px 0 9px;
-  overflow: hidden;
-  color: #71807b;
-  font-size: 11px;
-  line-height: 17px;
-}
-
-.online-wallpaper-card__meta {
-  min-height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: #87948f;
-  font-size: 10px;
-}
-
-.online-wallpaper-card__meta > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-state {
-  padding: 3px 7px;
-  border-radius: 7px;
-  color: #48615a;
-  background: #edf2f0;
-}
-
-.resource-state--installed { color: #0c7359; background: #dff4ec; }
-.resource-state--update-available { color: #9a5a16; background: #fff0d7; }
-.resource-state--error { color: #a43a2d; background: #ffe3de; }
-
-.resource-progress-text {
-  margin-top: 7px;
-  overflow: hidden;
-  color: #15755e;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.online-wallpaper-card__actions {
-  height: 34px;
-  margin-top: 11px;
-  display: flex;
-  gap: 7px;
-}
-
-.online-wallpaper-card__actions .btn { height: 34px; }
-.online-wallpaper-card__actions .resource-remove-btn { flex: 0 0 34px; padding: 0; color: #a34939; }
-.online-wallpaper-card__actions .btn:disabled { opacity: 0.52; cursor: not-allowed; }
-
 /* ===== Wallpaper owner publisher ===== */
 .owner-dialog-overlay { z-index: 300; }
 
@@ -2021,8 +1285,6 @@ textarea,
 }
 
 @media (max-width: 900px) {
-  .online-library-hero { align-items: flex-start; flex-direction: column; }
-  .online-library-hero__actions { width: 100%; }
   .owner-field-row--three { grid-template-columns: 1fr; }
 }
 
@@ -3363,304 +2625,4 @@ textarea,
 .widget-instance__delete:hover {
   background: rgba(196, 43, 28, 0.1);
   color: #c42b1c;
-}
-
-
-/* ===== FlowWall 在线壁纸站 ===== */
-.flowwall-page {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  background: var(--bg-solid);
-}
-.flowwall-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 46px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border-divider);
-  background: var(--bg-acrylic);
-}
-.flowwall-toolbar .nav-btn {
-  width: 32px;
-  height: 32px;
-}
-.flowwall-toolbar .nav-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-  background: none;
-}
-.flowwall-toolbar .nav-btn:focus-visible,
-.flowwall-toolbar__btn:focus-visible,
-.flowwall-link-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.flowwall-address {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  margin: 0 8px;
-  padding: 0 12px;
-  border: 1px solid var(--border-control);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-.flowwall-address__host {
-  color: var(--text-primary);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.flowwall-address__path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.btn.flowwall-toolbar__btn {
-  flex: 0 0 auto;
-  height: 30px;
-  margin-left: 4px;
-  padding: 0 10px;
-  font-size: 12px;
-  position: relative;
-}
-.btn.flowwall-toolbar__btn.active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.flowwall-badge {
-  min-width: 17px;
-  height: 17px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 17px;
-  text-align: center;
-}
-.flowwall-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-.flowwall-viewport {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  background: #fff;
-}
-.flowwall-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 24px;
-  color: var(--text-secondary);
-  text-align: center;
-}
-.flowwall-state__title {
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 700;
-}
-.flowwall-state__text {
-  max-width: 420px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.flowwall-state__actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-.flowwall-state__actions .btn {
-  flex: 0 0 auto;
-  padding: 0 14px;
-}
-.flowwall-downloads {
-  display: flex;
-  flex-direction: column;
-  width: 300px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border-divider);
-  background: var(--bg-acrylic);
-}
-.flowwall-downloads__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 42px;
-  padding: 0 6px 0 14px;
-  border-bottom: 1px solid var(--border-divider);
-  font-size: 13px;
-  font-weight: 700;
-}
-.flowwall-downloads__header > span {
-  flex: 1;
-}
-.flowwall-downloads__header .nav-btn {
-  width: 28px;
-  height: 28px;
-}
-.flowwall-downloads__notice {
-  margin: 10px 12px 0;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  background: rgba(220, 38, 38, 0.08);
-  color: #991b1b;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.flowwall-downloads__empty {
-  padding: 28px 22px;
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  line-height: 1.7;
-  text-align: center;
-}
-.flowwall-downloads__empty p {
-  margin: 10px 0 0;
-}
-.flowwall-downloads__hint {
-  color: var(--text-tertiary);
-  font-size: 11.5px;
-}
-.flowwall-downloads__list {
-  flex: 1;
-  margin: 0;
-  padding: 8px;
-  list-style: none;
-  overflow-y: auto;
-}
-.flowwall-download {
-  display: flex;
-  gap: 10px;
-  padding: 10px;
-  border-radius: var(--radius-md);
-}
-.flowwall-download + .flowwall-download {
-  margin-top: 4px;
-}
-.flowwall-download:hover {
-  background: rgba(255, 255, 255, 0.7);
-}
-.flowwall-download__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: var(--radius-md);
-  background: var(--accent-bg);
-  color: var(--accent);
-}
-.flowwall-download--failed .flowwall-download__icon,
-.flowwall-download--cancelled .flowwall-download__icon {
-  background: rgba(100, 116, 139, 0.12);
-  color: var(--text-tertiary);
-}
-.flowwall-download__body {
-  flex: 1;
-  min-width: 0;
-}
-.flowwall-download__title {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.flowwall-download__status {
-  margin-top: 2px;
-  color: var(--text-tertiary);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-.flowwall-download--failed .flowwall-download__status {
-  color: #b91c1c;
-}
-.flowwall-download--completed .flowwall-download__status,
-.flowwall-download--duplicate .flowwall-download__status {
-  color: #047857;
-}
-.flowwall-download__bar {
-  height: 4px;
-  margin-top: 6px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.07);
-  overflow: hidden;
-}
-.flowwall-download__bar > div {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 0.3s ease;
-}
-.flowwall-download__bar > div.indeterminate {
-  animation: flowwall-pulse 1.1s ease-in-out infinite;
-}
-@keyframes flowwall-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
-}
-.flowwall-download__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-.flowwall-download__actions:empty {
-  display: none;
-}
-.btn.btn--sm {
-  flex: 0 0 auto;
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-.flowwall-link-btn {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent);
-  font-size: 12px;
-  cursor: pointer;
-}
-.flowwall-link-btn:hover {
-  text-decoration: underline;
-}
-.wallpaper-card__source {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.55);
-  color: #fff;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(6px);
-}
-@media (prefers-reduced-motion: reduce) {
-  .flowwall-download__bar > div,
-  .flowwall-download__bar > div.indeterminate {
-    transition: none;
-    animation: none;
-  }
 }

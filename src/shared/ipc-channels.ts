@@ -61,6 +61,7 @@ export const IPC = {
   FLOWWALL_GET_STATE: 'flowwall:get-state',
   FLOWWALL_CANCEL_DOWNLOAD: 'flowwall:cancel-download',
   FLOWWALL_CLEAR_DOWNLOADS: 'flowwall:clear-downloads',
+  FLOWWALL_SNAPSHOT: 'flowwall:snapshot',
   // 主进程 → 主界面
   FLOWWALL_VIEW_STATE: 'flowwall:view-state',
   FLOWWALL_DOWNLOAD_CHANGED: 'flowwall:download-changed',

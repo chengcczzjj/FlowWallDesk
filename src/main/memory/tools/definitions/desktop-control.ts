@@ -119,8 +119,8 @@ export const wallpaperTool = tool({
     const currentId = state.current?.id
     switch (input.action) {
       case 'flowwall': {
-        showMainWindow({ activity: 'library', subPage: 'flowwall' })
-        return { ok: true, opened: 'FlowWall 在线壁纸站', note: '用户在页面里点下载后，壁纸会自动加入“我的壁纸”，下载完成可以直接应用。' }
+        showMainWindow({ activity: 'library', subPage: 'store' })
+        return { ok: true, opened: '壁纸库 · FlowWall 发现页', note: '用户在页面里点下载后，壁纸会自动加入“我的壁纸”，下载完成可以直接应用。' }
       }
       case 'current':
         return {

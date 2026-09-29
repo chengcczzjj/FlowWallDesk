@@ -5,6 +5,7 @@ import { assertTrustedIpcSender } from './ipcSecurity'
 import { getMainWindow } from '../windows/mainWindow'
 import {
   attachFlowWallView,
+  captureFlowWallSnapshot,
   cancelFlowWallDownload,
   clearFinishedFlowWallDownloads,
   detachFlowWallView,
@@ -35,6 +36,10 @@ export function registerFlowWallIpc(): void {
   ipcMain.on(IPC.FLOWWALL_DETACH, (event) => {
     assertTrustedIpcSender(event, ['main'])
     detachFlowWallView()
+  })
+  ipcMain.handle(IPC.FLOWWALL_SNAPSHOT, (event) => {
+    assertTrustedIpcSender(event, ['main'])
+    return captureFlowWallSnapshot()
   })
   ipcMain.handle(IPC.FLOWWALL_NAVIGATE, (event, action: unknown) => {
     assertTrustedIpcSender(event, ['main'])

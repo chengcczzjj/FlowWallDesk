@@ -124,6 +124,8 @@ const api = {
     attach: (bounds: { x: number; y: number; width: number; height: number }): Promise<FlowWallViewState> =>
       ipcRenderer.invoke(IPC.FLOWWALL_ATTACH, bounds),
     detach: (): void => ipcRenderer.send(IPC.FLOWWALL_DETACH),
+    /** Still image of the visible page, shown in its place while an app menu or dialog covers it. */
+    snapshot: (): Promise<string | null> => ipcRenderer.invoke(IPC.FLOWWALL_SNAPSHOT),
     navigate: (action: 'back' | 'forward' | 'reload' | 'home' | 'stop' | { url: string }): Promise<FlowWallViewState> =>
       ipcRenderer.invoke(IPC.FLOWWALL_NAVIGATE, action),
     openExternal: (): Promise<boolean> => ipcRenderer.invoke(IPC.FLOWWALL_OPEN_EXTERNAL),

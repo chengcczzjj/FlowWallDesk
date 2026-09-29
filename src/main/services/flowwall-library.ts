@@ -353,6 +353,24 @@ export function detachFlowWallView(): void {
   if (win && view && win.contentView.children.includes(view)) win.contentView.removeChildView(view)
 }
 
+/**
+ * A still of the attached page. The view is a native layer above the renderer,
+ * so app menus and dialogs show this image in its place while they are open.
+ */
+export async function captureFlowWallSnapshot(): Promise<string | null> {
+  const win = mainWindow()
+  const contents = view?.webContents
+  if (!win || !view || !contents || contents.isDestroyed() || !win.contentView.children.includes(view)) return null
+  const bounds = view.getBounds()
+  if (bounds.width < 2 || bounds.height < 2) return null
+  try {
+    const image = await contents.capturePage()
+    return image.isEmpty() ? null : `data:image/jpeg;base64,${image.toJPEG(88).toString('base64')}`
+  } catch {
+    return null
+  }
+}
+
 export function navigateFlowWall(action: 'back' | 'forward' | 'reload' | 'home' | 'stop' | { url: string }): FlowWallViewState {
   const contents = view?.webContents
   if (typeof action === 'object') {

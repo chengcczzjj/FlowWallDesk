@@ -80,7 +80,7 @@ function openDeepLink(argv: readonly string[]): boolean {
   const raw = argv.find((argument) => argument.startsWith(`${LINGYUE_PROTOCOL}://`))
   const link = raw ? parseLingyueDeepLink(raw) : null
   if (!link) return false
-  showMainWindow({ activity: 'library', subPage: 'flowwall' })
+  showMainWindow({ activity: 'library', subPage: 'store' })
   const win = getMainWindow()
   if (win) void handleLingyueDeepLink(link, win)
   return true

@@ -3,7 +3,28 @@
 > 近期事件，默认只读最近 3-5 条；当前能力看 [项目状态](project-status.md)，可复用结论看 [开发经验](dev-lessons.md)，资料取舍看 [知识索引](knowledge-index.md)。
 > 历史记录只证明当时的事件，不代表当前方案或新的操作授权；旧路径/旧结论保留以便追溯。
 
-历史归档：[2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
+历史归档：[2026-09](archive/dev-log-2026-09.md) · [2026-08](archive/dev-log-2026-08.md) · [2026-05](archive/dev-log-2026-05.md) · [2026-04](archive/dev-log-2026-04.md)。主页和归档不重复保存同一条事件。
+
+## [2026-09-29] 壁纸界面统一设计与动效，在线壁纸库并入发现页
+
+**变更摘要**: 用户反馈 1.1.14 壁纸界面的显示模式下拉“文字歪、展开动画不对”，且“FlowWall 发现”多出一个标签。按用户确认，在 1.1.14 分支代码上重做壁纸界面的设计规范与动效，并把在线壁纸库合并为一个“壁纸库”标签：FlowWall 发现页即在线壁纸库，侧栏收纳下载记录与灵月精选（官方清单、所有者发布）。
+
+**涉及模块**:
+- `src/renderer/main-ui/components/ui/*`: 自绘 listbox 下拉（门户定位、上下翻转、键盘、按触发点展开/收起动画）、滑块分段控件、共享滑动指示器、显示模式示意图标；替代 `appearance: base-select`。
+- `WallpaperDisplayControls.tsx` / `App.tsx` / `styles.css` / `wallpaper-ui.css`: 显示设置合并为胶囊按钮组；标签指示器滑动、预留加粗宽度；页面淡入；统一控件尺寸、圆角、阴影与 `--ease-*`/`--dur-*` 动效令牌，删除旧选择器、在线库与 FlowWall 页的散落样式。
+- `LibraryPage.tsx` / `WallpaperSidebar.tsx` / `AddWallpaperDialog.tsx`: 16:10 卡片、角标行（修复“已应用”与 FlowWall 角标重叠）、骨架屏与空状态；详情栏只在首次选中时滑入、切换壁纸仅内容交替，关闭有退场。
+- `WallpaperStorePage.tsx`（原 FlowWallPage）/ `OfficialWallpaperPanel.tsx`（原 OnlineWallpaperPage）/ `flowwall-library.ts` / `flowwallIpc.ts` / preload / ipc-channels: 合并标签；新增 `FLOWWALL_SNAPSHOT`，菜单或对话框出现时用页面静帧替换原生视图（见 L18）；旧 `flowwall` 子页、协议与智能体入口改指 `store`。
+
+**验证结果**:
+- `npm test`：类型检查、lint 通过；152 项 151 通过，失败项仍为基线即失败的 Windows 路径用例。
+- `npm run build:check` 成功；Xvfb 下 `test:electron:smoke` 五组通过，工具栏组改为验证自绘下拉，并新增文字/箭头与触发器垂直居中（偏差 0px）、菜单贴合触发器右缘、焦点进入列表、仅 3 个标签的断言。
+- 临时脚本驱动生产界面截图人工检查：两个下拉、2 倍缩放细节、卡片悬停、详情栏切换/关闭、壁纸库下载/精选侧栏、菜单与添加对话框覆盖在 FlowWall 页面上（静帧替身，关闭后恢复）；脚本未提交。
+- 未验证：Windows 实机的原生视图静帧切换与 DPI 贴合、真实 FlowWall 站点（容器网络拦截）。
+
+**经验关联**: L18（新增），L17。
+**提交意图**: `feat(ui): unify wallpaper UI motion and merge online library into discovery`
+
+---
 
 ## [2026-09-27] 发布 1.1.14：伙伴桌面操作、快捷对话、FlowWall 在线壁纸库
 
@@ -227,30 +248,5 @@
 - 安装态诊断确认主屏 `2560x1440` DIP / `3840x2160` 物理边界经 Raised Desktop 原生方案贴合成功。
 
 **Git Commit**: 本次任务提交 — `chore(release): package LingyueDesk 1.1.11`
-
----
-
-## [2026-09-04] 完成多显示器原生坐标、稳定归属与逐屏渲染链路
-
-**变更摘要**: 重新审计从 Electron 显示器枚举、持久化、BrowserWindow、WorkerW 子窗口定位到 Canvas 组件坐标的完整链路，不再用 UI 状态修补原生坐标问题。默认安全落到主显示器，并补齐复制、按屏、延展和组件跨屏持久化。
-
-**涉及模块**:
-- `src/main/windows/nativeDisplayIdentity.ts` / `src/main/windows/displayLayout.ts` / `src/main/windows/attachWallpaperNative.ts`: 用 Win32 设备名和物理矩形匹配 Electron 显示器；修复 `GetMonitorInfoW.cbSize` 被 Koffi 纯输出参数清零的问题；`SetParent` 后显式切换 `WS_CHILD`、移除 `WS_POPUP`，经 `ScreenToClient` 定位并用 `GetWindowRect` 校验。
-- `src/main/windows/wallpaperWindow.ts` / `src/shared/wallpaper-display-layout.ts` / `src/main/ipc/wallpaperIpc.ts`: 所有模式均使用显示器本地窗口；延展改为同一虚拟构图的逐屏负偏移裁切；贴合失败自动退避重试，壁纸分配迁移到稳定显示器键。
-- `src/shared/widget-display-layout.ts` / `src/main/ipc/widgetIpc.ts` / `src/main/windows/canvasWindow.ts` / `src/main/ipc/desktopIconIpc.ts`: 组件改为稳定显示器键 + 屏幕本地坐标持久化，单 Canvas 只在同步和拖拽边界做双向映射，旧虚拟桌面坐标按覆盖面积一次性迁移。
-- `src/renderer/canvas/wallpaperFrameStore.ts` / `src/renderer/widgets/FrostedGlassBackground.tsx` / `src/renderer/wallpaper/Wallpaper.tsx`: 毛玻璃帧改为逐屏传输和选择，renderer 与主进程 fallback 都保留显示器边界，延展抽帧使用真实本地裁切区域。
-- `src/main/runtime/diagnosticLog.ts` / `doc/双显示器支持方案.md`: 增加 `%APPDATA%\lingyue-desk\logs\display-diagnostics.jsonl`，记录拓扑、逻辑/物理边界、贴合结果和失败重试，并同步真实架构及验收边界。
-
-**遇到的问题**:
-- 旧实现把“模式能保存、窗口数会变化”当成多屏完成，但 `electron-as-wallpaper` 只执行 `SetParent`，没有负责每块屏幕的坐标；父子窗口坐标、DIP/物理像素和负坐标仍混用，因此 UI 改多少轮都不能消除半张壁纸跨屏。
-- 初版稳定键代码虽然存在，`GetMonitorInfoW` 却声明成 Koffi `out` 参数，调用前必需的 `cbSize` 被清零，真实 Windows 调用始终失败并静默退回 Electron id；改为 `inout` 后已直接读到 `\\.\DISPLAY1` 和 `2560x1440` 物理边界。
-- 旧组件一直保存联合 Canvas 坐标，切换主屏/联合画布必然改变原点；现永久保存显示器本地坐标，只有跨屏拖拽才改变显示器归属。
-
-**验证结果**:
-- `npm.cmd test` 通过全部 62 项测试；`npm.cmd run build:check` 成功。
-- 使用 Node + Koffi 直接调用 Win32 枚举，确认本机 `GetMonitorInfoW` 返回稳定设备名、主屏标志及物理矩形。
-- 当前开发机只有一台 `2560x1440` 显示器，不能把自动测试冒充公司混合 DPI 双屏验收；后续实机异常可直接依据 `display-diagnostics.jsonl` 中的 expected/actual 边界定位。
-
-**Git Commit**: 本次任务提交 — `fix(display): complete stable multi-monitor layout`
 
 ---

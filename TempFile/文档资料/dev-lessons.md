@@ -162,3 +162,12 @@
 - 代码：[flowwall.ts](../../src/shared/flowwall.ts)、[media-signature.ts](../../src/shared/media-signature.ts)、[flowwall-library.ts](../../src/main/services/flowwall-library.ts)。测试：[flowwall.test.mjs](../../tests/flowwall.test.mjs)（含判重竞态回归，旧逻辑下失败）、[flowwall.cjs](../../tests/electron/flowwall.cjs)。
 - 验证：真实站点的下载形态（直链/blob/需登录）与 Windows DPI 下的视图贴合仍待实测；开发构建可用 `LINGYUE_FLOWWALL_HOME` 指向本地替身站点。
 - 来源：2026-09-27 FlowWall 在线壁纸库接入；设计见 [FlowWall 在线壁纸库接入设计](../../doc/FlowWall在线壁纸库接入设计.md)。与 L10 一致：UI 门禁不是授权，下载文件不是可信内容。
+
+## L18 主界面控件与浮层：自绘下拉、原生视图用静帧让位
+
+- 适用：主界面下拉/菜单/对话框、页面与侧栏动效，以及 FlowWall 这类盖在渲染层之上的 `WebContentsView`。
+- 根因：`appearance: base-select` 的按钮内容和 `::picker-icon` 按基线排布，中英文字体度量不同导致文字上浮、箭头下沉，弹层动画也无法按触发点控制；原生视图永远在 DOM 之上，菜单和对话框会被遮住，直接移除视图又会整页闪白；放在做 transform/动画容器里的 `position: fixed` 弹层会被困在容器内。
+- 当前做法：下拉统一用 [SelectMenu.tsx](../../src/renderer/main-ui/components/ui/SelectMenu.tsx)（listbox、门户挂到 `.app-shell`、定位后再聚焦、`data-ly-overlay` 标记）；壁纸库页发现浮层时先取页面静帧（`FLOWWALL_SNAPSHOT`）显示在原位再移除视图，浮层关闭后重新贴合并在两帧后撤下静帧。弹层从变换容器里用 portal 移出；进入动画用 `backwards` 填充，避免结束后仍占用 transform。页面切换只做淡入，不做位移，原生视图的贴合坐标才准确。
+- 规范：控件高 28/32/36/40、圆角 7/8/10/14，动效只用 `--ease-standard`/`--ease-emphasized`/`--ease-exit` 与 `--dur-1..5`（[wallpaper-ui.css](../../src/renderer/main-ui/wallpaper-ui.css)、[styles.css](../../src/renderer/main-ui/styles.css)）。
+- 测试：[library-toolbar.cjs](../../tests/electron/library-toolbar.cjs) 断言文字/箭头与触发器同一垂直中心、菜单贴合触发器、键盘与外部点击关闭；静帧切换在 Windows 实机（含非 100% DPI）仍待观察。
+- 来源：2026-09-29 用户反馈 1.1.14 显示模式下拉文字歪斜、展开动画不对。
